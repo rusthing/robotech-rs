@@ -13,4 +13,4 @@ regex = "1.12.2"
 once_cell = "1.21.3"
 validator = { version = "0.20.0", features = ["derive"] }
 utoipa = { version = "5.4.0", features = ["actix_extras"] }
-robotech-api = { path = "robotech-api" }
+robotech-api = { version = "0.1.0", path = "robotech-api" }
