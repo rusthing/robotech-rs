@@ -1,0 +1,16 @@
+[package]
+name = "robotech-api"
+version = "0.1.0"
+edition = "2024"
+authors = ["zbz"]
+keywords = ["crud", "microservice", "service", "RESTful"]
+description = "API definitions and data transfer objects for the RoboTech platform."
+categories = ["web-programming::http-server"]
+license = "MIT"
+repository = "https://github.com/rusthing/robotech-rs"
+homepage = "https://github.com/rusthing/robotech-rs"
+
+[dependencies]
+chrono = { workspace = true }
+serde = { workspace = true }
+utoipa ={ workspace = true }
