@@ -1,6 +1,6 @@
 [package]
 name = "robotech"
-version = "0.5.1"
+version = "0.6.0"
 edition = "2024"
 authors = ["zbz"]
 keywords = ["crud", "microservice", "service", "RESTful"]
@@ -14,14 +14,13 @@ readme = "README.md"
 [features]
 default = ["api"]
 api = ["chrono", "serde", "utoipa"]
-svr = ["dep:log", "dep:actix-web", "dep:sea-orm", "dep:thiserror", "dep:regex", "dep:once_cell", "dep:validator", "dep:sqlx", "dep:wheel-rs"]
+svr = ["dep:log", "dep:actix-web", "dep:sea-orm", "dep:thiserror", "dep:regex", "dep:once_cell", "dep:validator", "dep:wheel-rs"]
 
 [dependencies]
 log = { version = "0.4.28", optional = true }
 chrono = { version = "0.4.42", optional = true }
 serde = { version = "1.0.228", optional = true }
 actix-web = { version = "4.11.0", optional = true }
-sqlx = { version = "0.8.6", optional = true }
 sea-orm = { version = "1.1.17", optional = true }
 thiserror = { version = "2.0.17", optional = true }
 regex = { version = "1.12.2", optional = true }
