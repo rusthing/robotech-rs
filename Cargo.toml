@@ -1,6 +1,6 @@
 [package]
 name = "robotech"
-version = "0.5.0"
+version = "0.5.1"
 edition = "2024"
 authors = ["zbz"]
 keywords = ["crud", "microservice", "service", "RESTful"]
@@ -14,16 +14,18 @@ readme = "README.md"
 [features]
 default = ["api"]
 api = ["chrono", "serde", "utoipa"]
-svr = ["dep:log", "dep:actix-web", "dep:sea-orm", "dep:thiserror", "dep:regex", "dep:once_cell", "dep:validator"]
+svr = ["dep:log", "dep:actix-web", "dep:sea-orm", "dep:thiserror", "dep:regex", "dep:once_cell", "dep:validator", "dep:sqlx", "dep:wheel-rs"]
 
 [dependencies]
 log = { version = "0.4.28", optional = true }
 chrono = { version = "0.4.42", optional = true }
-serde = { version = "1.0.228", features = ["derive"], optional = true }
+serde = { version = "1.0.228", optional = true }
 actix-web = { version = "4.11.0", optional = true }
-sea-orm = { version = "1.1.17", features = ["sqlx-postgres", "runtime-actix-rustls", "debug-print"], optional = true }
+sqlx = { version = "0.8.6", optional = true }
+sea-orm = { version = "1.1.17", optional = true }
 thiserror = { version = "2.0.17", optional = true }
 regex = { version = "1.12.2", optional = true }
 once_cell = { version = "1.21.3", optional = true }
-validator = { version = "0.20.0", features = ["derive"], optional = true }
+validator = { version = "0.20.0", optional = true }
 utoipa = { version = "5.4.0", optional = true }
+wheel-rs = { version = "0.2.0", optional = true }
