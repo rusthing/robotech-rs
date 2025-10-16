@@ -2,10 +2,10 @@
 pub mod cst;
 #[cfg(feature = "svr")]
 pub mod ctrl;
+#[cfg(feature = "svr")]
+pub mod db;
 #[cfg(feature = "api")]
 pub mod ro;
-#[cfg(feature = "svr")]
-pub mod settings;
 #[cfg(feature = "svr")]
 pub mod svc;
 #[cfg(feature = "svr")]

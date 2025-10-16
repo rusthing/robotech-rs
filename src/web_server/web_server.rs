@@ -1,4 +1,4 @@
-use crate::settings::WebServerSettings;
+use crate::web_server::WebServerSettings;
 use actix_web::middleware::Logger;
 use actix_web::{App, HttpServer};
 use log::info;
