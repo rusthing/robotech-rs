@@ -6,3 +6,5 @@ pub mod ctrl;
 pub mod ro;
 #[cfg(feature = "svr")]
 pub mod svc;
+#[cfg(feature = "svr")]
+pub mod web_server;
