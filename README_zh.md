@@ -2,7 +2,7 @@
 
 [English](README.md)
 
-RoboTech 是一个用 Rust 编写的后端服务工具库。本项目提供 RESTful 控制器层和业务逻辑层的常用的工具。
+RoboTech-RS 是一个用 Rust 编写的后端服务工具库。本项目提供 RESTful 控制器层和业务逻辑层的常用的工具。
 
 ## 项目结构
 
@@ -31,7 +31,7 @@ RoboTech 是一个用 Rust 编写的后端服务工具库。本项目提供 REST
 
 ```toml
 [dependencies.robotech]
-version = "0.1.0"
+version = "0.3.2"
 features = ["api", "svr"]
 ```
 
@@ -39,9 +39,21 @@ features = ["api", "svr"]
 
 本项目采用统一的响应格式，所有 API 响应都遵循以下结构：
 
+```json
+{
+  "result": 1,
+  "msg": "Operation completed successfully",
+  "timestamp": 1700000000000,
+  "extra": {},
+  "detail": "Optional detailed information",
+  "code": "Optional business code"
+}
+```
+
+字段说明：
 - `result`: 响应结果（Success, IllegalArgument, Warn, Fail）
 - `msg`: 响应消息
-- `timestamp`: 时间戳
+- `timestamp`: 时间戳（毫秒）
 - `extra`: 可选的额外数据
 - `detail`: 可选的详细信息
 - `code`: 可选的业务编码
@@ -69,6 +81,15 @@ cargo build --features api,svr
 # 运行服务（需要启用 svr feature）
 cargo run --features svr
 ```
+
+## 模块说明
+
+- `ro`: API响应对象，提供统一格式的响应
+- `cst`: 应用中使用的常量
+- `ctrl`: 处理HTTP请求的控制器
+- `svc`: 业务逻辑服务
+- `settings`: 配置管理
+- `web_server`: Web服务器实现
 
 ## 许可证
 

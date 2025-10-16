@@ -2,14 +2,17 @@
 
 [中文](README_zh.md)
 
-RoboTech-RS is a backend service toolkit written in Rust. This project provides commonly used tools for RESTful controller layer and business logic layer.
+RoboTech-RS is a backend service toolkit written in Rust. This project provides commonly used tools for RESTful
+controller layer and business logic layer.
 
 ## Project Structure
 
 This project organizes functional modules through Rust's feature flags mechanism:
 
-- `api` feature (enabled by default): Contains API interfaces and data transfer objects, providing a unified response object (RO) structure
-- `svr` feature: Implements server-side business logic, including controller (ctrl), service (svc), and constant (cst) modules
+- `api` feature (enabled by default): Contains API interfaces and data transfer objects, providing a unified response
+  object (RO) structure
+- `svr` feature: Implements server-side business logic, including controller (ctrl), service (svc), and constant (cst)
+  modules
 
 ## Tech Stack
 
@@ -31,13 +34,26 @@ The `api` feature is enabled by default. To use server-side features, you can en
 
 ```toml
 [dependencies.robotech]
-version = "0.1.0"
+version = "0.3.2"
 features = ["api", "svr"]
 ```
 
 ## API Response Format
 
 This project adopts a unified response format, where all API responses follow this structure:
+
+```json
+{
+  "result": 1,
+  "msg": "Operation completed successfully",
+  "timestamp": 1700000000000,
+  "extra": {},
+  "detail": "Optional detailed information",
+  "code": "Optional business code"
+}
+```
+
+API Response Fields Explanation:
 
 - `result`: Response result (Success, IllegalArgument, Warn, Fail)
 - `msg`: Response message
@@ -69,6 +85,15 @@ cargo build --features api,svr
 # Run service (requires svr feature)
 cargo run --features svr
 ```
+
+## Modules
+
+- `ro`: Response objects for API responses with unified format
+- `cst`: Constants used across the application
+- `ctrl`: Controllers handling HTTP requests
+- `svc`: Business logic services
+- `settings`: Configuration management
+- `web_server`: Web server implementation
 
 ## License
 
