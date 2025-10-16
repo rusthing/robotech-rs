@@ -1,58 +1,75 @@
-# RoboTech-rs
+# RoboTech-RS
 
-RoboTech-rs 是一个用 Rust 编写的后端工具库。该项目采用模块化设计，分为 API 定义和服务实现两个主要部分。
+[中文](README_zh.md)
 
-## 项目结构
+RoboTech-RS is a backend service toolkit written in Rust. This project provides commonly used tools for RESTful controller layer and business logic layer.
 
-本项目采用 Rust 工作区(workspace)的形式组织，包含以下两个主要 crate：
+## Project Structure
 
-- [`robotech-api`](./robotech-api): 定义 API 接口和数据传输对象，提供统一的响应对象（RO）结构
-- [`robotech-svr`](./robotech-svr): 实现服务端业务逻辑，包括控制器（ctrl）、服务（svc）和常量（cst）模块
+This project organizes functional modules through Rust's feature flags mechanism:
 
-## 技术栈
+- `api` feature (enabled by default): Contains API interfaces and data transfer objects, providing a unified response object (RO) structure
+- `svr` feature: Implements server-side business logic, including controller (ctrl), service (svc), and constant (cst) modules
+
+## Tech Stack
 
 - Rust 2024 edition
-- Actix-web 作为 Web 框架
-- SeaORM 作为数据库 ORM
-- Utoipa 用于 OpenAPI 文档生成
-- Serde 用于序列化/反序列化
-- Chrono 用于时间处理
+- Actix-web as Web framework (in svr feature)
+- SeaORM as database ORM (in svr feature)
+- Utoipa for OpenAPI documentation generation (in api feature)
+- Serde for serialization/deserialization (in api feature)
+- Chrono for time processing (in api feature)
 
-## 快速开始
+## Feature Flags
 
-### 先决条件
+This project uses feature flags to control dependencies and functionality:
 
-- Rust 1.70 或更高版本
-- PostgreSQL 数据库（如果使用 SeaORM）
-- 环境变量配置（如数据库连接信息等）
+- `api` (default): Enables API-related features, including response objects (RO) and data transfer
+- `svr`: Enables server-side features, including controllers, services, and database operations
 
-### 构建项目
+The `api` feature is enabled by default. To use server-side features, you can enable both features:
+
+```toml
+[dependencies.robotech]
+version = "0.1.0"
+features = ["api", "svr"]
+```
+
+## API Response Format
+
+This project adopts a unified response format, where all API responses follow this structure:
+
+- `result`: Response result (Success, IllegalArgument, Warn, Fail)
+- `msg`: Response message
+- `timestamp`: Timestamp
+- `extra`: Optional extra data
+- `detail`: Optional detailed information
+- `code`: Optional business code
+
+## Quick Start
+
+### Prerequisites
+
+- Rust 1.70 or higher
+- PostgreSQL database (if using SeaORM)
+
+### Build Project
 
 ```bash
+# Build with default features (api)
 cargo build
+
+# Build with all features
+cargo build --features api,svr
 ```
 
-### 运行服务
+### Run Service
 
 ```bash
-# 运行默认二进制文件
-cargo run
-
-# 或者运行特定的二进制文件（如果项目中有多个）
-cargo run --bin <binary_name>
+# Run service (requires svr feature)
+cargo run --features svr
 ```
 
-## API 响应格式
+## License
 
-本项目采用统一的响应格式，所有 API 响应都遵循以下结构：
-
-- `result`: 响应结果（Success, IllegalArgument, Warn, Fail）
-- `msg`: 响应消息
-- `timestamp`: 时间戳
-- `extra`: 可选的额外数据
-- `detail`: 可选的详细信息
-- `code`: 可选的业务编码
-
-## 许可证
-
-本项目根据 MIT 许可证授权 - 查看 [LICENSE](LICENSE) 文件了解更多详情。
+This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
