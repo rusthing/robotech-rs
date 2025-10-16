@@ -1,6 +1,6 @@
 [package]
 name = "robotech"
-version = "0.2.2"
+version = "0.3.0"
 edition = "2024"
 authors = ["zbz"]
 keywords = ["crud", "microservice", "service", "RESTful"]
@@ -12,7 +12,7 @@ repository = "https://github.com/rusthing/robotech-rs"
 readme = "README.md"
 
 [features]
-default = ["api"]
+default = ["api", "svr"]
 api = ["chrono", "serde", "utoipa"]
 svr = ["dep:log", "dep:actix-web", "dep:sea-orm", "dep:thiserror", "dep:regex", "dep:once_cell", "dep:validator"]
 
