@@ -4,8 +4,14 @@ pub mod cst;
 pub mod ctrl;
 #[cfg(feature = "svr")]
 pub mod db;
+#[cfg(feature = "svr")]
+pub mod env;
+#[cfg(feature = "svr")]
+pub mod log;
 #[cfg(feature = "api")]
 pub mod ro;
+#[cfg(feature = "svr")]
+pub mod settings;
 #[cfg(feature = "svr")]
 pub mod svc;
 #[cfg(feature = "svr")]
