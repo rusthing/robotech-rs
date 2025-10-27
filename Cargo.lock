@@ -1955,7 +1955,7 @@ dependencies = [
 
 [[package]]
 name = "robotech"
-version = "0.9.1"
+version = "0.9.2"
 dependencies = [
  "actix-web",
  "chrono",
@@ -3120,9 +3120,9 @@ dependencies = [
 
 [[package]]
 name = "wheel-rs"
-version = "0.2.2"
+version = "0.2.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "17e169de32c83fdf151add3a1b4c7237d8a037b5ef2ea820c68d0a9c0cb1c062"
+checksum = "0c058b8245e46de2549737e0b1eeff98fbb7f4aa2adc9f0a1a2d713fd7b7b70e"
 dependencies = [
  "dns-lookup",
  "humantime",
