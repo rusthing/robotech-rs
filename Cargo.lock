@@ -729,6 +729,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "dns-lookup"
+version = "3.0.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "6e39034cee21a2f5bbb66ba0e3689819c4bb5d00382a282006e802a7ffa6c41d"
+dependencies = [
+ "cfg-if",
+ "libc",
+ "socket2 0.6.1",
+ "windows-sys 0.60.2",
+]
+
+[[package]]
 name = "dotenvy"
 version = "0.15.7"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1943,7 +1955,7 @@ dependencies = [
 
 [[package]]
 name = "robotech"
-version = "0.9.0"
+version = "0.9.1"
 dependencies = [
  "actix-web",
  "chrono",
@@ -3108,10 +3120,11 @@ dependencies = [
 
 [[package]]
 name = "wheel-rs"
-version = "0.2.0"
+version = "0.2.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "eaae3a2b9b60cd47d33ddf5f712270d4b15157902911db8dbd7c08f014dd8096"
+checksum = "17e169de32c83fdf151add3a1b4c7237d8a037b5ef2ea820c68d0a9c0cb1c062"
 dependencies = [
+ "dns-lookup",
  "humantime",
  "log",
  "serde",
