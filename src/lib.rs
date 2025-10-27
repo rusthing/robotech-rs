@@ -8,7 +8,7 @@ pub mod db;
 pub mod env;
 #[cfg(feature = "base")]
 pub mod log;
-#[cfg(feature = "crud")]
+#[cfg(feature = "api")]
 pub mod ro;
 #[cfg(feature = "base")]
 pub mod settings;

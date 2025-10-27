@@ -11,31 +11,43 @@ This project organizes functional modules through Rust's feature flags mechanism
 
 - `api` feature (enabled by default): Contains API interfaces and data transfer objects, providing a unified response
   object (RO) structure
-- `svr` feature: Implements server-side business logic, including controller (ctrl), service (svc), and constant (cst)
-  modules
+- `base` feature: Provides basic functionalities including logging, configuration management, environment variables
+- `web` feature: Implements web server functionality based on Actix-web
+- `crud` feature: Implements database operations based on SeaORM
 
 ## Tech Stack
 
 - Rust 2024 edition
-- Actix-web as Web framework (in svr feature)
-- SeaORM as database ORM (in svr feature)
+- Actix-web as Web framework (in web feature)
+- SeaORM as database ORM (in crud feature)
 - Utoipa for OpenAPI documentation generation (in api feature)
 - Serde for serialization/deserialization (in api feature)
 - Chrono for time processing (in api feature)
+- Tracing ecosystem for logging (in base feature)
 
 ## Feature Flags
 
 This project uses feature flags to control dependencies and functionality:
 
 - `api` (default): Enables API-related features, including response objects (RO) and data transfer
-- `svr`: Enables server-side features, including controllers, services, and database operations
+- `base`: Enables basic features like logging, configuration, environment management
+- `web`: Enables web server functionality (includes base feature)
+- `crud`: Enables database CRUD operations (includes base feature)
 
-The `api` feature is enabled by default. To use server-side features, you can enable both features:
+The `api` feature is enabled by default. To use web server features, you can enable the web feature:
 
 ```toml
 [dependencies.robotech]
-version = "0.3.2"
-features = ["api", "svr"]
+version = "0.8.0"
+features = ["web"]
+```
+
+To use database operations, enable the crud feature:
+
+```toml
+[dependencies.robotech]
+version = "0.8.0"
+features = ["web", "crud"]
 ```
 
 ## API Response Format
@@ -75,15 +87,21 @@ API Response Fields Explanation:
 # Build with default features (api)
 cargo build
 
+# Build with web server features
+cargo build --features web
+
 # Build with all features
-cargo build --features api,svr
+cargo build --features web,crud
 ```
 
 ### Run Service
 
 ```bash
-# Run service (requires svr feature)
-cargo run --features svr
+# Run service (requires web feature)
+cargo run --features web
+
+# Run service with database support
+cargo run --features web,crud
 ```
 
 ## Modules
@@ -94,6 +112,9 @@ cargo run --features svr
 - `svc`: Business logic services
 - `settings`: Configuration management
 - `web_server`: Web server implementation
+- `db`: Database operations
+- `log`: Logging functionality
+- `env`: Environment variable management
 
 ## License
 

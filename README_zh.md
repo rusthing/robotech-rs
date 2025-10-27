@@ -9,30 +9,43 @@ RoboTech-RS 是一个用 Rust 编写的后端服务工具库。本项目提供 R
 本项目通过 Rust 的 feature flags 机制组织功能模块：
 
 - `api` feature（默认启用）：包含 API 接口和数据传输对象，提供统一的响应对象（RO）结构
-- `svr` feature：实现服务端业务逻辑，包括控制器（ctrl）、服务（svc）和常量（cst）模块
+- `base` feature：提供基础功能，包括日志记录、配置管理、环境变量处理
+- `web` feature：基于 Actix-web 实现 Web 服务器功能
+- `crud` feature：基于 SeaORM 实现数据库操作功能
 
 ## 技术栈
 
 - Rust 2024 edition
-- Actix-web 作为 Web 框架（在 svr feature 中）
-- SeaORM 作为数据库 ORM（在 svr feature 中）
+- Actix-web 作为 Web 框架（在 web feature 中）
+- SeaORM 作为数据库 ORM（在 crud feature 中）
 - Utoipa 用于 OpenAPI 文档生成（在 api feature 中）
 - Serde 用于序列化/反序列化（在 api feature 中）
 - Chrono 用于时间处理（在 api feature 中）
+- Tracing 生态系统用于日志记录（在 base feature 中）
 
 ## Feature Flags
 
 本项目使用 feature flags 来控制依赖和功能：
 
 - `api`（默认）：启用 API 相关功能，包括响应对象（RO）和数据传输
-- `svr`：启用服务端功能，包括控制器、服务和数据库操作
+- `base`：启用基础功能，如日志记录、配置管理、环境变量处理
+- `web`：启用 Web 服务器功能（包含 base feature）
+- `crud`：启用数据库 CRUD 操作（包含 base feature）
 
-默认情况下启用 `api` feature。要使用服务端功能，可以同时启用两个 features：
+默认情况下启用 `api` feature。要使用 Web 服务器功能，可以启用 web feature：
 
 ```toml
 [dependencies.robotech]
-version = "0.3.2"
-features = ["api", "svr"]
+version = "0.8.0"
+features = ["web"]
+```
+
+要使用数据库操作功能，可以启用 crud feature：
+
+```toml
+[dependencies.robotech]
+version = "0.8.0"
+features = ["web", "crud"]
 ```
 
 ## API 响应格式
@@ -71,15 +84,21 @@ features = ["api", "svr"]
 # 构建默认 features（api）
 cargo build
 
+# 构建 web 服务器功能
+cargo build --features web
+
 # 构建所有 features
-cargo build --features api,svr
+cargo build --features web,crud
 ```
 
 ### 运行服务
 
 ```bash
-# 运行服务（需要启用 svr feature）
-cargo run --features svr
+# 运行服务（需要启用 web feature）
+cargo run --features web
+
+# 运行带数据库支持的服务
+cargo run --features web,crud
 ```
 
 ## 模块说明
@@ -90,6 +109,9 @@ cargo run --features svr
 - `svc`: 业务逻辑服务
 - `settings`: 配置管理
 - `web_server`: Web服务器实现
+- `db`: 数据库操作
+- `log`: 日志功能
+- `env`: 环境变量管理
 
 ## 许可证
 
