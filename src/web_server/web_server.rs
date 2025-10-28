@@ -21,14 +21,21 @@ pub async fn start_web_server(
     // 绑定监听地址
     for listen in web_server_settings.listen {
         let parts: Vec<&str> = listen.rsplitn(2, ':').collect();
-        if parts.len() == 2 {
-            let port: u16 = parts[0].parse().expect("listen的端口解析失败");
-            let mut bind = parts[1].to_string();
-            // 如果是IPv6地址，去除方括号
-            if bind.starts_with('[') && bind.ends_with(']') {
-                bind = bind[1..bind.len() - 1].to_string();
+        match parts.len() {
+            0 => {
+                let port: u16 = listen.parse().expect("listen的端口解析失败");
+                server = server.bind(("::", port)).unwrap();
             }
-            server = server.bind((bind, port)).unwrap();
+            2 => {
+                let port: u16 = parts[0].parse().expect("listen的端口解析失败");
+                let mut bind = parts[1].to_string();
+                // 如果是IPv6地址，去除方括号
+                if bind.starts_with('[') && bind.ends_with(']') {
+                    bind = bind[1..bind.len() - 1].to_string();
+                }
+                server = server.bind((bind, port)).unwrap();
+            }
+            _ => panic!("listen格式错误"),
         }
     }
 
