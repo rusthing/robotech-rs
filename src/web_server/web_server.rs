@@ -16,20 +16,15 @@ pub async fn start_web_server(
     let listens = web_server_settings.listen.unwrap_or_default();
 
     // 绑定地址
-    match web_server_settings.bind {
-        Some(binds) => {
-            for bind in binds {
-                server = server
-                    .bind((bind.clone(), port))
-                    .expect(&format!("绑定地址失败: {}", bind));
-            }
+    if let Some(binds) = web_server_settings.bind {
+        for bind in binds {
+            server = server
+                .bind((bind.clone(), port))
+                .expect(&format!("绑定地址失败: {}", bind));
         }
-        None => {
-            // 如果bind和listen都未配置，默认绑定 "::"，监听所有本地地址
-            if listens.is_empty() {
-                server = server.bind(("::", port)).expect("绑定地址失败: \"::\"");
-            }
-        }
+    } else if listens.is_empty() {
+        // 如果bind和listen都未配置，默认绑定 "::"
+        server = server.bind(("::", port)).expect("绑定地址失败: \"::\"");
     }
 
     // 监听地址
