@@ -5,14 +5,14 @@ use serde::{Deserialize, Serialize};
 pub struct WebServerSettings {
     /// 绑定的IP地址
     #[serde(default = "bind_default")]
-    pub bind: Vec<String>,
+    pub bind: Option<Vec<String>>,
     /// Web服务器的端口号
     #[serde(default = "port_default")]
     pub port: Option<u16>,
 
     /// 监听地址(ip+':'+port，例如127.0.0.1:80或\[::\]:80)
     #[serde(default = "listen_default")]
-    pub listen: Vec<String>,
+    pub listen: Option<Vec<String>>,
 }
 
 impl Default for WebServerSettings {
@@ -25,13 +25,13 @@ impl Default for WebServerSettings {
     }
 }
 
-fn bind_default() -> Vec<String> {
-    vec![String::from("::")]
+fn bind_default() -> Option<Vec<String>> {
+    None
 }
 fn port_default() -> Option<u16> {
     Some(0)
 }
 
-fn listen_default() -> Vec<String> {
-    vec![]
+fn listen_default() -> Option<Vec<String>> {
+    None
 }
