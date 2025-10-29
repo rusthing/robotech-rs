@@ -4,7 +4,7 @@
 
 use log::LevelFilter;
 use serde::{Deserialize, Serialize};
-use wheel_rs::serde::log_filter_serde;
+use wheel_rs::serde::log_filter_option_serde;
 
 /// # 数据库配置结构体
 ///
@@ -21,7 +21,7 @@ pub struct DbSettings {
     /// 日志输出级别配置
     ///
     /// 控制数据库相关操作的日志输出级别
-    #[serde(default = "log_level_default", with = "log_filter_serde")]
+    #[serde(with = "log_filter_option_serde", default = "log_level_default")]
     pub log_level: Option<LevelFilter>,
 }
 
