@@ -1,9 +1,11 @@
-use crate::ro::Ro;
+#[cfg(feature = "crud")]
 use crate::ro::ro_code::RO_CODE_WARNING_DELETE_VIOLATE_CONSTRAINT;
+use crate::ro::Ro;
 use crate::svc::svc_error::SvcError;
 use actix_web::http::StatusCode;
 use actix_web::{HttpResponse, ResponseError};
 use log::error;
+#[cfg(feature = "crud")]
 use sea_orm::DbErr;
 use thiserror::Error;
 use validator;
@@ -60,9 +62,11 @@ impl CtrlError {
                 SvcError::NotFound(err) => {
                     Ro::warn("找不到数据".to_string()).detail(Some(err.to_string()))
                 }
+                #[cfg(feature = "crud")]
                 SvcError::DuplicateKey(field_name, field_value) => {
                     Ro::warn(format!("{}<{}>已存在！", field_name, field_value))
                 }
+                #[cfg(feature = "crud")]
                 SvcError::DeleteViolateConstraint(pk_table, foreign_key, fk_table) => {
                     Ro::warn("删除失败，有其它数据依赖于本数据".to_string())
                         .code(Some(RO_CODE_WARNING_DELETE_VIOLATE_CONSTRAINT.to_string()))
@@ -71,6 +75,7 @@ impl CtrlError {
                             pk_table, foreign_key, fk_table
                         )))
                 }
+                #[cfg(feature = "crud")]
                 SvcError::DatabaseError(db_err) => match db_err {
                     DbErr::RecordNotUpdated => {
                         Ro::warn("未更新数据，请检查记录是否存在".to_string())
@@ -97,6 +102,7 @@ impl ResponseError for CtrlError {
             CtrlError::IoError(_) => StatusCode::INTERNAL_SERVER_ERROR,
             CtrlError::SvcError(error) => match error {
                 SvcError::NotFound(_) => StatusCode::NOT_FOUND,
+                #[cfg(feature = "crud")]
                 SvcError::DuplicateKey(_, _) | SvcError::DeleteViolateConstraint(_, _, _) => {
                     StatusCode::OK
                 }

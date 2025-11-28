@@ -1,18 +1,20 @@
-#[cfg(feature = "base")]
+#[cfg(feature = "api")]
+pub mod api;
+#[cfg(feature = "svr")]
 pub mod cst;
-#[cfg(feature = "crud")]
+#[cfg(feature = "web")]
 pub mod ctrl;
 #[cfg(feature = "crud")]
 pub mod db;
-#[cfg(feature = "base")]
+#[cfg(feature = "svr")]
 pub mod env;
-#[cfg(feature = "base")]
+#[cfg(feature = "svr")]
 pub mod log;
-#[cfg(feature = "api")]
-pub mod ro;
 #[cfg(feature = "base")]
+pub mod ro;
+#[cfg(feature = "svr")]
 pub mod settings;
-#[cfg(feature = "crud")]
+#[cfg(any(feature = "web", feature = "crud"))]
 pub mod svc;
 #[cfg(feature = "web")]
 pub mod web_server;

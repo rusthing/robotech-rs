@@ -1,26 +1,35 @@
+#[cfg(feature = "crud")]
 use crate::svc::svc_error::SvcError::{DeleteViolateConstraint, DuplicateKey};
 use log::error;
+#[cfg(feature = "crud")]
 use once_cell::sync::Lazy;
+#[cfg(feature = "crud")]
 use regex::{Captures, Regex};
+#[cfg(feature = "crud")]
 use sea_orm::DbErr;
+#[cfg(feature = "crud")]
 use std::collections::HashMap;
+use std::error;
 use std::io::Error;
 use thiserror::Error;
 
 /// # 正则匹配重复键错误-Postgres
 /// 格式: duplicate key value violates unique constraint "...", detail: Some("Key (<字段名>)=(<字段值>) already exists."), ...
+#[cfg(feature = "crud")]
 static REGEX_DUPLICATE_KEY_POSTGRES: Lazy<Regex> = Lazy::new(|| {
     Regex::new(r#"Key \((?P<column>[^)]+)\)=\((?P<value>[^)]*)\) already exists\."#).unwrap()
 });
 
 /// # 正则匹配重复键错误-MySQL
 /// 格式: Duplicate entry '<字段值>' for key '<字段名>'
+#[cfg(feature = "crud")]
 static REGEX_DUPLICATE_KEY_MYSQL: Lazy<Regex> = Lazy::new(|| {
     Regex::new(r#"Duplicate entry '(?P<value>[^']+)' for key '(?P<column>[^']*)'$"#).unwrap()
 });
 
 /// # 正则匹配删除操作违反了约束条件错误-Postgres
 /// 格式: Duplicate entry '<字段值>' for key '<字段名>'
+#[cfg(feature = "crud")]
 static REGEX_DELETE_VIOLATE_CONSTRAINT_POSTGRES: Lazy<Regex> = Lazy::new(|| {
     Regex::new(r#"update or delete on table \\"(?P<pk_table>[^"]+)\\" violates foreign key constraint \\"(?P<foreign_key>[^"]+)\\" on table \\"(?P<fk_table>[^"]+)\\""#).unwrap()
 });
@@ -38,14 +47,25 @@ static REGEX_DELETE_VIOLATE_CONSTRAINT_POSTGRES: Lazy<Regex> = Lazy::new(|| {
 /// - `DatabaseError`: 表示底层数据库操作发生的错误
 #[derive(Debug, Error)]
 pub enum SvcError {
+    #[error("参数校验错误: {0}")]
+    ValidationError(#[from] validator::ValidationError),
+    #[error("参数校验错误: {0}")]
+    ValidationErrors(#[from] validator::ValidationErrors),
+    #[error("运行时错误: {0}")]
+    RuntimeError(String),
+    #[error("运行时错误: {0}")]
+    RuntimeXError(#[from] Box<dyn error::Error + Send + Sync>),
     #[error("找不到数据: {0}")]
     NotFound(String),
-    #[error("重复键错误: {0} {1}")]
-    DuplicateKey(String, String),
-    #[error("删除操作违反了约束条件: {0} {1} {2}")]
-    DeleteViolateConstraint(String, String, String),
     #[error("IO错误: {0}")]
     IoError(#[from] Error),
+    #[cfg(feature = "crud")]
+    #[error("重复键错误: {0} {1}")]
+    DuplicateKey(String, String),
+    #[cfg(feature = "crud")]
+    #[error("删除操作违反了数据库约束条件: {0} {1} {2}")]
+    DeleteViolateConstraint(String, String, String),
+    #[cfg(feature = "crud")]
     #[error("数据库错误: {0}")]
     DatabaseError(#[from] DbErr),
 }
@@ -62,6 +82,7 @@ pub enum SvcError {
 ///
 /// ## 返回值
 /// 返回对应的SvcError服务层错误对象
+#[cfg(feature = "crud")]
 pub fn handle_db_err_to_svc_error(
     db_err: DbErr,
     unique_field_hashmap: &Lazy<HashMap<&'static str, &'static str>>,
@@ -98,6 +119,7 @@ pub fn handle_db_err_to_svc_error(
 ///
 /// ## 返回值
 /// 返回一个包含字段名和冲突值的SvcError::DuplicateKey错误
+#[cfg(feature = "crud")]
 fn to_duplicate_key(
     caps: Captures,
     unique_field_hashmap: &Lazy<HashMap<&'static str, &'static str>>,

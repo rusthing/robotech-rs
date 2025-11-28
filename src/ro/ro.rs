@@ -2,7 +2,7 @@
 
 use crate::ro::ro_result::RoResult;
 use chrono::Utc;
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use std::fmt::Debug;
 use utoipa::ToSchema;
 
@@ -13,7 +13,7 @@ use utoipa::ToSchema;
 ///
 /// ## 泛型参数
 /// * `E` - 额外数据的类型，用于携带具体的业务数据
-#[derive(ToSchema, Debug, Serialize)]
+#[derive(ToSchema, Debug, Serialize, Deserialize)]
 pub struct Ro<E> {
     /// 响应结果枚举值，表示请求处理的结果状态
     pub result: RoResult,
