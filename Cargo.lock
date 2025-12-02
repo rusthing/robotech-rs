@@ -2291,7 +2291,7 @@ dependencies = [
 
 [[package]]
 name = "robotech"
-version = "0.10.0"
+version = "0.10.1"
 dependencies = [
  "actix-web",
  "async-trait",
