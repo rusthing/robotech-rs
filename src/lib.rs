@@ -1,6 +1,6 @@
 #[cfg(feature = "api")]
 pub mod api;
-#[cfg(feature = "svr")]
+#[cfg(feature = "base")]
 pub mod cst;
 #[cfg(feature = "web")]
 pub mod ctrl;

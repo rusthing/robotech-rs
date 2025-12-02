@@ -9,9 +9,6 @@ use regex::{Captures, Regex};
 use sea_orm::DbErr;
 #[cfg(feature = "crud")]
 use std::collections::HashMap;
-use std::error;
-use std::io::Error;
-use thiserror::Error;
 
 /// # 正则匹配重复键错误-Postgres
 /// 格式: duplicate key value violates unique constraint "...", detail: Some("Key (<字段名>)=(<字段值>) already exists."), ...
@@ -45,7 +42,7 @@ static REGEX_DELETE_VIOLATE_CONSTRAINT_POSTGRES: Lazy<Regex> = Lazy::new(|| {
 /// - `DuplicateKey`: 表示违反了唯一性约束，如重复的用户名或邮箱
 /// - `IoError`: 表示输入输出相关的错误，如文件读写失败
 /// - `DatabaseError`: 表示底层数据库操作发生的错误
-#[derive(Debug, Error)]
+#[derive(Debug, thiserror::Error)]
 pub enum SvcError {
     #[error("参数校验错误: {0}")]
     ValidationError(#[from] validator::ValidationError),
@@ -54,11 +51,11 @@ pub enum SvcError {
     #[error("运行时错误: {0}")]
     RuntimeError(String),
     #[error("运行时错误: {0}")]
-    RuntimeXError(#[from] Box<dyn error::Error + Send + Sync>),
+    RuntimeXError(#[from] Box<dyn std::error::Error + Send + Sync>),
     #[error("找不到数据: {0}")]
     NotFound(String),
     #[error("IO错误: {0}")]
-    IoError(#[from] Error),
+    IoError(#[from] std::io::Error),
     #[cfg(feature = "crud")]
     #[error("重复键错误: {0} {1}")]
     DuplicateKey(String, String),

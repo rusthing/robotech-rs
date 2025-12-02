@@ -1,10 +1,8 @@
+use crate::cst::user_id_cst::USER_ID_HEADER_NAME;
 use actix_web::web::Query;
 use actix_web::HttpRequest;
 use std::collections::HashMap;
 use validator;
-
-/// 当前用户ID的Http header的名称
-pub const USER_ID_HEADER_NAME: &str = "X-User-Id";
 
 /// # 从Query参数中获取ID
 ///
