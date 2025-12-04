@@ -15,10 +15,15 @@ pub trait BaseApi {
     async fn get(
         &self,
         path: &str,
+        current_user_id: u64,
     ) -> Result<Ro<serde_json::Value>, Box<dyn std::error::Error + Send + Sync>> {
         let url = format!("{}{}", self.get_api_settings().base_url, path);
         log::debug!("request get: {}", url);
-        let response = REQWEST_CLIENT.get(&url).send().await?;
+        let response = REQWEST_CLIENT
+            .get(&url)
+            .header(USER_ID_HEADER_NAME, current_user_id)
+            .send()
+            .await?;
         let result = response.json().await?;
         Ok(result)
     }
@@ -27,10 +32,15 @@ pub trait BaseApi {
     async fn get_bytes(
         &self,
         path: &str,
+        current_user_id: u64,
     ) -> Result<Vec<u8>, Box<dyn std::error::Error + Send + Sync>> {
         let url = format!("{}{}", self.get_api_settings().base_url, path);
         log::debug!("request get: {}", url);
-        let response = REQWEST_CLIENT.get(&url).send().await?;
+        let response = REQWEST_CLIENT
+            .get(&url)
+            .header(USER_ID_HEADER_NAME, current_user_id)
+            .send()
+            .await?;
         let result = response.bytes().await?;
         Ok(result.to_vec())
     }
@@ -40,10 +50,16 @@ pub trait BaseApi {
         &self,
         path: &str,
         body: &B,
+        current_user_id: u64,
     ) -> Result<Ro<serde_json::Value>, Box<dyn std::error::Error + Send + Sync>> {
         let url = format!("{}{}", self.get_api_settings().base_url, path);
         log::debug!("request post: {}", url);
-        let response = REQWEST_CLIENT.post(&url).json(body).send().await?;
+        let response = REQWEST_CLIENT
+            .post(&url)
+            .header(USER_ID_HEADER_NAME, current_user_id)
+            .json(body)
+            .send()
+            .await?;
         let ro = response.json().await?;
         Ok(ro)
     }
@@ -52,10 +68,16 @@ pub trait BaseApi {
         &self,
         path: &str,
         body: &B,
+        current_user_id: u64,
     ) -> Result<Ro<serde_json::Value>, Box<dyn std::error::Error + Send + Sync>> {
         let url = format!("{}{}", self.get_api_settings().base_url, path);
         log::debug!("request put: {}", url);
-        let response = REQWEST_CLIENT.put(&url).json(body).send().await?;
+        let response = REQWEST_CLIENT
+            .put(&url)
+            .header(USER_ID_HEADER_NAME, current_user_id)
+            .json(body)
+            .send()
+            .await?;
         let ro = response.json().await?;
         Ok(ro)
     }
@@ -63,28 +85,20 @@ pub trait BaseApi {
     async fn delete<B: serde::Serialize>(
         &self,
         path: &str,
+        current_user_id: u64,
     ) -> Result<Ro<serde_json::Value>, Box<dyn std::error::Error + Send + Sync>> {
         let url = format!("{}{}", self.get_api_settings().base_url, path);
         log::debug!("request delete: {}", url);
-        let response = REQWEST_CLIENT.delete(&url).send().await?;
+        let response = REQWEST_CLIENT
+            .delete(&url)
+            .header(USER_ID_HEADER_NAME, current_user_id)
+            .send()
+            .await?;
         let ro = response.json().await?;
         Ok(ro)
     }
     /// 执行post multipart请求的通用方法
     async fn multipart(
-        &self,
-        path: &str,
-        form: reqwest::multipart::Form,
-    ) -> Result<Ro<serde_json::Value>, Box<dyn std::error::Error + Send + Sync>> {
-        let url = format!("{}{}", self.get_api_settings().base_url, path);
-        log::debug!("request post multipart: {}", url);
-        let response = REQWEST_CLIENT.post(&url).multipart(form).send().await?;
-        let ro = response.json().await?;
-        Ok(ro)
-    }
-
-    /// 执行post multipart请求带当前用户ID的方法
-    async fn multipart_with_current_user_id(
         &self,
         path: &str,
         form: reqwest::multipart::Form,
