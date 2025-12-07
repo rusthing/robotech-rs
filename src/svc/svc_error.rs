@@ -1,3 +1,5 @@
+#[cfg(feature = "api")]
+use crate::api::ApiError;
 #[cfg(feature = "crud")]
 use crate::svc::svc_error::SvcError::{DeleteViolateConstraint, DuplicateKey};
 use log::error;
@@ -48,10 +50,6 @@ pub enum SvcError {
     ValidationError(#[from] validator::ValidationError),
     #[error("参数校验错误: {0}")]
     ValidationErrors(#[from] validator::ValidationErrors),
-    #[error("运行时错误: {0}")]
-    RuntimeError(String),
-    #[error("运行时错误: {0}")]
-    RuntimeXError(#[from] Box<dyn std::error::Error + Send + Sync>),
     #[error("找不到数据: {0}")]
     NotFound(String),
     #[error("IO错误: {0}")]
@@ -65,6 +63,11 @@ pub enum SvcError {
     #[cfg(feature = "crud")]
     #[error("数据库错误: {0}")]
     DatabaseError(#[from] DbErr),
+    #[error("{0}")]
+    RuntimeError(#[from] wheel_rs::runtime::Error),
+    #[cfg(feature = "api")]
+    #[error("API调用错误, {0}")]
+    ApiError(#[from] ApiError),
 }
 
 /// # 处理数据库错误，并转换为服务层错误

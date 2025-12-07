@@ -1,4 +1,4 @@
-pub mod log;
+pub mod dto;
 
 // 重新导出结构体，简化外部引用
-pub use log::init_log;
+pub use dto::Dto;

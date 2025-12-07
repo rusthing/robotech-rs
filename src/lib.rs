@@ -6,6 +6,8 @@ pub mod cst;
 pub mod ctrl;
 #[cfg(feature = "crud")]
 pub mod db;
+#[cfg(feature = "base")]
+pub mod dto;
 #[cfg(feature = "svr")]
 pub mod env;
 #[cfg(feature = "svr")]

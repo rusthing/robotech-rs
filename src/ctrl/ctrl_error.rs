@@ -38,7 +38,7 @@ pub enum CtrlError {
     ValidationErrors(#[from] validator::ValidationErrors),
     #[error("IO错误: {0}")]
     IoError(#[from] std::io::Error),
-    #[error("服务层错误")]
+    #[error("服务层错误, {0}")]
     SvcError(#[from] SvcError),
 }
 
