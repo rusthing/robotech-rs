@@ -14,6 +14,10 @@ pub struct WebServerSettings {
     /// 监听地址(ip+':'+port，例如127.0.0.1:80或\[::\]:80)
     #[serde(with = "vec_option_serde", default = "listen_default")]
     pub listen: Option<Vec<String>>,
+
+    /// 是否支持健康检查
+    #[serde(default = "support_health_check_default")]
+    pub support_health_check: bool,
 }
 
 impl Default for WebServerSettings {
@@ -22,6 +26,7 @@ impl Default for WebServerSettings {
             bind: bind_default(),
             port: port_default(),
             listen: listen_default(),
+            support_health_check: support_health_check_default(),
         }
     }
 }
@@ -35,4 +40,7 @@ fn port_default() -> Option<u16> {
 
 fn listen_default() -> Option<Vec<String>> {
     None
+}
+fn support_health_check_default() -> bool {
+    true
 }

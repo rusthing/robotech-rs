@@ -1,7 +1,12 @@
 use crate::web_server::WebServerSettings;
 use actix_web::middleware::Logger;
-use actix_web::{App, HttpServer};
+use actix_web::{get, App, HttpServer, Responder};
 use log::info;
+
+#[get("/health")]
+async fn health() -> impl Responder {
+    "Ok"
+}
 
 pub async fn start_web_server(
     web_server_settings: WebServerSettings,
@@ -10,10 +15,16 @@ pub async fn start_web_server(
     info!("创建Web服务器({:?})并运行...", web_server_settings);
 
     let port = web_server_settings.port.unwrap();
-    let mut server =
-        HttpServer::new(move || App::new().wrap(Logger::default()).configure(configure));
-
     let listens = web_server_settings.listen.unwrap_or_default();
+    let support_health_check = web_server_settings.support_health_check;
+
+    let mut server = HttpServer::new(move || {
+        let mut app = App::new().wrap(Logger::default()).configure(configure);
+        if support_health_check {
+            app = app.service(health);
+        }
+        app
+    });
 
     // 绑定地址
     if let Some(binds) = web_server_settings.bind {
