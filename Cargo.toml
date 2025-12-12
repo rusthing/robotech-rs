@@ -1,6 +1,6 @@
 [package]
 name = "robotech"
-version = "0.13.1"
+version = "0.13.2"
 edition = "2024"
 authors = ["zbz"]
 keywords = ["crud", "microservice", "service", "RESTful"]
@@ -12,9 +12,9 @@ repository = "https://github.com/rusthing/robotech-rs"
 readme = "README.md"
 
 [features]
-base = ["dep:log", "dep:tracing-log", "dep:tracing-core", "dep:tracing-subscriber", "dep:tracing-appender", "dep:chrono", "dep:serde", "dep:serde_json", "dep:utoipa"]
+base = ["dep:log", "dep:tracing-log", "dep:tracing-core", "dep:tracing-subscriber", "dep:tracing-appender", "dep:thiserror", "dep:chrono", "dep:serde", "dep:serde_json", "dep:utoipa"]
 api = ["base", "dep:reqwest"]
-svr = ["base", "dep:wheel-rs", "dep:config", "dep:thiserror", "dep:validator"]
+svr = ["base", "dep:wheel-rs", "dep:config", "dep:validator"]
 web = ["svr", "dep:actix-web"]
 crud = ["svr", "dep:sea-orm", "dep:regex", "dep:once_cell"]
 
@@ -34,7 +34,7 @@ sea-orm = { version = "1.1.19", optional = true }
 thiserror = { version = "2.0.17", optional = true }
 once_cell = { version = "1.21.3", optional = true }
 validator = { version = "0.20.0", optional = true }
-reqwest = { version = "0.12.24", features = ["multipart", "json", "stream"], optional = true }
+reqwest = { version = "0.12.25", features = ["multipart", "json", "stream"], optional = true }
 utoipa = { version = "5.4.0", optional = true }
 wheel-rs = { version = "0.4.3", optional = true }
 [patch.crates-io]
