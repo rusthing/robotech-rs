@@ -4,7 +4,7 @@ use crate::ro::Ro;
 use crate::svc::svc_error::SvcError;
 use actix_web::http::StatusCode;
 use actix_web::{HttpResponse, ResponseError};
-use log::error;
+use log::{error, warn};
 #[cfg(feature = "crud")]
 use sea_orm::DbErr;
 use thiserror::Error;
@@ -32,6 +32,8 @@ use validator;
 /// ```
 #[derive(Debug, Error)]
 pub enum CtrlError {
+    #[error("{0}")]
+    RuntimeError(#[from] wheel_rs::runtime::Error),
     #[error("参数校验错误: {0}")]
     ValidationError(#[from] validator::ValidationError),
     #[error("参数校验错误: {0}")]
@@ -49,6 +51,10 @@ impl CtrlError {
     /// 将错误转换为Ro对象
     fn to_ro(&self) -> Ro<()> {
         match self {
+            CtrlError::RuntimeError(error) => {
+                warn!("{}", error);
+                Ro::warn("运行时错误".to_string()).detail(Some(error.to_string()))
+            }
             CtrlError::ValidationError(error) => {
                 Ro::illegal_argument(format!("参数校验错误: {}", error.code))
             }
@@ -96,6 +102,7 @@ impl ResponseError for CtrlError {
     /// 根据异常获取状态码
     fn status_code(&self) -> StatusCode {
         match self {
+            CtrlError::RuntimeError(_) => StatusCode::INTERNAL_SERVER_ERROR,
             CtrlError::ValidationError(_) | CtrlError::ValidationErrors(_) => {
                 StatusCode::BAD_REQUEST
             }

@@ -46,6 +46,8 @@ static REGEX_DELETE_VIOLATE_CONSTRAINT_POSTGRES: Lazy<Regex> = Lazy::new(|| {
 /// - `DatabaseError`: 表示底层数据库操作发生的错误
 #[derive(Debug, thiserror::Error)]
 pub enum SvcError {
+    #[error("{0}")]
+    RuntimeError(#[from] wheel_rs::runtime::Error),
     #[error("参数校验错误: {0}")]
     ValidationError(#[from] validator::ValidationError),
     #[error("参数校验错误: {0}")]
@@ -63,8 +65,6 @@ pub enum SvcError {
     #[cfg(feature = "crud")]
     #[error("数据库错误: {0}")]
     DatabaseError(#[from] DbErr),
-    #[error("{0}")]
-    RuntimeError(#[from] wheel_rs::runtime::Error),
     #[cfg(feature = "api")]
     #[error("API调用错误, {0}")]
     ApiError(#[from] ApiError),
