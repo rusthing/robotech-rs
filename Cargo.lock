@@ -2296,7 +2296,7 @@ dependencies = [
 
 [[package]]
 name = "robotech"
-version = "0.13.2"
+version = "1.0.0"
 dependencies = [
  "actix-web",
  "chrono",
@@ -3695,8 +3695,9 @@ dependencies = [
 
 [[package]]
 name = "wheel-rs"
-version = "0.4.3"
+version = "1.0.0"
 dependencies = [
+ "bytes",
  "dns-lookup",
  "humantime",
  "log",
