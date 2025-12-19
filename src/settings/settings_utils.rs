@@ -21,7 +21,7 @@ pub fn get_settings<'de, T: Deserialize<'de>>(path: Option<String>) -> T {
             .to_string_lossy()
             .to_string();
 
-        // Add in `./Settings.toml`
+        // Add in `./Settings.toml`, `./Settings.yml`, `./Settings.json`, `./Settings.ini`, `./Settings.ron`
         config
             .add_source(config::File::with_name(format!("{}.toml", path).as_str()).required(false))
             .add_source(config::File::with_name(format!("{}.yml", path).as_str()).required(false))
@@ -33,7 +33,7 @@ pub fn get_settings<'de, T: Deserialize<'de>>(path: Option<String>) -> T {
     let config = config
         // Add in settings from the environment (with a prefix of APP)
         // E.g. `APP_DEBUG=1 ./target/app` would set the `debug` key
-        .add_source(config::Environment::with_prefix("OSS"))
+        .add_source(config::Environment::with_prefix("APP"))
         .build()
         .unwrap();
 
