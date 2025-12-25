@@ -1,6 +1,6 @@
 [package]
 name = "robotech"
-version = "1.0.1"
+version = "1.0.2"
 edition = "2024"
 authors = ["zbz"]
 keywords = ["crud", "microservice", "service", "RESTful"]
@@ -21,14 +21,14 @@ crud = ["svr", "dep:sea-orm", "dep:regex", "dep:once_cell"]
 [dependencies]
 log = { version = "0.4.29", optional = true }
 tracing-log = { version = "0.2.0", optional = true }
-tracing-core = { version = "0.1.35", optional = true }
+tracing-core = { version = "0.1.36", optional = true }
 tracing-subscriber = { version = "0.3.20", features = ["env-filter", "json", "chrono", "tracing-log"], optional = true }
 tracing-appender = { version = "0.2.4", optional = true }
 config = { version = "0.15.19", optional = true }
 chrono = { version = "0.4.42", optional = true }
 regex = { version = "1.12.2", optional = true }
 serde = { version = "1.0.228", optional = true }
-serde_json = { version = "1.0.145", optional = true }
+serde_json = { version = "1.0.147", optional = true }
 actix-web = { version = "4.12.1", optional = true }
 sea-orm = { version = "1.1.19", optional = true }
 thiserror = { version = "2.0.17", optional = true }
@@ -36,7 +36,7 @@ once_cell = { version = "1.21.3", optional = true }
 validator = { version = "0.20.0", optional = true }
 reqwest = { version = "0.12.25", features = ["multipart", "json", "stream"], optional = true }
 utoipa = { version = "5.4.0", optional = true }
-wheel-rs = { version = "1.0.0", optional = true }
+wheel-rs = { version = "1.0.1", optional = true }
 [patch.crates-io]
 wheel-rs = { path = "../wheel-rs", optional = true }
 
