@@ -52,6 +52,21 @@ impl<E> Ro<E> {
         }
     }
 
+    /// # 判断结果是否为成功
+    ///
+    /// ## 返回值
+    /// 如果结果为Success，则返回true；否则返回false
+    pub fn is_success(&self) -> bool {
+        self.result == RoResult::Success
+    }
+    /// # 判断结果是否为失败
+    ///
+    /// ## 返回值
+    /// 如果结果不为Success，则返回true；否则返回false
+    pub fn is_fail(&self) -> bool {
+        self.result != RoResult::Success
+    }
+
     /// # 创建一个成功的响应对象
     ///
     /// ## 参数

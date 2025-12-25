@@ -13,7 +13,7 @@ use utoipa::ToSchema;
 /// - IllegalArgument: 参数错误
 /// - Warn: 警告状态
 /// - Fail: 操作失败
-#[derive(ToSchema, Debug, Copy, Clone)]
+#[derive(ToSchema, Debug, Copy, Clone, PartialEq)]
 pub enum RoResult {
     Success,
     IllegalArgument,
