@@ -56,14 +56,15 @@ impl<E> Ro<E> {
     ///
     /// ## 返回值
     /// 如果结果为Success，则返回true；否则返回false
-    pub fn is_success(&self) -> bool {
+    pub fn is_ok(&self) -> bool {
         self.result == RoResult::Success
     }
-    /// # 判断结果是否为失败
+
+    /// # 判断结果是否有错误
     ///
     /// ## 返回值
     /// 如果结果不为Success，则返回true；否则返回false
-    pub fn is_fail(&self) -> bool {
+    pub fn is_err(&self) -> bool {
         self.result != RoResult::Success
     }
 
@@ -80,10 +81,10 @@ impl<E> Ro<E> {
 
     /// # 创建一个非法参数的响应对象
     ///
-    /// ##  参数
+    /// ## 参数
     /// * `msg` - 错误消息
     ///
-    /// ##  返回值
+    /// ## 返回值
     /// 返回一个结果为IllegalArgument的Ro实例
     pub fn illegal_argument(msg: String) -> Self {
         Self::new(RoResult::IllegalArgument, msg)
@@ -117,7 +118,7 @@ impl<E> Ro<E> {
     /// * `msg` - 新的消息内容
     ///
     /// ## 返回值
-    /// 返回更新消息后的本实例
+    /// 返回更新消息后的本实例（支持链式调用）
     pub fn msg(mut self, msg: String) -> Self {
         self.msg = msg;
         self
@@ -129,7 +130,7 @@ impl<E> Ro<E> {
     /// * `extra` - 可选的额外数据
     ///
     /// ## 返回值
-    /// 返回更新额外数据后的本实例
+    /// 返回更新额外数据后的本实例（支持链式调用）
     pub fn extra(mut self, extra: Option<E>) -> Self {
         self.extra = extra;
         self
@@ -141,7 +142,7 @@ impl<E> Ro<E> {
     /// * `detail` - 可选的详细信息
     ///
     /// ## 返回值
-    /// 返回更新详细信息后的本实例
+    /// 返回更新详细信息后的本实例（支持链式调用）
     pub fn detail(mut self, detail: Option<String>) -> Self {
         self.detail = detail;
         self
@@ -153,7 +154,7 @@ impl<E> Ro<E> {
     /// * `code` - 可选的编码
     ///
     /// ## 返回值
-    /// 返回更新编码后的本实例
+    /// 返回更新编码后的本实例（支持链式调用）
     pub fn code(mut self, code: Option<String>) -> Self {
         self.code = code;
         self
@@ -163,6 +164,8 @@ impl<E> Ro<E> {
     ///
     /// ## 返回值
     /// 返回包含额外数据的Option
+    ///
+    /// 注意：此方法会消费当前实例
     pub fn get_extra(self) -> Option<E> {
         self.extra
     }
