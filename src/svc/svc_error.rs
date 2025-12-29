@@ -2,6 +2,7 @@
 use crate::api::ApiError;
 #[cfg(feature = "crud")]
 use crate::svc::svc_error::SvcError::{DeleteViolateConstraint, DuplicateKey};
+#[cfg(feature = "crud")]
 use log::error;
 #[cfg(feature = "crud")]
 use once_cell::sync::Lazy;

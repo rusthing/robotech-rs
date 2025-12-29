@@ -4,7 +4,7 @@ use crate::ro::Ro;
 use crate::svc::svc_error::SvcError;
 use actix_web::http::StatusCode;
 use actix_web::{HttpResponse, ResponseError};
-use log::{error, warn};
+use log::warn;
 #[cfg(feature = "crud")]
 use sea_orm::DbErr;
 use thiserror::Error;
