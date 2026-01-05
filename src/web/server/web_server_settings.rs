@@ -15,6 +15,10 @@ pub struct WebServerSettings {
     #[serde(with = "vec_option_serde", default = "listen_default")]
     pub listen: Option<Vec<String>>,
 
+    /// CORS配置
+    #[serde(default)]
+    pub cors: Option<CorsConfig>,
+
     /// 是否支持健康检查
     #[serde(default = "support_health_check_default")]
     pub support_health_check: bool,
@@ -26,9 +30,21 @@ impl Default for WebServerSettings {
             bind: bind_default(),
             port: port_default(),
             listen: listen_default(),
+            cors: None,
             support_health_check: support_health_check_default(),
         }
     }
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone)]
+#[serde(rename_all = "kebab-case")]
+pub struct CorsConfig {
+    pub allowed_origins: Vec<String>,
+    pub allowed_methods: Vec<String>,
+    pub allowed_headers: Vec<String>,
+    pub expose_headers: Option<Vec<String>>,
+    pub max_age: Option<usize>,
+    pub supports_credentials: Option<bool>,
 }
 
 fn bind_default() -> Option<Vec<String>> {

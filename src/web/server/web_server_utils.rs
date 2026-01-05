@@ -1,4 +1,4 @@
-use crate::web_server::WebServerSettings;
+use crate::web::WebServerSettings;
 use actix_web::middleware::Logger;
 use actix_web::{get, App, HttpServer, Responder};
 use log::info;
@@ -21,6 +21,7 @@ pub async fn start_web_server(
     let mut server = HttpServer::new(move || {
         let mut app = App::new().wrap(Logger::default()).configure(configure);
         if support_health_check {
+            info!("支持健康检查");
             app = app.service(health);
         }
         app

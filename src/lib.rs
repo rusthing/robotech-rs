@@ -2,8 +2,6 @@
 pub mod api;
 #[cfg(feature = "base")]
 pub mod cst;
-#[cfg(feature = "web")]
-pub mod ctrl;
 #[cfg(feature = "crud")]
 pub mod db;
 #[cfg(feature = "base")]
@@ -19,4 +17,4 @@ pub mod settings;
 #[cfg(any(feature = "web", feature = "crud"))]
 pub mod svc;
 #[cfg(feature = "web")]
-pub mod web_server;
+pub mod web;
