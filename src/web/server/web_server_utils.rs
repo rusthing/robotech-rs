@@ -1,6 +1,7 @@
+use crate::web::cors::cors_utils::build_cors;
 use crate::web::WebServerSettings;
 use actix_web::middleware::Logger;
-use actix_web::{get, App, HttpServer, Responder};
+use actix_web::{get, web, App, HttpServer, Responder};
 use log::info;
 
 #[get("/health")]
@@ -10,20 +11,26 @@ async fn health() -> impl Responder {
 
 pub async fn start_web_server(
     web_server_settings: WebServerSettings,
-    configure: fn(&mut actix_web::web::ServiceConfig),
+    configure: fn(&mut web::ServiceConfig),
 ) {
     info!("创建Web服务器({:?})并运行...", web_server_settings);
 
     let port = web_server_settings.port.unwrap();
     let listens = web_server_settings.listen.unwrap_or_default();
+    let cors_settings = web_server_settings.cors.clone();
     let support_health_check = web_server_settings.support_health_check;
 
     let mut server = HttpServer::new(move || {
-        let mut app = App::new().wrap(Logger::default()).configure(configure);
+        let mut app = App::new()
+            .wrap(Logger::default())
+            .wrap(build_cors(&cors_settings))
+            .configure(configure);
+
         if support_health_check {
             info!("支持健康检查");
             app = app.service(health);
         }
+
         app
     });
 

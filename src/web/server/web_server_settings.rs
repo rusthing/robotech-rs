@@ -1,3 +1,4 @@
+use crate::web::cors::cors_settings::CorsSettings;
 use serde::{Deserialize, Serialize};
 use wheel_rs::serde::vec_option_serde;
 
@@ -17,7 +18,7 @@ pub struct WebServerSettings {
 
     /// CORS配置
     #[serde(default)]
-    pub cors: Option<CorsConfig>,
+    pub cors: Option<CorsSettings>,
 
     /// 是否支持健康检查
     #[serde(default = "support_health_check_default")]
@@ -36,17 +37,6 @@ impl Default for WebServerSettings {
     }
 }
 
-#[derive(Debug, Serialize, Deserialize, Clone)]
-#[serde(rename_all = "kebab-case")]
-pub struct CorsConfig {
-    pub allowed_origins: Vec<String>,
-    pub allowed_methods: Vec<String>,
-    pub allowed_headers: Vec<String>,
-    pub expose_headers: Option<Vec<String>>,
-    pub max_age: Option<usize>,
-    pub supports_credentials: Option<bool>,
-}
-
 fn bind_default() -> Option<Vec<String>> {
     None
 }
@@ -57,6 +47,7 @@ fn port_default() -> Option<u16> {
 fn listen_default() -> Option<Vec<String>> {
     None
 }
+
 fn support_health_check_default() -> bool {
     true
 }
