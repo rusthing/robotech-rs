@@ -2,7 +2,8 @@ use crate::web::cors::cors_utils::build_cors;
 use crate::web::WebServerConfig;
 use actix_web::middleware::Logger;
 use actix_web::{get, web, App, HttpServer, Responder};
-use log::info;
+use log::{debug, info};
+use std::sync::Arc;
 
 #[get("/health")]
 async fn health() -> impl Responder {
@@ -17,10 +18,12 @@ pub async fn start_web_server(
 
     let port = web_server_config.port.unwrap();
     let listens = web_server_config.listen.unwrap_or_default();
-    let cors_config = web_server_config.cors.clone();
+    let cors_config = Arc::new(web_server_config.cors);
     let support_health_check = web_server_config.support_health_check;
 
     let mut server = HttpServer::new(move || {
+        debug!("HttpServer创建worker，并拥有独立的app...");
+        let cors_config = cors_config.clone();
         let mut app = App::new()
             .wrap(Logger::default())
             .wrap(build_cors(&cors_config))
@@ -31,6 +34,7 @@ pub async fn start_web_server(
             app = app.service(health);
         }
 
+        debug!("HttpServer创建worker，并配置完成app.");
         app
     });
 
