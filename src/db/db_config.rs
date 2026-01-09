@@ -11,7 +11,7 @@ use wheel_rs::serde::log_filter_option_serde;
 /// 用于存储数据库连接所需的各种配置参数
 #[derive(Debug, Serialize, Deserialize, Clone)]
 #[serde(rename_all = "kebab-case")]
-pub struct DbSettings {
+pub struct DbConfig {
     /// 数据库连接URL
     ///
     /// 例如: postgres://user:password@localhost/database
@@ -25,7 +25,7 @@ pub struct DbSettings {
     pub log_level: Option<LevelFilter>,
 }
 
-impl Default for DbSettings {
+impl Default for DbConfig {
     fn default() -> Self {
         db_default()
     }
@@ -47,9 +47,9 @@ fn log_level_default() -> Option<LevelFilter> {
 
 /// # 数据库配置默认值
 ///
-/// 创建并返回一个具有默认值的 [DbSettings] 实例
-fn db_default() -> DbSettings {
-    DbSettings {
+/// 创建并返回一个具有默认值的 [DbConfig] 实例
+fn db_default() -> DbConfig {
+    DbConfig {
         url: url_default(),
         log_level: log_level_default(),
     }

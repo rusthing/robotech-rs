@@ -84,7 +84,7 @@ API Response Fields Explanation:
 ### Build Project
 
 ```bash
-# Build with default features (api)
+# Build with default features (api_client)
 cargo build
 
 # Build with web server features
@@ -110,7 +110,7 @@ cargo run --features web,crud
 - `cst`: Constants used across the application
 - `ctrl`: Controllers handling HTTP requests
 - `svc`: Business logic services
-- `settings`: Configuration management
+- `config`: Configuration management
 - `web_server`: Web server implementation
 - `db`: Database operations
 - `log`: Logging functionality

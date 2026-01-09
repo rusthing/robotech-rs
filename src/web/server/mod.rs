@@ -1,2 +1,2 @@
 pub mod web_server_utils;
-pub mod web_server_settings;
+pub mod web_server_config;

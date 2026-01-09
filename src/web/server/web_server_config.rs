@@ -1,10 +1,10 @@
-use crate::web::cors::cors_settings::CorsSettings;
+use crate::web::cors::cors_config::CorsConfig;
 use serde::{Deserialize, Serialize};
 use wheel_rs::serde::vec_option_serde;
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
 #[serde(rename_all = "kebab-case")]
-pub struct WebServerSettings {
+pub struct WebServerConfig {
     /// 绑定的IP地址
     #[serde(with = "vec_option_serde", default = "bind_default")]
     pub bind: Option<Vec<String>>,
@@ -16,18 +16,18 @@ pub struct WebServerSettings {
     #[serde(with = "vec_option_serde", default = "listen_default")]
     pub listen: Option<Vec<String>>,
 
-    /// CORS配置
+    /// CORS配置(不设置默认不开启)
     #[serde(default)]
-    pub cors: Option<CorsSettings>,
+    pub cors: Option<CorsConfig>,
 
     /// 是否支持健康检查
     #[serde(default = "support_health_check_default")]
     pub support_health_check: bool,
 }
 
-impl Default for WebServerSettings {
+impl Default for WebServerConfig {
     fn default() -> Self {
-        WebServerSettings {
+        WebServerConfig {
             bind: bind_default(),
             port: port_default(),
             listen: listen_default(),

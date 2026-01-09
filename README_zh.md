@@ -81,7 +81,7 @@ features = ["web", "crud"]
 ### 构建项目
 
 ```bash
-# 构建默认 features（api）
+# 构建默认 features（api_client）
 cargo build
 
 # 构建 web 服务器功能
@@ -107,7 +107,7 @@ cargo run --features web,crud
 - `cst`: 应用中使用的常量
 - `ctrl`: 处理HTTP请求的控制器
 - `svc`: 业务逻辑服务
-- `settings`: 配置管理
+- `config`: 配置管理
 - `web_server`: Web服务器实现
 - `db`: 数据库操作
 - `log`: 日志功能

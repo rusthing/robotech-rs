@@ -1,6 +1,6 @@
-use crate::api::api_settings::ApiSettings;
-use crate::api::ApiError;
-use crate::api::ApiError::{
+use crate::api_client::api_client_config::ApiClientConfig;
+use crate::api_client::ApiClientError;
+use crate::api_client::ApiClientError::{
     BytesParseError, JsonParseError, RequestError, ResponseError, ResponseStatusError,
 };
 use crate::cst::user_id_cst::USER_ID_HEADER_NAME;
@@ -11,18 +11,18 @@ use std::sync::LazyLock;
 pub static REQWEST_CLIENT: LazyLock<Client> = LazyLock::new(|| Client::new());
 
 #[derive(Debug)]
-pub struct CrudApi {
-    pub api_settings: ApiSettings,
+pub struct CrudApiClient {
+    pub api_client_config: ApiClientConfig,
 }
 
-impl CrudApi {
+impl CrudApiClient {
     /// 执行GET请求的通用方法
     pub async fn get(
         &self,
         path: &str,
         current_user_id: u64,
-    ) -> Result<Ro<serde_json::Value>, ApiError> {
-        let url = format!("{}{}", self.api_settings.base_url, path);
+    ) -> Result<Ro<serde_json::Value>, ApiClientError> {
+        let url = format!("{}{}", self.api_client_config.base_url, path);
         let urn = format!("GET:{}", url);
         log::debug!("{}....", urn);
         let response = REQWEST_CLIENT
@@ -51,8 +51,12 @@ impl CrudApi {
     }
 
     /// 执行GET请求的通用方法，返回bytes
-    pub async fn get_bytes(&self, path: &str, current_user_id: u64) -> Result<Vec<u8>, ApiError> {
-        let url = format!("{}{}", self.api_settings.base_url, path);
+    pub async fn get_bytes(
+        &self,
+        path: &str,
+        current_user_id: u64,
+    ) -> Result<Vec<u8>, ApiClientError> {
+        let url = format!("{}{}", self.api_client_config.base_url, path);
         let urn = format!("GET:{}", url);
         log::debug!("{}....", urn);
         let response = REQWEST_CLIENT
@@ -82,8 +86,8 @@ impl CrudApi {
         path: &str,
         body: &B,
         current_user_id: u64,
-    ) -> Result<Ro<serde_json::Value>, ApiError> {
-        let url = format!("{}{}", self.api_settings.base_url, path);
+    ) -> Result<Ro<serde_json::Value>, ApiClientError> {
+        let url = format!("{}{}", self.api_client_config.base_url, path);
         let urn = format!("POST:{}", url);
         log::debug!("{}....", urn);
         let response = REQWEST_CLIENT
@@ -117,8 +121,8 @@ impl CrudApi {
         path: &str,
         body: &B,
         current_user_id: u64,
-    ) -> Result<Ro<serde_json::Value>, ApiError> {
-        let url = format!("{}{}", self.api_settings.base_url, path);
+    ) -> Result<Ro<serde_json::Value>, ApiClientError> {
+        let url = format!("{}{}", self.api_client_config.base_url, path);
         let urn = format!("PUT:{}", url);
         log::debug!("{}....", urn);
         let response = REQWEST_CLIENT
@@ -151,8 +155,8 @@ impl CrudApi {
         &self,
         path: &str,
         current_user_id: u64,
-    ) -> Result<Ro<serde_json::Value>, ApiError> {
-        let url = format!("{}{}", self.api_settings.base_url, path);
+    ) -> Result<Ro<serde_json::Value>, ApiClientError> {
+        let url = format!("{}{}", self.api_client_config.base_url, path);
         let urn = format!("DELETE:{}", url);
         log::debug!("{}....", urn);
         let response = REQWEST_CLIENT
@@ -185,8 +189,8 @@ impl CrudApi {
         path: &str,
         form: reqwest::multipart::Form,
         current_user_id: u64,
-    ) -> Result<Ro<serde_json::Value>, ApiError> {
-        let url = format!("{}{}", self.api_settings.base_url, path);
+    ) -> Result<Ro<serde_json::Value>, ApiClientError> {
+        let url = format!("{}{}", self.api_client_config.base_url, path);
         let urn = format!("MULTIPART POST:{}", url);
         log::debug!("{}....", urn);
         // 请求并获取响应

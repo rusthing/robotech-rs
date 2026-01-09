@@ -8,7 +8,7 @@ use serde::{Deserialize, Serialize};
 /// 用于存储API所需的各种配置参数
 #[derive(Debug, Serialize, Deserialize, Clone)]
 #[serde(rename_all = "kebab-case")]
-pub struct ApiSettings {
+pub struct ApiClientConfig {
     /// API请求的基础URL
     ///
     /// 例如: http://127.0.0.1:8080

@@ -3,7 +3,10 @@ use wheel_rs::serde::vec_option_serde;
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
 #[serde(rename_all = "kebab-case")]
-pub struct CorsSettings {
+pub struct CorsConfig {
+    /// # 是否启用 CORS(不设置此项默认为true)
+    #[serde(default = "enabled_default")]
+    pub enabled: bool,
     /// # 允许哪些来源（域名）
     /// ## 作用与原理
     /// - 控制浏览器允许哪些源(网站)的前端代码可以向此服务器发出请求
@@ -87,6 +90,9 @@ pub struct CorsSettings {
     pub supports_credentials: Option<bool>,
 }
 
+fn enabled_default() -> bool {
+    true
+}
 fn allowed_origins_default() -> Option<Vec<String>> {
     None
 }

@@ -10,7 +10,7 @@
 /// - `IoError`: 表示输入输出相关的错误，如文件读写失败
 /// - `DatabaseError`: 表示底层数据库操作发生的错误
 #[derive(Debug, thiserror::Error)]
-pub enum ApiError {
+pub enum ApiClientError {
     #[error("文件读取错误: {0}")]
     FileError(String, #[source] std::io::Error),
     #[error("请求失败:{0}")]

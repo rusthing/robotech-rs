@@ -1,5 +1,5 @@
-#[cfg(feature = "api")]
-use crate::api::ApiError;
+#[cfg(feature = "api-client")]
+use crate::api_client::ApiClientError;
 #[cfg(feature = "crud")]
 use crate::svc::svc_error::SvcError::{DeleteViolateConstraint, DuplicateKey};
 #[cfg(feature = "crud")]
@@ -66,9 +66,9 @@ pub enum SvcError {
     #[cfg(feature = "crud")]
     #[error("数据库错误: {0}")]
     DatabaseError(#[from] DbErr),
-    #[cfg(feature = "api")]
+    #[cfg(feature = "api-client")]
     #[error("API调用错误, {0}")]
-    ApiError(#[from] ApiError),
+    ApiError(#[from] ApiClientError),
 }
 
 /// # 处理数据库错误，并转换为服务层错误

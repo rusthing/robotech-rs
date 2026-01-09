@@ -1,4 +1,4 @@
-use crate::db::DbSettings;
+use crate::db::DbConfig;
 use log::info;
 use sea_orm::{ConnectOptions, Database, DatabaseConnection};
 use std::sync::OnceLock;
@@ -13,17 +13,17 @@ pub static DB_CONN: OnceLock<DatabaseConnection> = OnceLock::new();
 ///
 /// # 参数
 ///
-/// * `db_settings` - 数据库配置信息，包含连接数据库所需的信息
+/// * `db_config` - 数据库配置信息，包含连接数据库所需的信息
 ///
 /// # Panics
 ///
 /// * 如果数据库连接失败，程序将 panic
 /// * 如果无法设置全局数据库连接，程序将 panic
-pub async fn init_db(db_settings: DbSettings) {
+pub async fn init_db(db_config: DbConfig) {
     info!("init database...");
 
     // 获取数据库配置
-    let mut opt = ConnectOptions::new(db_settings.url);
+    let mut opt = ConnectOptions::new(db_config.url);
 
     // 设置sql日志按什么级别输出
     opt.sqlx_logging_level(log::LevelFilter::Trace);

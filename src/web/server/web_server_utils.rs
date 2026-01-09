@@ -1,5 +1,5 @@
 use crate::web::cors::cors_utils::build_cors;
-use crate::web::WebServerSettings;
+use crate::web::WebServerConfig;
 use actix_web::middleware::Logger;
 use actix_web::{get, web, App, HttpServer, Responder};
 use log::info;
@@ -10,20 +10,20 @@ async fn health() -> impl Responder {
 }
 
 pub async fn start_web_server(
-    web_server_settings: WebServerSettings,
+    web_server_config: WebServerConfig,
     configure: fn(&mut web::ServiceConfig),
 ) {
-    info!("创建Web服务器({:?})并运行...", web_server_settings);
+    info!("创建Web服务器({:?})并运行...", web_server_config);
 
-    let port = web_server_settings.port.unwrap();
-    let listens = web_server_settings.listen.unwrap_or_default();
-    let cors_settings = web_server_settings.cors.clone();
-    let support_health_check = web_server_settings.support_health_check;
+    let port = web_server_config.port.unwrap();
+    let listens = web_server_config.listen.unwrap_or_default();
+    let cors_config = web_server_config.cors.clone();
+    let support_health_check = web_server_config.support_health_check;
 
     let mut server = HttpServer::new(move || {
         let mut app = App::new()
             .wrap(Logger::default())
-            .wrap(build_cors(&cors_settings))
+            .wrap(build_cors(&cors_config))
             .configure(configure);
 
         if support_health_check {
@@ -35,7 +35,7 @@ pub async fn start_web_server(
     });
 
     // 绑定地址
-    if let Some(binds) = web_server_settings.bind {
+    if let Some(binds) = web_server_config.bind {
         for bind in binds {
             server = server
                 .bind((bind.clone(), port))

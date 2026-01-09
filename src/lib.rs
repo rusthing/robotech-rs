@@ -1,5 +1,5 @@
-#[cfg(feature = "api")]
-pub mod api;
+#[cfg(feature = "api-client")]
+pub mod api_client;
 #[cfg(feature = "base")]
 pub mod cst;
 #[cfg(feature = "crud")]
@@ -13,7 +13,7 @@ pub mod log;
 #[cfg(feature = "base")]
 pub mod ro;
 #[cfg(feature = "svr")]
-pub mod settings;
+pub mod config;
 #[cfg(any(feature = "web", feature = "crud"))]
 pub mod svc;
 #[cfg(feature = "web")]
