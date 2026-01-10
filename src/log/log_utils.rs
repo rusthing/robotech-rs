@@ -1,6 +1,7 @@
 use crate::env::ENV;
 use log::info;
 use std::{env, fs};
+use std::sync::OnceLock;
 use tracing_core::{Event, Level, Subscriber};
 use tracing_log::NormalizeEvent;
 use tracing_subscriber::fmt::format::{DefaultFields, Writer};
@@ -10,6 +11,10 @@ use tracing_subscriber::layer::SubscriberExt;
 use tracing_subscriber::registry::LookupSpan;
 use tracing_subscriber::util::SubscriberInitExt;
 use tracing_subscriber::{fmt, EnvFilter};
+
+/// 日志文件输出锁
+/// 解决锁在初始化方法结束后被提前释放导致后续日志不能输出
+static LOG_GUARD: OnceLock<tracing_appender::non_blocking::WorkerGuard> = OnceLock::new();
 
 struct CustomFormatter {
     timer_format: String,
@@ -89,7 +94,7 @@ where
 /// 初始化日志
 pub fn init_log() -> Result<(), std::io::Error> {
     // 创建环境过滤器，支持 RUST_LOG 环境变量
-    let env_filter = EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new("info"));
+    let env_filter = EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new("debug"));
 
     // 控制台输出层
     let console_layer = tracing_subscriber::fmt::layer()
@@ -105,7 +110,9 @@ pub fn init_log() -> Result<(), std::io::Error> {
     fs::create_dir_all(log_dir.as_path())?;
     let log_file_name_prefix = format!("{}.log", env.app_file_name);
     let file_appender = tracing_appender::rolling::hourly(log_dir, log_file_name_prefix);
-    let (non_blocking, _guard) = tracing_appender::non_blocking(file_appender);
+    let (non_blocking, guard) = tracing_appender::non_blocking(file_appender);
+    // 解决锁在初始化方法结束后被提前释放导致后续日志不能输出
+    LOG_GUARD.set(guard).map_err(|_| std::io::Error::new(std::io::ErrorKind::Other, "Failed to set guard"))?;
     let file_layer = fmt::layer()
         .with_timer(ChronoLocal::new("%Y-%m-%d %H:%M:%S%.6f".to_string()))
         .with_file(true)
@@ -118,7 +125,7 @@ pub fn init_log() -> Result<(), std::io::Error> {
         .with(console_layer) // 控制台输出层
         .with(file_layer) // 文件输出层
         .init();
-    info!("日志初始化成功");
+    info!("初始化日志成功");
 
     Ok(())
 }
