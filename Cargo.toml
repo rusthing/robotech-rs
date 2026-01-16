@@ -1,6 +1,6 @@
 [package]
 name = "robotech"
-version = "1.4.0"
+version = "1.5.0"
 edition = "2024"
 authors = ["zbz"]
 keywords = ["crud", "microservice", "service", "RESTful"]
@@ -25,6 +25,7 @@ tracing-core = { version = "0.1.36", optional = true }
 tracing-subscriber = { version = "0.3.22", features = ["env-filter", "json", "chrono", "tracing-log"], optional = true }
 tracing-appender = { version = "0.2.4", optional = true }
 config = { version = "0.15.19", optional = true }
+notify = "8.2.0"
 chrono = { version = "0.4.43", optional = true }
 regex = { version = "1.12.2", optional = true }
 serde = { version = "1.0.228", optional = true }

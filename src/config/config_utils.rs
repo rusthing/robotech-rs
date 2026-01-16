@@ -1,17 +1,17 @@
 use crate::env::ENV;
-use config::Config;
+use config::builder::DefaultState;
+use config::{Config, ConfigBuilder, ConfigError};
+use notify::{RecommendedWatcher, RecursiveMode, Watcher};
 use serde::Deserialize;
 
-pub fn get_config<'de, T: Deserialize<'de>>(path: Option<String>) -> T {
+pub fn parse_config<'de, T: Deserialize<'de>>(
+    path: Option<String>,
+) -> Result<(T, Vec<String>), ConfigError> {
     let config = Config::builder();
-    let config = if path.is_some() {
-        let path = path.unwrap();
-        // 判断文件是否存在
-        if !std::path::Path::new(&path).exists() {
-            panic!("The specified configuration file does not exist");
-        }
+    let config = if let Some(path) = path {
         // 如果已指定配置文件路径
-        config.add_source(config::File::with_name(path.as_str()).required(false))
+        let config_file_path = config::File::with_name(path.as_str());
+        (config.add_source(config_file_path), vec![path])
     } else {
         // 如果未指定配置文件路径
         let env = ENV.get().unwrap();
@@ -21,13 +21,23 @@ pub fn get_config<'de, T: Deserialize<'de>>(path: Option<String>) -> T {
             .to_string_lossy()
             .to_string();
 
+        // 创建通道接收事件
+        let (tx, rx) = std::sync::mpsc::channel();
+
+        // 创建推荐的 watcher
+        let mut watcher: RecommendedWatcher = notify::recommended_watcher(tx)?;
+
+        // 监听文件（非递归）
+        watcher.watch("config.toml", RecursiveMode::NonRecursive)?;
+
         // Add in `./xxx.toml`, `./xxx.yml`, `./xxx.json`, `./xxx.ini`, `./xxx.ron`
-        config
-            .add_source(config::File::with_name(format!("{}.toml", path).as_str()).required(false))
-            .add_source(config::File::with_name(format!("{}.yml", path).as_str()).required(false))
-            .add_source(config::File::with_name(format!("{}.json", path).as_str()).required(false))
-            .add_source(config::File::with_name(format!("{}.ini", path).as_str()).required(false))
-            .add_source(config::File::with_name(format!("{}.ron", path).as_str()).required(false))
+        let config_file_path = format!("{}.toml", path).as_str();
+        // 判断文件是否存在
+        add_source(&config, format!("{}.toml", path).as_str());
+        add_source(&config, format!("{}.yml", path).as_str());
+        add_source(&config, format!("{}.json", path).as_str());
+        add_source(&config, format!("{}.ini", path).as_str());
+        add_source(&config, format!("{}.ron", path).as_str());
     };
     // 后续添加环境变量，以覆盖配置文件中的设置
     let config = config
@@ -38,4 +48,10 @@ pub fn get_config<'de, T: Deserialize<'de>>(path: Option<String>) -> T {
         .unwrap();
 
     config.try_deserialize::<T>().unwrap()
+}
+
+fn add_source(config: &ConfigBuilder<DefaultState>, config_file_path: &str) {
+    if !std::path::Path::new(config_file_path).exists() {
+        let _ = config.add_source(config::File::with_name(config_file_path).required(false));
+    }
 }
