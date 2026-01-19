@@ -1,26 +1,16 @@
-/// # 自定义服务层的错误枚举
+/// # 自定义配置错误的枚举
 ///
-/// 该枚举定义了服务层可能遇到的各种错误类型，包括数据未找到、重复键约束违反、
-/// IO错误和数据库错误。这些错误类型用于在服务层统一处理各种异常情况，
+/// 该枚举定义了配置模块可能遇到的各种错误类型，包括文件系统监听错误和配置构建错误。
+/// 这些错误类型用于在配置加载和处理过程中统一处理各种异常情况，
 /// 并提供清晰的错误信息反馈给调用方。
 ///
 /// ## 错误类型说明
-/// - `NotFound`: 表示请求的数据未找到，通常用于查询操作
-/// - `DuplicateKey`: 表示违反了唯一性约束，如重复的用户名或邮箱
-/// - `IoError`: 表示输入输出相关的错误，如文件读写失败
-/// - `DatabaseError`: 表示底层数据库操作发生的错误
+/// - `NotifyError`: 表示文件系统监听相关的错误，如无法监听配置文件变化
+/// - `BuildError`: 表示配置构建过程中的错误，如解析配置文件失败
 #[derive(Debug, thiserror::Error)]
 pub enum ConfigError {
-    #[error("文件读取错误: {0}")]
-    FileError(String, #[source] std::io::Error),
-    #[error("请求失败:{0}")]
-    RequestError(String, #[source] reqwest::Error),
-    #[error("获取响应失败: {0}")]
-    ResponseError(String, #[source] reqwest::Error),
-    #[error("响应状态错误: {0}->{1}")]
-    ResponseStatusError(String, String),
-    #[error("按Json格式解析响应失败: {0}")]
-    JsonParseError(String, #[source] serde_json::Error),
-    #[error("按bytes格式解析响应失败: {0}")]
-    BytesParseError(String, #[source] reqwest::Error),
+    #[error("通知错误: {0}")]
+    NotifyError(#[from] notify::Error),
+    #[error("构建配置错误: {0}")]
+    BuildError(#[from] config::ConfigError),
 }
