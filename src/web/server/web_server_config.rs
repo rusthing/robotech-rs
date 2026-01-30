@@ -1,5 +1,5 @@
-use crate::web::cors::cors_config::CorsConfig;
-use crate::web::https::https_config::HttpsConfig;
+use crate::web::cors::CorsConfig;
+use crate::web::https::HttpsConfig;
 use serde::{Deserialize, Serialize};
 use wheel_rs::serde::vec_option_serde;
 

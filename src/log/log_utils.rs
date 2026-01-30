@@ -1,7 +1,7 @@
 use crate::env::ENV;
 use log::info;
-use std::{env, fs};
 use std::sync::OnceLock;
+use std::{env, fs};
 use tracing_core::{Event, Level, Subscriber};
 use tracing_log::NormalizeEvent;
 use tracing_subscriber::fmt::format::{DefaultFields, Writer};
@@ -92,7 +92,7 @@ where
 }
 
 /// 初始化日志
-pub fn init_log() -> Result<(), std::io::Error> {
+pub fn init_log() {
     // 创建环境过滤器，支持 RUST_LOG 环境变量
     let env_filter = EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new("debug"));
 
@@ -107,12 +107,12 @@ pub fn init_log() -> Result<(), std::io::Error> {
     // 文件输出层
     let env = ENV.get().unwrap();
     let log_dir = env.app_dir.join("log");
-    fs::create_dir_all(log_dir.as_path())?;
+    fs::create_dir_all(log_dir.as_path()).expect("创建日志目录失败");
     let log_file_name_prefix = format!("{}.log", env.app_file_name);
     let file_appender = tracing_appender::rolling::hourly(log_dir, log_file_name_prefix);
     let (non_blocking, guard) = tracing_appender::non_blocking(file_appender);
     // 解决锁在初始化方法结束后被提前释放导致后续日志不能输出
-    LOG_GUARD.set(guard).map_err(|_| std::io::Error::new(std::io::ErrorKind::Other, "Failed to set guard"))?;
+    LOG_GUARD.set(guard).expect("设置日志文件输出锁失败");
     let file_layer = fmt::layer()
         .with_timer(ChronoLocal::new("%Y-%m-%d %H:%M:%S%.6f".to_string()))
         .with_file(true)
@@ -126,6 +126,4 @@ pub fn init_log() -> Result<(), std::io::Error> {
         .with(file_layer) // 文件输出层
         .init();
     info!("初始化日志成功");
-
-    Ok(())
 }

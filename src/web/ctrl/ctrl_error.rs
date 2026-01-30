@@ -1,7 +1,7 @@
 #[cfg(feature = "crud")]
-use crate::ro::ro_code::RO_CODE_WARNING_DELETE_VIOLATE_CONSTRAINT;
+use crate::ro::RO_CODE_WARNING_DELETE_VIOLATE_CONSTRAINT;
 use crate::ro::Ro;
-use crate::svc::svc_error::SvcError;
+use crate::svc::SvcError;
 use actix_web::http::StatusCode;
 use actix_web::{HttpResponse, ResponseError};
 use log::warn;

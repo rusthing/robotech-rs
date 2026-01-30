@@ -1,1 +1,2 @@
-pub mod svc_error;
+mod svc_error;
+pub use svc_error::*;

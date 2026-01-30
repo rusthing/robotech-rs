@@ -1,5 +1,5 @@
-use crate::web::cors::cors_utils::build_cors;
-use crate::web::WebServerConfig;
+use crate::web::cors::build_cors;
+use crate::web::server::WebServerConfig;
 use actix_http::body::MessageBody;
 use actix_service::{IntoServiceFactory, ServiceFactory};
 use actix_web::dev::{AppConfig, ServerHandle};

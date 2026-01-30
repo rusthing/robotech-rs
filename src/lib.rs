@@ -1,6 +1,8 @@
 #[cfg(feature = "api-client")]
 pub mod api_client;
 #[cfg(feature = "app")]
+pub mod args;
+#[cfg(feature = "app")]
 pub mod config;
 #[cfg(feature = "base")]
 pub mod cst;

@@ -4,14 +4,8 @@ use config::Config;
 pub fn build_app_config<'a, T: serde::Deserialize<'a>>(path: Option<String>) -> T {
     let mut config = Config::builder();
     if path.is_none() {
-        let Env {
-            app_dir,
-            app_file_name,
-        } = ENV.get().expect("ENV is None");
-        let temp_path = app_dir
-            .join(app_file_name.as_str())
-            .to_string_lossy()
-            .to_string();
+        let Env { app_file_path, .. } = ENV.get().expect("ENV is None");
+        let temp_path = app_file_path.to_string_lossy().to_string();
 
         // Add in `./xxx.toml`, `./xxx.yml`, `./xxx.json`, `./xxx.ini`, `./xxx.ron`
         config = config

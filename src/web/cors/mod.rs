@@ -1,2 +1,5 @@
-pub mod cors_config;
-pub mod cors_utils;
+mod cors_config;
+mod cors_utils;
+
+pub use cors_config::*;
+pub use cors_utils::*;
