@@ -1,4 +1,5 @@
 use crate::web::cors::cors_config::CorsConfig;
+use crate::web::https::https_config::HttpsConfig;
 use serde::{Deserialize, Serialize};
 use wheel_rs::serde::vec_option_serde;
 
@@ -8,19 +9,32 @@ pub struct WebServerConfig {
     /// 绑定的IP地址
     #[serde(with = "vec_option_serde", default = "bind_default")]
     pub bind: Option<Vec<String>>,
-    /// Web服务器的端口号
+    /// Web服务器的端口号(默认0)
     #[serde(default = "port_default")]
     pub port: Option<u16>,
 
-    /// 监听地址(ip+':'+port，例如127.0.0.1:80或\[::\]:80)
+    /// 监听地址列表(监听地址格式: ip+':'+port，例如127.0.0.1:80或\[::\]:80)
     #[serde(with = "vec_option_serde", default = "listen_default")]
     pub listen: Option<Vec<String>>,
+
+    /// 是否启用端口复用(默认关闭)
+    ///
+    /// * 启用端口复用是为了实现无缝重启服务器，发指令重启服务器时，会在新的服务器启动完成后，才会关闭旧的服务器，达到无缝重启服务器的效果
+    /// * 如果绑定监听的是随机端口，会自动禁用，因为随机端口新旧服务器的端口就不会冲突
+    /// * 如果启用，同时也会开启支持健康检查，因为重启时需要健康检查来判断新的服务器是否启动成功，才停止旧的服务器
+    #[serde(default = "reuse_port_default")]
+    pub reuse_port: bool,
+
+    /// 是否启用Https(默认关闭)
+    #[serde(default)]
+    pub https: Option<HttpsConfig>,
 
     /// CORS配置(不设置默认不开启)
     #[serde(default)]
     pub cors: Option<CorsConfig>,
 
     /// 是否支持健康检查
+    /// 如果绑定或监听随机端口，或是启用端口复用，都会自动启用支持健康检查，因为重启时需要健康检查来判断新的服务器是否启动成功，才停止旧的服务器
     #[serde(default = "support_health_check_default")]
     pub support_health_check: bool,
 }
@@ -31,6 +45,8 @@ impl Default for WebServerConfig {
             bind: bind_default(),
             port: port_default(),
             listen: listen_default(),
+            reuse_port: reuse_port_default(),
+            https: None,
             cors: None,
             support_health_check: support_health_check_default(),
         }
@@ -41,11 +57,15 @@ fn bind_default() -> Option<Vec<String>> {
     None
 }
 fn port_default() -> Option<u16> {
-    Some(0)
+    None
 }
 
 fn listen_default() -> Option<Vec<String>> {
     None
+}
+
+fn reuse_port_default() -> bool {
+    false
 }
 
 fn support_health_check_default() -> bool {

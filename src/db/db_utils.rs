@@ -22,6 +22,10 @@ pub static DB_CONN: OnceLock<DatabaseConnection> = OnceLock::new();
 pub async fn init_db(db_config: DbConfig) {
     info!("init database...");
 
+    if db_config.url.is_empty() {
+        panic!("尚未配置db.url(数据库连接字符串)项");
+    }
+
     // 获取数据库配置
     let mut opt = ConnectOptions::new(db_config.url);
 

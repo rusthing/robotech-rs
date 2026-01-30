@@ -1,6 +1,4 @@
-mod config_utils;
-mod config_error;
+mod app_config_utils;
 
 // 重新导出结构体，简化外部引用
-pub use config_utils::parse_config;
-pub use config_error::ConfigError;
+pub use app_config_utils::build_app_config;

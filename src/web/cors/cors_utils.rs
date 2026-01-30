@@ -5,7 +5,7 @@ use log::info;
 use std::str::FromStr;
 
 pub fn build_cors(cors_config: &Option<CorsConfig>) -> Cors {
-    info!("初始化CORS: {:?}", cors_config);
+    info!("构建CORS: {:?}", cors_config);
 
     if let Some(cors_config) = cors_config
         && cors_config.enabled
