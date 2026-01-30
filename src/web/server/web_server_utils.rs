@@ -8,7 +8,7 @@ use actix_web::{get, web, App, Error, HttpServer, Responder};
 use log::{debug, info};
 use socket2::{Domain, Socket, Type};
 use std::fmt::Debug;
-use std::net::{SocketAddr, TcpListener};
+use std::net::{IpAddr, SocketAddr, TcpListener};
 use std::sync::{Arc, RwLock};
 use std::time::{Duration, Instant};
 
@@ -52,8 +52,8 @@ pub async fn start_web_server(
             listen_binds.push((bind, port));
         }
     } else if listens.is_empty() {
-        // 如果bind和listen都未配置，默认绑定 "::"
-        listen_binds.push(("::".to_string(), port));
+        // 如果bind和listen都未配置，默认绑定 "0.0.0.0"
+        listen_binds.push(("0.0.0.0".to_string(), port));
     }
 
     // 解析监听地址
@@ -113,12 +113,6 @@ pub async fn start_web_server(
         app
     });
 
-    // 监听绑定地址
-    for (bind, port) in listen_binds {
-        http_server = http_server_bind(http_server, &bind, port);
-    }
-
-    // http_server.bind_rustls_0_23()
     let server = {
         debug!("获取 server_handle 写锁...");
         let mut server_handle_write_lock =
@@ -136,18 +130,19 @@ pub async fn start_web_server(
         }
 
         info!("启动Web服务器...");
-        // 获取绑定监听的地址
-        let addrs = http_server.addrs();
-        for addr in &addrs {
-            info!("服务器绑定监听地址: {}", addr);
+        // 监听绑定地址
+        for (bind, port) in &listen_binds {
             if reuse_port {
                 info!("支持端口复用");
-                let tcp_listener = create_reusable_listener(addr);
+                let tcp_listener = create_reusable_listener(bind, *port);
                 http_server = http_server
                     .listen(tcp_listener)
                     .expect("监听自定义tcp socket失败");
+            } else {
+                http_server = http_server_bind(http_server, bind, *port);
             }
         }
+
         let server = http_server.run();
         tokio::spawn(async move {
             let max_duration = Duration::from_secs(10);
@@ -159,16 +154,15 @@ pub async fn start_web_server(
             } else {
                 "http"
             };
-            let addr_ip = {
-                let ip_str = addrs[0].ip().to_string();
-                let final_ip = if ip_str == "::" || ip_str == "0.0.0.0" {
-                    "127.0.0.1"
-                } else {
-                    &ip_str
-                };
-                final_ip.to_string()
+            let (ip, port) = &listen_binds[0];
+            let ip = if ip == "0.0.0.0" {
+                "127.0.0.1"
+            } else if ip == "::" {
+                "[::1]"
+            } else {
+                &ip
             };
-            let health_url = format!("{}://{}:{}/health", protocol, addr_ip, addrs[0].port());
+            let health_url = format!("{}://{}:{}/health", protocol, ip, port);
             wait_for_server_ready(&health_url, max_duration, retry_interval).await;
             info!("启动Web服务器完成.");
 
@@ -190,7 +184,7 @@ pub async fn start_web_server(
 
 fn http_server_bind<F, I, S, B>(
     http_server: HttpServer<F, I, S, B>,
-    bind: &str,
+    ip: &str,
     port: u16,
 ) -> HttpServer<F, I, S, B>
 where
@@ -202,12 +196,17 @@ where
     S::Response: Into<actix_http::Response<B>> + 'static,
     B: MessageBody + 'static,
 {
+    info!("绑定地址: [{ip}]:{port}");
     http_server
-        .bind((bind.to_string(), port))
-        .expect(&format!("绑定地址失败: {}:{}", bind, port))
+        .bind((ip.to_string(), port))
+        .expect(&format!("绑定地址失败: {}:{}", ip, port))
 }
 
-fn create_reusable_listener(addr: &SocketAddr) -> TcpListener {
+fn create_reusable_listener(ip: &str, port: u16) -> TcpListener {
+    info!("创建绑定([{ip}]:{port})可复用端口的监听器...");
+    // 解析 IP 地址
+    let ip_addr: IpAddr = ip.parse().expect("无效的 IP 地址格式");
+    let addr: &SocketAddr = &SocketAddr::new(ip_addr, port);
     // 创建 socket
     let socket = Socket::new(
         Domain::for_address(*addr),
