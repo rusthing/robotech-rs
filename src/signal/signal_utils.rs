@@ -1,4 +1,4 @@
-use crate::args::pid_utils::{delete_pid, read_pid, write_pid, PidFileGuard};
+use crate::signal::pid_utils::{delete_pid, read_pid, write_pid, PidFileGuard};
 use log::{error, info};
 use nix::sys::signal::kill;
 use nix::sys::signal::Signal;
@@ -17,6 +17,15 @@ use std::process;
 ///
 /// 返回 `PidFileGuard` 实例，用于管理PID文件的生命周期
 ///
+/// ## 支持的信号指令
+///
+/// * `start` - 不发送信号，直接启动程序
+/// * `restart` - 发送 SIGINT 信号并立即返回
+/// * `reload`/`l` - 发送 SIGHUP 信号，用于重载配置
+/// * `quit`/`q` - 发送 SIGINT 信号，用于优雅退出
+/// * `stop`/`s` - 发送 SIGTERM 信号，用于终止程序
+/// * `kill`/`k` - 发送 SIGKILL 信号，用于强制终止程序
+/// 
 /// ## 使用示例
 ///
 /// ```
@@ -27,7 +36,7 @@ use std::process;
 ///
 /// 当PID文件已存在且对应进程正在运行时，函数会panic并输出提示信息
 pub fn parse_and_handle_signal_args(signal: Option<String>) -> PidFileGuard {
-    info!("Signal args: {:?}", signal);
+    info!("Signal signal: {:?}", signal);
     let pid_option = read_pid();
     if let Some(signal) = signal
         && signal != "start"
@@ -63,13 +72,14 @@ pub fn parse_and_handle_signal_args(signal: Option<String>) -> PidFileGuard {
 /// * `Ok(())` - 信号发送成功
 /// * `Err(std::io::Error)` - 信号发送失败
 ///
-/// ## 支持的信号
+/// ## 支持的信号指令
 ///
+/// * `start` - 不发送信号，直接启动程序
+/// * `restart` - 发送 SIGINT 信号并立即返回
 /// * `reload`/`l` - 发送 SIGHUP 信号，用于重载配置
 /// * `quit`/`q` - 发送 SIGINT 信号，用于优雅退出
 /// * `stop`/`s` - 发送 SIGTERM 信号，用于终止程序
 /// * `kill`/`k` - 发送 SIGKILL 信号，用于强制终止程序
-/// * `restart` - 发送 SIGINT 信号并立即返回
 ///
 /// ## Panics
 ///
