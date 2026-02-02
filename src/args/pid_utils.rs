@@ -6,11 +6,21 @@ use std::io::{BufRead, BufReader, BufWriter, Write};
 use std::path::PathBuf;
 use std::process;
 
+/// PID 文件守卫结构
+/// 
+/// 用于管理 PID 文件的生命周期，通过 RAII 模式在程序退出时自动删除 PID 文件。
+/// 
+/// # 使用示例
+/// 
+/// ```
+/// let guard = write_pid();  // 创建 PID 文件并返回守卫
+/// // 当 guard 超出作用域时，会自动删除 PID 文件
+/// ```
 pub struct PidFileGuard;
 
 impl Drop for PidFileGuard {
     fn drop(&mut self) {
-        delete_pid();
+        delete_pid_of_my_process();
     }
 }
 
@@ -55,7 +65,7 @@ pub fn write_pid() -> PidFileGuard {
     pid_file_guard
 }
 
-fn delete_pid() {
+fn delete_pid_of_my_process() {
     let pid_option = read_pid();
     // 如果 PID 文件存在且是当前进程创建的，则删除
     if let Some(pid) = pid_option
@@ -65,6 +75,12 @@ fn delete_pid() {
         info!("Deleting {pid_file_path:?} ...");
         std::fs::remove_file(pid_file_path).unwrap();
     }
+}
+
+pub fn delete_pid() {
+    let pid_file_path = get_pid_file_path();
+    info!("Deleting {pid_file_path:?} ...");
+    std::fs::remove_file(pid_file_path).unwrap();
 }
 
 fn create_pid_file_guard() -> PidFileGuard {
