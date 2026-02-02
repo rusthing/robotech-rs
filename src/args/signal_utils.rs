@@ -21,6 +21,7 @@ fn send_signal(signal_str: &str) -> std::io::Result<Signal> {
     let signal_str = signal_str.to_lowercase();
     match signal_str.as_str() {
         "reload" | "r" => signal::kill(Pid::from_raw(pid), signal::Signal::SIGHUP).expect("SIGHUP"),
+        "quit" | "q" => signal::kill(Pid::from_raw(pid), signal::Signal::SIGINT).expect("SIGINT"),
         "stop" | "s" => signal::kill(Pid::from_raw(pid), signal::Signal::SIGTERM).expect("SIGTERM"),
         _ => panic!("Invalid signal({signal_str})"),
     };
