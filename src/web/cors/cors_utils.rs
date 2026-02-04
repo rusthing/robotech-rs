@@ -1,15 +1,14 @@
 use crate::web::CorsConfig;
 use actix_cors::Cors;
 use actix_web::http::Method;
-use log::info;
+use log::debug;
 use std::str::FromStr;
 
 pub fn build_cors(cors_config: &Option<CorsConfig>) -> Cors {
-    info!("构建CORS: {:?}", cors_config);
-
     if let Some(cors_config) = cors_config
         && cors_config.enabled
     {
+        debug!("构建CORS: {:?}", cors_config);
         let mut cors = Cors::default();
 
         if let Some(ref allowed_origins) = cors_config.allowed_origins {

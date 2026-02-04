@@ -1,18 +1,18 @@
+use crate::main_fn::send_signal_to_stop;
 use crate::web::cors::build_cors;
 use crate::web::server::WebServerConfig;
 use actix_http::body::MessageBody;
 use actix_service::{IntoServiceFactory, ServiceFactory};
-use actix_web::dev::{AppConfig, ServerHandle};
+use actix_web::dev::AppConfig;
 use actix_web::middleware::Logger;
 use actix_web::{get, web, App, Error, HttpServer, Responder};
+use libc::pid_t;
 use log::{debug, info};
 use socket2::{Domain, Socket, Type};
 use std::fmt::Debug;
 use std::net::{IpAddr, SocketAddr, TcpListener};
-use std::sync::{Arc, RwLock};
+use std::sync::Arc;
 use std::time::{Duration, Instant};
-
-static SERVER_HANDLE: RwLock<Option<ServerHandle>> = RwLock::new(None);
 
 #[get("/health")]
 async fn health() -> impl Responder {
@@ -24,6 +24,7 @@ pub async fn start_web_server(
     web_server_config: WebServerConfig,
     configure: fn(&mut web::ServiceConfig),
     port_of_args: Option<u16>,
+    old_pid: Option<pid_t>,
 ) {
     info!("初始化Web服务器({:?})...", web_server_config);
 
@@ -105,7 +106,7 @@ pub async fn start_web_server(
             .configure(configure);
 
         if support_health_check {
-            info!("支持健康检查");
+            debug!("支持健康检查");
             app = app.service(health);
         }
 
@@ -113,73 +114,56 @@ pub async fn start_web_server(
         app
     });
 
-    let server = {
-        debug!("获取 server_handle 写锁...");
-        let mut server_handle_write_lock =
-            SERVER_HANDLE.write().expect("获取 server_handle 写锁失败");
+    // 如果不是随机端口，且不是复用端口，且是重启服务器，则先停止旧服务器，再启动新服务器
+    if !is_random_port && !web_server_config.reuse_port {
+        stop_old_web_server(old_pid).await;
+    }
 
-        let old_server_handle_option = server_handle_write_lock.take();
+    debug!("监听绑定地址...");
+    for (bind, port) in &listen_binds {
+        if reuse_port {
+            debug!("支持端口复用");
+            let tcp_listener = create_reusable_listener(bind, *port);
+            http_server = http_server
+                .listen(tcp_listener)
+                .expect("监听自定义tcp socket失败");
+        } else {
+            http_server = http_server_bind(http_server, bind, *port);
+        }
+    }
 
-        // 如果不是随机端口，且不是复用端口，且是重启服务器，则先停止旧服务器，再启动新服务器
-        if !is_random_port
-            && !web_server_config.reuse_port
-            && let Some(server_handle) = old_server_handle_option.as_ref()
+    let server = http_server.run();
+    tokio::spawn(async move {
+        let max_duration = Duration::from_secs(10);
+        let retry_interval = Duration::from_millis(500);
+        let protocol = if let Some(https_config) = https_config
+            && https_config.enabled
         {
-            info!("停止旧服务器...");
-            server_handle.stop(true).await;
+            "https"
+        } else {
+            "http"
+        };
+        let (ip, port) = &listen_binds[0];
+        let ip = if ip == "0.0.0.0" {
+            "127.0.0.1"
+        } else if ip == "::" {
+            "[::1]"
+        } else {
+            &ip
+        };
+        let health_url = format!("{}://{}:{}/health", protocol, ip, port);
+        wait_for_web_server_ready(health_url, max_duration, retry_interval)
+            .await
+            .unwrap();
+
+        // 如果是随机端口或复用端口，且是重启服务器，则先启动新服务器，再停止旧服务器
+        if is_random_port || web_server_config.reuse_port {
+            stop_old_web_server(old_pid).await;
         }
+    });
 
-        info!("启动Web服务器...");
-        // 监听绑定地址
-        for (bind, port) in &listen_binds {
-            if reuse_port {
-                info!("支持端口复用");
-                let tcp_listener = create_reusable_listener(bind, *port);
-                http_server = http_server
-                    .listen(tcp_listener)
-                    .expect("监听自定义tcp socket失败");
-            } else {
-                http_server = http_server_bind(http_server, bind, *port);
-            }
-        }
-
-        let server = http_server.run();
-        tokio::spawn(async move {
-            let max_duration = Duration::from_secs(10);
-            let retry_interval = Duration::from_millis(500);
-            let protocol = if let Some(https_config) = https_config
-                && https_config.enabled
-            {
-                "https"
-            } else {
-                "http"
-            };
-            let (ip, port) = &listen_binds[0];
-            let ip = if ip == "0.0.0.0" {
-                "127.0.0.1"
-            } else if ip == "::" {
-                "[::1]"
-            } else {
-                &ip
-            };
-            let health_url = format!("{}://{}:{}/health", protocol, ip, port);
-            wait_for_server_ready(&health_url, max_duration, retry_interval).await;
-            info!("启动Web服务器完成.");
-
-            // 如果是随机端口或复用端口，且是重启服务器，则先启动新服务器，再停止旧服务器
-            if (is_random_port || web_server_config.reuse_port)
-                && let Some(server_handle) = old_server_handle_option.as_ref()
-            {
-                info!("停止旧服务器...");
-                server_handle.stop(true).await;
-            }
-        });
-
-        let new_server_handle = server.handle();
-        *server_handle_write_lock = Some(new_server_handle);
-        server
-    };
-    server.await.expect("服务器运行时异常");
+    info!("启动Web服务器...");
+    server.await.expect("Web服务器运行时异常");
 }
 
 fn http_server_bind<F, I, S, B>(
@@ -196,14 +180,14 @@ where
     S::Response: Into<actix_http::Response<B>> + 'static,
     B: MessageBody + 'static,
 {
-    info!("绑定地址: [{ip}]:{port}");
+    debug!("绑定地址: [{ip}]:{port}");
     http_server
         .bind((ip.to_string(), port))
         .expect(&format!("绑定地址失败: {}:{}", ip, port))
 }
 
 fn create_reusable_listener(ip: &str, port: u16) -> TcpListener {
-    info!("创建绑定([{ip}]:{port})可复用端口的监听器...");
+    debug!("创建绑定([{ip}]:{port})可复用端口的监听器...");
     // 解析 IP 地址
     let ip_addr: IpAddr = ip.parse().expect("无效的 IP 地址格式");
     let addr: &SocketAddr = &SocketAddr::new(ip_addr, port);
@@ -236,23 +220,41 @@ fn create_reusable_listener(ip: &str, port: u16) -> TcpListener {
     TcpListener::from(socket)
 }
 
-async fn wait_for_server_ready(health_url: &str, max_duration: Duration, retry_interval: Duration) {
-    let client = reqwest::Client::new();
-    let start_time = Instant::now();
+async fn wait_for_web_server_ready(
+    health_url: String,
+    max_duration: Duration,
+    retry_interval: Duration,
+) -> Result<(), String> {
+    tokio::spawn(async move {
+        let client = reqwest::Client::new();
+        let start_time = Instant::now();
 
-    loop {
-        if start_time.elapsed() >= max_duration {
-            break;
-        }
-
-        if let Ok(response) = client.get(health_url).send().await {
-            if response.status().is_success() {
-                info!("服务器通过健康检查，启动完成.");
-                return;
+        loop {
+            if start_time.elapsed() >= max_duration {
+                return Err("启动超时".to_string());
             }
-        }
 
-        tokio::time::sleep(retry_interval).await;
+            if let Ok(response) = client.get(health_url.as_str()).send().await {
+                if response.status().is_success() {
+                    info!("Web服务器通过健康检查，启动完成.");
+                    break;
+                }
+            }
+
+            tokio::time::sleep(retry_interval).await;
+        }
+        Ok(())
+    })
+    .await
+    .expect("Web服务器启动失败")
+}
+
+async fn stop_old_web_server(old_pid: Option<pid_t>) {
+    if let Some(old_pid) = old_pid {
+        debug!("停止运行旧的Web服务器...");
+        send_signal_to_stop(old_pid)
+            .await
+            .expect("停止旧的Web服务器失败");
+        debug!("旧的Web服务器已被停止运行");
     }
-    panic!("服务器启动超时.");
 }

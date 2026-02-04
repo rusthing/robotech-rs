@@ -12,7 +12,7 @@ repository = "https://github.com/rusthing/robotech-rs"
 readme = "README.md"
 
 [features]
-base = ["dep:log", "dep:tracing-log", "dep:tracing-core", "dep:tracing-subscriber", "dep:tracing-appender", "dep:thiserror", "dep:chrono", "dep:serde", "dep:serde_json", "dep:utoipa"]
+base = ["dep:log", "dep:tracing-log", "dep:tracing-core", "dep:tracing-subscriber", "dep:tracing-appender", "dep:thiserror", "dep:chrono", "dep:serde", "dep:serde_json", "dep:tokio", "dep:utoipa"]
 api-client = ["base", "dep:reqwest"]
 app = ["base", "dep:config", "dep:nix", "dep:libc"]
 web = ["app", "dep:actix-web", "dep:actix-cors", "dep:actix-service", "dep:actix-http", "dep:socket2", "dep:rustls", "dep:validator", "dep:reqwest", "dep:wheel-rs"]
@@ -26,13 +26,13 @@ tracing-subscriber = { version = "0.3.22", features = ["env-filter", "json", "ch
 tracing-appender = { version = "0.2.4", optional = true }
 config = { version = "0.15.19", optional = true }
 chrono = { version = "0.4.43", optional = true }
-nix = { version = "0.31.1", optional = true, features = ["signal"] }
+nix = { version = "0.31.1", features = ["signal"], optional = true }
 libc = { version = "0.2.180", optional = true }
 regex = { version = "1.12.2", optional = true }
 serde = { version = "1.0.228", optional = true }
 serde_json = { version = "1.0.149", optional = true }
-tokio = "1.49.0"
-actix-web = { version = "4.12.1", optional = true, features = ["rustls-0_23"] }
+tokio = { version = "1.49.0", features = ["macros"], optional = true }
+actix-web = { version = "4.12.1", features = ["rustls-0_23"], optional = true }
 actix-cors = { version = "0.7.1", optional = true }
 actix-service = { version = "2.0.3", optional = true }
 actix-http = { version = "3.11.2", optional = true }
