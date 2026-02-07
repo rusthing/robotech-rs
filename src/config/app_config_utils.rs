@@ -1,10 +1,13 @@
-use crate::env::{Env, ENV};
+use crate::config::AppConfigError;
+use crate::env::{Env, EnvError, ENV};
 use config::Config;
 
-pub fn build_app_config<'a, T: serde::Deserialize<'a>>(path: Option<String>) -> T {
+pub fn build_app_config<'a, T: serde::Deserialize<'a>>(
+    path: Option<String>,
+) -> Result<T, AppConfigError> {
     let mut config = Config::builder();
     if path.is_none() {
-        let Env { app_file_path, .. } = ENV.get().expect("ENV is None");
+        let Env { app_file_path, .. } = ENV.get().ok_or(EnvError::GetEnv())?;
         let temp_path = app_file_path.to_string_lossy().to_string();
 
         // Add in `./xxx.toml`, `./xxx.yml`, `./xxx.json`, `./xxx.ini`, `./xxx.ron`
@@ -38,8 +41,9 @@ pub fn build_app_config<'a, T: serde::Deserialize<'a>>(path: Option<String>) -> 
         // E.g. `APP_DEBUG=1 ./target/app` would set the `debug` key
         .add_source(config::Environment::with_prefix("APP"))
         .build()
-        .expect("Config build error");
+        .map_err(|e| AppConfigError::Build(e))?;
 
-    let config: T = config.try_deserialize().expect("Config deserialize error");
-    config
+    Ok(config
+        .try_deserialize()
+        .map_err(|e| AppConfigError::Deserialize(e))?)
 }

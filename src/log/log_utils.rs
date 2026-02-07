@@ -1,5 +1,6 @@
-use crate::env::ENV;
-use log::info;
+use crate::env::{Env, ENV};
+use crate::log::LogError;
+use log::debug;
 use std::sync::OnceLock;
 use std::{env, fs};
 use tracing_core::{Event, Level, Subscriber};
@@ -62,7 +63,6 @@ where
         write!(writer, "{:<5} ", *level)?;
 
         // 格式化事件字段
-        // write!(writer, "\x1B[39m")?;
         // 设置字体颜色
         let visitor = DefaultFields::default();
         visitor.format_fields(writer.by_ref(), event)?;
@@ -74,10 +74,10 @@ where
         // 设置字体颜色为蓝色
         write!(writer, "\x1B[34m")?;
         if let (Some(file_path), Some(line_number)) = (meta.file(), meta.line()) {
-            let absolute_path = env::current_dir().unwrap().join(file_path);
+            let current_dir = env::current_dir().map_err(|_| std::fmt::Error)?;
+            let absolute_path = current_dir.join(file_path);
             let path = format!("{}:{}", absolute_path.display(), line_number);
             let label = format!("{}:{}", file_path, line_number);
-            // writeln!(writer)?;
             write!(
                 writer,
                 "\x1B]8;;file://{}\x1B\\{}\x1B]8;;\x1B\\",
@@ -92,9 +92,9 @@ where
 }
 
 /// 初始化日志
-pub fn init_log() {
+pub fn init_log() -> Result<(), LogError> {
     // 创建环境过滤器，支持 RUST_LOG 环境变量
-    let env_filter = EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new("debug"));
+    let env_filter = EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new("warn"));
 
     // 控制台输出层
     let console_layer = tracing_subscriber::fmt::layer()
@@ -105,14 +105,19 @@ pub fn init_log() {
         .with_writer(std::io::stdout);
 
     // 文件输出层
-    let env = ENV.get().unwrap();
-    let log_dir = env.app_dir.join("log");
-    fs::create_dir_all(log_dir.as_path()).expect("创建日志目录失败");
-    let log_file_name_prefix = format!("{}.log", env.app_file_name);
+    let Env {
+        app_dir,
+        app_file_name,
+        ..
+    } = ENV.get().expect("Environment not initialized");
+    let log_dir = app_dir.join("log");
+    fs::create_dir_all(log_dir.as_path())
+        .map_err(|e| LogError::CreateDirectory(format!("{log_dir:?}-{e}")))?;
+    let log_file_name_prefix = format!("{}.log", app_file_name);
     let file_appender = tracing_appender::rolling::hourly(log_dir, log_file_name_prefix);
     let (non_blocking, guard) = tracing_appender::non_blocking(file_appender);
     // 解决锁在初始化方法结束后被提前释放导致后续日志不能输出
-    LOG_GUARD.set(guard).expect("设置日志文件输出锁失败");
+    LOG_GUARD.set(guard).map_err(|_| LogError::SetLogGuard())?;
     let file_layer = fmt::layer()
         .with_timer(ChronoLocal::new("%Y-%m-%d %H:%M:%S%.6f".to_string()))
         .with_file(true)
@@ -125,5 +130,6 @@ pub fn init_log() {
         .with(console_layer) // 控制台输出层
         .with(file_layer) // 文件输出层
         .init();
-    info!("初始化日志成功");
+    debug!("初始化日志成功");
+    Ok(())
 }

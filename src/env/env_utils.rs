@@ -1,3 +1,4 @@
+use crate::env::EnvError;
 use log::info;
 use std::env;
 use std::path::PathBuf;
@@ -14,12 +15,12 @@ pub struct Env {
 }
 
 /// 初始化环境变量
-pub fn init_env() {
+pub fn init_env() -> Result<(), EnvError> {
     info!("init env...");
-    let app_file_path = env::current_exe().expect("Failed to get application path");
+    let app_file_path = env::current_exe().map_err(|e| EnvError::GetAppPath(e))?;
     let app_file_name = app_file_path
         .file_name()
-        .expect("Failed to get application file name")
+        .ok_or(EnvError::GetAppFileName())?
         .to_string_lossy()
         .to_string();
     // 获取当前执行文件所在目录
@@ -32,5 +33,6 @@ pub fn init_env() {
         app_file_name,
     };
 
-    ENV.set(env).expect("Unable to set environment variables");
+    ENV.set(env).map_err(|_| EnvError::SetEnv())?;
+    Ok(())
 }

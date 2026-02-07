@@ -48,15 +48,15 @@ static REGEX_DELETE_VIOLATE_CONSTRAINT_POSTGRES: Lazy<Regex> = Lazy::new(|| {
 #[derive(Debug, thiserror::Error)]
 pub enum SvcError {
     #[error("{0}")]
-    RuntimeError(#[from] wheel_rs::runtime::Error),
+    Runtime(#[from] anyhow::Error),
     #[error("参数校验错误: {0}")]
-    ValidationError(#[from] validator::ValidationError),
+    Validation(#[from] validator::ValidationError),
     #[error("参数校验错误: {0}")]
-    ValidationErrors(#[from] validator::ValidationErrors),
+    Validations(#[from] validator::ValidationErrors),
     #[error("找不到数据: {0}")]
     NotFound(String),
     #[error("IO错误: {0}")]
-    IoError(#[from] std::io::Error),
+    Io(#[from] std::io::Error),
     #[cfg(feature = "crud")]
     #[error("重复键错误: {0} {1}")]
     DuplicateKey(String, String),
@@ -65,10 +65,10 @@ pub enum SvcError {
     DeleteViolateConstraint(String, String, String),
     #[cfg(feature = "crud")]
     #[error("数据库错误: {0}")]
-    DatabaseError(#[from] DbErr),
+    Database(#[from] DbErr),
     #[cfg(feature = "api-client")]
-    #[error("API调用错误, {0}")]
-    ApiError(#[from] ApiClientError),
+    #[error("API客户端错误, {0}")]
+    ApiClient(#[from] ApiClientError),
 }
 
 /// # 处理数据库错误，并转换为服务层错误
@@ -105,7 +105,7 @@ pub fn handle_db_err_to_svc_error(
         return DeleteViolateConstraint(pk_table, foreign_key, fk_table);
     }
 
-    SvcError::DatabaseError(db_err)
+    SvcError::Database(db_err)
 }
 
 /// # 从正则匹配中抓取有用信息转换成重复键错误

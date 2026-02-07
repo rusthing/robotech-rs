@@ -1,6 +1,6 @@
+use crate::ro::Ro;
 #[cfg(feature = "crud")]
 use crate::ro::RO_CODE_WARNING_DELETE_VIOLATE_CONSTRAINT;
-use crate::ro::Ro;
 use crate::svc::SvcError;
 use actix_web::http::StatusCode;
 use actix_web::{HttpResponse, ResponseError};
@@ -33,15 +33,15 @@ use validator;
 #[derive(Debug, Error)]
 pub enum CtrlError {
     #[error("{0}")]
-    RuntimeError(#[from] wheel_rs::runtime::Error),
+    Runtime(#[from] anyhow::Error),
     #[error("参数校验错误: {0}")]
-    ValidationError(#[from] validator::ValidationError),
+    Validation(#[from] validator::ValidationError),
     #[error("参数校验错误: {0}")]
-    ValidationErrors(#[from] validator::ValidationErrors),
+    Validations(#[from] validator::ValidationErrors),
     #[error("IO错误: {0}")]
-    IoError(#[from] std::io::Error),
+    Io(#[from] std::io::Error),
     #[error("服务层错误, {0}")]
-    SvcError(#[from] SvcError),
+    Svc(#[from] SvcError),
 }
 
 /// # 为 CtrlError 实现错误转换方法
@@ -51,20 +51,20 @@ impl CtrlError {
     /// 将错误转换为Ro对象
     fn to_ro(&self) -> Ro<()> {
         match self {
-            CtrlError::RuntimeError(error) => {
+            CtrlError::Runtime(error) => {
                 warn!("{}", error);
                 Ro::warn("运行时错误".to_string()).detail(Some(error.to_string()))
             }
-            CtrlError::ValidationError(error) => {
+            CtrlError::Validation(error) => {
                 Ro::illegal_argument(format!("参数校验错误: {}", error.code))
             }
-            CtrlError::ValidationErrors(errors) => {
+            CtrlError::Validations(errors) => {
                 Ro::illegal_argument(format!("参数校验错误: {}", errors))
             }
-            CtrlError::IoError(error) => {
+            CtrlError::Io(error) => {
                 Ro::fail("磁盘异常".to_string()).detail(Some(error.to_string()))
             }
-            CtrlError::SvcError(error) => match error {
+            CtrlError::Svc(error) => match error {
                 SvcError::NotFound(err) => {
                     Ro::warn("找不到数据".to_string()).detail(Some(err.to_string()))
                 }
@@ -82,7 +82,7 @@ impl CtrlError {
                         )))
                 }
                 #[cfg(feature = "crud")]
-                SvcError::DatabaseError(db_err) => match db_err {
+                SvcError::Database(db_err) => match db_err {
                     DbErr::RecordNotUpdated => {
                         Ro::warn("未更新数据，请检查记录是否存在".to_string())
                     }
@@ -102,12 +102,10 @@ impl ResponseError for CtrlError {
     /// 根据异常获取状态码
     fn status_code(&self) -> StatusCode {
         match self {
-            CtrlError::RuntimeError(_) => StatusCode::INTERNAL_SERVER_ERROR,
-            CtrlError::ValidationError(_) | CtrlError::ValidationErrors(_) => {
-                StatusCode::BAD_REQUEST
-            }
-            CtrlError::IoError(_) => StatusCode::INTERNAL_SERVER_ERROR,
-            CtrlError::SvcError(error) => match error {
+            CtrlError::Runtime(_) => StatusCode::INTERNAL_SERVER_ERROR,
+            CtrlError::Validation(_) | CtrlError::Validations(_) => StatusCode::BAD_REQUEST,
+            CtrlError::Io(_) => StatusCode::INTERNAL_SERVER_ERROR,
+            CtrlError::Svc(error) => match error {
                 SvcError::NotFound(_) => StatusCode::NOT_FOUND,
                 #[cfg(feature = "crud")]
                 SvcError::DuplicateKey(_, _) | SvcError::DeleteViolateConstraint(_, _, _) => {

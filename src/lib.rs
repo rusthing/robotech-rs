@@ -10,11 +10,11 @@ pub mod db;
 pub mod env;
 #[cfg(feature = "app")]
 pub mod log;
-#[cfg(feature = "app")]
-pub mod main_fn;
 #[cfg(feature = "base")]
 pub mod ro;
-#[cfg(any(feature = "web", feature = "crud"))]
+#[cfg(feature = "app")]
+pub mod signal;
+#[cfg(any(feature = "app"))]
 pub mod svc;
 #[cfg(feature = "web")]
 pub mod web;

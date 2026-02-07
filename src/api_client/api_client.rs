@@ -1,8 +1,5 @@
 use crate::api_client::api_client_config::ApiClientConfig;
 use crate::api_client::ApiClientError;
-use crate::api_client::ApiClientError::{
-    BytesParseError, JsonParseError, RequestError, ResponseError, ResponseStatusError,
-};
 use crate::cst::user_id_cst::USER_ID_HEADER_NAME;
 use crate::ro::Ro;
 use reqwest::Client;
@@ -30,23 +27,26 @@ impl CrudApiClient {
             .header(USER_ID_HEADER_NAME, current_user_id)
             .send()
             .await
-            .map_err(|e| RequestError(urn.clone(), e))?;
+            .map_err(|e| ApiClientError::Request(urn.clone(), e))?;
         log::debug!("{} response....", urn);
         // 检查状态码，如果不是成功状态码则转换为错误
         let status_code = response.status();
         if !status_code.is_success() {
-            return Err(ResponseStatusError(url.clone(), status_code.to_string()));
+            return Err(ApiClientError::NonSuccessStatus(
+                url.clone(),
+                status_code.to_string(),
+            ));
         }
 
         let response_text = response
             .text()
             .await
-            .map_err(|e| ResponseError(url.clone(), e))?;
+            .map_err(|e| ApiClientError::Response(url.clone(), e))?;
         log::debug!("{} response body: {}", urn, response_text);
 
         // 将文本解析为JSON
         let result: Ro<serde_json::Value> =
-            serde_json::from_str(&response_text).map_err(|e| JsonParseError(url, e))?;
+            serde_json::from_str(&response_text).map_err(|e| ApiClientError::ParseJson(url, e))?;
         Ok(result)
     }
 
@@ -64,18 +64,21 @@ impl CrudApiClient {
             .header(USER_ID_HEADER_NAME, current_user_id)
             .send()
             .await
-            .map_err(|e| RequestError(urn.clone(), e))?;
+            .map_err(|e| ApiClientError::Request(urn.clone(), e))?;
         log::debug!("{} response....", urn);
         // 检查状态码，如果不是成功状态码则转换为错误
         let status_code = response.status();
         if !status_code.is_success() {
-            return Err(ResponseStatusError(url.clone(), status_code.to_string()));
+            return Err(ApiClientError::NonSuccessStatus(
+                url.clone(),
+                status_code.to_string(),
+            ));
         }
 
         let result = response
             .bytes()
             .await
-            .map_err(|e| BytesParseError(urn.clone(), e))?;
+            .map_err(|e| ApiClientError::ParseBytes(urn.clone(), e))?;
         log::debug!("{} response.", urn);
         Ok(result.to_vec())
     }
@@ -96,23 +99,26 @@ impl CrudApiClient {
             .json(body)
             .send()
             .await
-            .map_err(|e| RequestError(urn.clone(), e))?;
+            .map_err(|e| ApiClientError::Request(urn.clone(), e))?;
         log::debug!("{} response....", urn);
         // 检查状态码，如果不是成功状态码则转换为错误
         let status_code = response.status();
         if !status_code.is_success() {
-            return Err(ResponseStatusError(url.clone(), status_code.to_string()));
+            return Err(ApiClientError::NonSuccessStatus(
+                url.clone(),
+                status_code.to_string(),
+            ));
         }
 
         let response_text = response
             .text()
             .await
-            .map_err(|e| ResponseError(url.clone(), e))?;
+            .map_err(|e| ApiClientError::Response(url.clone(), e))?;
         log::debug!("{} response body: {}", urn, response_text);
 
         // 将文本解析为JSON
         let result: Ro<serde_json::Value> =
-            serde_json::from_str(&response_text).map_err(|e| JsonParseError(url, e))?;
+            serde_json::from_str(&response_text).map_err(|e| ApiClientError::ParseJson(url, e))?;
         Ok(result)
     }
     /// 执行PUT请求的通用方法
@@ -131,23 +137,26 @@ impl CrudApiClient {
             .json(body)
             .send()
             .await
-            .map_err(|e| RequestError(urn.clone(), e))?;
+            .map_err(|e| ApiClientError::Request(urn.clone(), e))?;
         log::debug!("{} response....", urn);
         // 检查状态码，如果不是成功状态码则转换为错误
         let status_code = response.status();
         if !status_code.is_success() {
-            return Err(ResponseStatusError(url.clone(), status_code.to_string()));
+            return Err(ApiClientError::NonSuccessStatus(
+                url.clone(),
+                status_code.to_string(),
+            ));
         }
 
         let response_text = response
             .text()
             .await
-            .map_err(|e| ResponseError(url.clone(), e))?;
+            .map_err(|e| ApiClientError::Response(url.clone(), e))?;
         log::debug!("{} response body: {}", urn, response_text);
 
         // 将文本解析为JSON
         let result: Ro<serde_json::Value> =
-            serde_json::from_str(&response_text).map_err(|e| JsonParseError(url, e))?;
+            serde_json::from_str(&response_text).map_err(|e| ApiClientError::ParseJson(url, e))?;
         Ok(result)
     }
     /// 执行DELETE请求的通用方法
@@ -164,23 +173,26 @@ impl CrudApiClient {
             .header(USER_ID_HEADER_NAME, current_user_id)
             .send()
             .await
-            .map_err(|e| RequestError(urn.clone(), e))?;
+            .map_err(|e| ApiClientError::Request(urn.clone(), e))?;
         log::debug!("{} response....", urn);
         // 检查状态码，如果不是成功状态码则转换为错误
         let status_code = response.status();
         if !status_code.is_success() {
-            return Err(ResponseStatusError(url.clone(), status_code.to_string()));
+            return Err(ApiClientError::NonSuccessStatus(
+                url.clone(),
+                status_code.to_string(),
+            ));
         }
 
         let response_text = response
             .text()
             .await
-            .map_err(|e| ResponseError(url.clone(), e))?;
+            .map_err(|e| ApiClientError::Response(url.clone(), e))?;
         log::debug!("{} response body: {}", urn, response_text);
 
         // 将文本解析为JSON
         let result: Ro<serde_json::Value> =
-            serde_json::from_str(&response_text).map_err(|e| JsonParseError(url, e))?;
+            serde_json::from_str(&response_text).map_err(|e| ApiClientError::ParseJson(url, e))?;
         Ok(result)
     }
     /// 执行post multipart请求的通用方法
@@ -200,23 +212,26 @@ impl CrudApiClient {
             .header(USER_ID_HEADER_NAME, current_user_id)
             .send()
             .await
-            .map_err(|e| RequestError(urn.clone(), e))?;
+            .map_err(|e| ApiClientError::Request(urn.clone(), e))?;
         log::debug!("{} response....", urn);
         // 检查状态码，如果不是成功状态码则转换为错误
         let status_code = response.status();
         if !status_code.is_success() {
-            return Err(ResponseStatusError(url.clone(), status_code.to_string()));
+            return Err(ApiClientError::NonSuccessStatus(
+                url.clone(),
+                status_code.to_string(),
+            ));
         }
 
         let response_text = response
             .text()
             .await
-            .map_err(|e| ResponseError(url.clone(), e))?;
+            .map_err(|e| ApiClientError::Response(url.clone(), e))?;
         log::debug!("{} response body: {}", urn, response_text);
 
         // 将文本解析为JSON
         let result: Ro<serde_json::Value> =
-            serde_json::from_str(&response_text).map_err(|e| JsonParseError(url, e))?;
+            serde_json::from_str(&response_text).map_err(|e| ApiClientError::ParseJson(url, e))?;
         Ok(result)
     }
 }

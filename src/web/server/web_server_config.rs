@@ -1,21 +1,23 @@
 use crate::web::cors::CorsConfig;
 use crate::web::https::HttpsConfig;
 use serde::{Deserialize, Serialize};
-use wheel_rs::serde::vec_option_serde;
+use std::time::Duration;
+use wheel_rs::serde::duration_serde;
+use wheel_rs::serde::vec_serde;
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
 #[serde(rename_all = "kebab-case")]
 pub struct WebServerConfig {
     /// 绑定的IP地址
-    #[serde(with = "vec_option_serde", default = "bind_default")]
-    pub bind: Option<Vec<String>>,
+    #[serde(with = "vec_serde", default = "bind_default")]
+    pub bind: Vec<String>,
     /// Web服务器的端口号(默认0)
     #[serde(default = "port_default")]
     pub port: Option<u16>,
 
     /// 监听地址列表(监听地址格式: ip+':'+port，例如127.0.0.1:80或\[::\]:80)
-    #[serde(with = "vec_option_serde", default = "listen_default")]
-    pub listen: Option<Vec<String>>,
+    #[serde(with = "vec_serde", default = "listen_default")]
+    pub listen: Vec<String>,
 
     /// 是否启用端口复用(默认关闭)
     ///
@@ -37,6 +39,24 @@ pub struct WebServerConfig {
     /// 如果绑定或监听随机端口，或是启用端口复用，都会自动启用支持健康检查，因为重启时需要健康检查来判断新的服务器是否启动成功，才停止旧的服务器
     #[serde(default = "support_health_check_default")]
     pub support_health_check: bool,
+
+    #[serde(with = "duration_serde", default = "start_wait_timeout_default")]
+    pub start_wait_timeout: Duration,
+
+    #[serde(with = "duration_serde", default = "start_retry_interval_default")]
+    pub start_retry_interval: Duration,
+
+    #[serde(
+        with = "duration_serde",
+        default = "terminate_old_wait_timeout_default"
+    )]
+    pub terminate_old_wait_timeout: Duration,
+
+    #[serde(
+        with = "duration_serde",
+        default = "terminate_old_retry_interval_default"
+    )]
+    pub terminate_old_retry_interval: Duration,
 }
 
 impl Default for WebServerConfig {
@@ -49,19 +69,23 @@ impl Default for WebServerConfig {
             https: None,
             cors: None,
             support_health_check: support_health_check_default(),
+            start_wait_timeout: start_wait_timeout_default(),
+            start_retry_interval: start_retry_interval_default(),
+            terminate_old_wait_timeout: terminate_old_wait_timeout_default(),
+            terminate_old_retry_interval: terminate_old_retry_interval_default(),
         }
     }
 }
 
-fn bind_default() -> Option<Vec<String>> {
-    None
+fn bind_default() -> Vec<String> {
+    vec![]
 }
 fn port_default() -> Option<u16> {
     None
 }
 
-fn listen_default() -> Option<Vec<String>> {
-    None
+fn listen_default() -> Vec<String> {
+    vec![]
 }
 
 fn reuse_port_default() -> bool {
@@ -70,4 +94,17 @@ fn reuse_port_default() -> bool {
 
 fn support_health_check_default() -> bool {
     true
+}
+
+fn start_wait_timeout_default() -> Duration {
+    Duration::from_secs(10)
+}
+fn start_retry_interval_default() -> Duration {
+    Duration::from_secs(500)
+}
+fn terminate_old_wait_timeout_default() -> Duration {
+    Duration::from_secs(10)
+}
+fn terminate_old_retry_interval_default() -> Duration {
+    Duration::from_secs(1)
 }
