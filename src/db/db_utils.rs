@@ -36,9 +36,7 @@ pub async fn init_db(db_config: DbConfig) -> Result<(), DbError> {
     opt.sqlx_logging_level(log::LevelFilter::Trace);
 
     // 连接数据库
-    let connection = Database::connect(opt)
-        .await
-        .map_err(|e| DbError::Connect(e))?;
+    let connection = Database::connect(opt).await.map_err(DbError::Connect)?;
     // 设置数据库连接到全局变量中
     DB_CONN
         .set(connection.clone())

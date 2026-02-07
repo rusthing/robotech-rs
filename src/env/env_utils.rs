@@ -17,7 +17,7 @@ pub struct Env {
 /// 初始化环境变量
 pub fn init_env() -> Result<(), EnvError> {
     info!("init env...");
-    let app_file_path = env::current_exe().map_err(|e| EnvError::GetAppPath(e))?;
+    let app_file_path = env::current_exe().map_err(EnvError::GetAppPath)?;
     let app_file_name = app_file_path
         .file_name()
         .ok_or(EnvError::GetAppFileName())?

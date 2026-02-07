@@ -11,13 +11,13 @@ RoboTech-RS 是一个用 Rust 编写的后端服务工具库。本项目提供 R
 - `api` feature（默认启用）：包含 API 接口和数据传输对象，提供统一的响应对象（RO）结构
 - `base` feature：提供基础功能，包括日志记录、配置管理、环境变量处理
 - `web` feature：基于 Actix-web 实现 Web 服务器功能
-- `crud` feature：基于 SeaORM 实现数据库操作功能
+- `db` feature：基于 SeaORM 实现数据库操作功能
 
 ## 技术栈
 
 - Rust 2024 edition
 - Actix-web 作为 Web 框架（在 web feature 中）
-- SeaORM 作为数据库 ORM（在 crud feature 中）
+- SeaORM 作为数据库 ORM（在 db feature 中）
 - Utoipa 用于 OpenAPI 文档生成（在 api feature 中）
 - Serde 用于序列化/反序列化（在 api feature 中）
 - Chrono 用于时间处理（在 api feature 中）
@@ -30,7 +30,7 @@ RoboTech-RS 是一个用 Rust 编写的后端服务工具库。本项目提供 R
 - `api`（默认）：启用 API 相关功能，包括响应对象（RO）和数据传输
 - `base`：启用基础功能，如日志记录、配置管理、环境变量处理
 - `web`：启用 Web 服务器功能（包含 base feature）
-- `crud`：启用数据库 CRUD 操作（包含 base feature）
+- `db`：启用数据库 CRUD 操作（包含 base feature）
 
 默认情况下启用 `api` feature。要使用 Web 服务器功能，可以启用 web feature：
 
@@ -40,12 +40,12 @@ version = "0.8.0"
 features = ["web"]
 ```
 
-要使用数据库操作功能，可以启用 crud feature：
+要使用数据库操作功能，可以启用 db feature：
 
 ```toml
 [dependencies.robotech]
 version = "0.8.0"
-features = ["web", "crud"]
+features = ["web", "db"]
 ```
 
 ## API 响应格式
@@ -88,7 +88,7 @@ cargo build
 cargo build --features web
 
 # 构建所有 features
-cargo build --features web,crud
+cargo build --features web,db
 ```
 
 ### 运行服务
@@ -98,7 +98,7 @@ cargo build --features web,crud
 cargo run --features web
 
 # 运行带数据库支持的服务
-cargo run --features web,crud
+cargo run --features web,db
 ```
 
 ## 模块说明

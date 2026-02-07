@@ -13,13 +13,13 @@ This project organizes functional modules through Rust's feature flags mechanism
   object (RO) structure
 - `base` feature: Provides basic functionalities including logging, configuration management, environment variables
 - `web` feature: Implements web server functionality based on Actix-web
-- `crud` feature: Implements database operations based on SeaORM
+- `db` feature: Implements database operations based on SeaORM
 
 ## Tech Stack
 
 - Rust 2024 edition
 - Actix-web as Web framework (in web feature)
-- SeaORM as database ORM (in crud feature)
+- SeaORM as database ORM (in db feature)
 - Utoipa for OpenAPI documentation generation (in api feature)
 - Serde for serialization/deserialization (in api feature)
 - Chrono for time processing (in api feature)
@@ -32,7 +32,7 @@ This project uses feature flags to control dependencies and functionality:
 - `api` (default): Enables API-related features, including response objects (RO) and data transfer
 - `base`: Enables basic features like logging, configuration, environment management
 - `web`: Enables web server functionality (includes base feature)
-- `crud`: Enables database CRUD operations (includes base feature)
+- `db`: Enables database CRUD operations (includes base feature)
 
 The `api` feature is enabled by default. To use web server features, you can enable the web feature:
 
@@ -42,12 +42,12 @@ version = "0.8.0"
 features = ["web"]
 ```
 
-To use database operations, enable the crud feature:
+To use database operations, enable the db feature:
 
 ```toml
 [dependencies.robotech]
 version = "0.8.0"
-features = ["web", "crud"]
+features = ["web", "db"]
 ```
 
 ## API Response Format
@@ -91,7 +91,7 @@ cargo build
 cargo build --features web
 
 # Build with all features
-cargo build --features web,crud
+cargo build --features web,db
 ```
 
 ### Run Service
@@ -101,7 +101,7 @@ cargo build --features web,crud
 cargo run --features web
 
 # Run service with database support
-cargo run --features web,crud
+cargo run --features web,db
 ```
 
 ## Modules

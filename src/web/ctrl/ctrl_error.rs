@@ -1,11 +1,12 @@
+use crate::dao::DaoError;
 use crate::ro::Ro;
-#[cfg(feature = "crud")]
+#[cfg(feature = "db")]
 use crate::ro::RO_CODE_WARNING_DELETE_VIOLATE_CONSTRAINT;
 use crate::svc::SvcError;
 use actix_web::http::StatusCode;
 use actix_web::{HttpResponse, ResponseError};
 use log::warn;
-#[cfg(feature = "crud")]
+#[cfg(feature = "db")]
 use sea_orm::DbErr;
 use thiserror::Error;
 use validator;
@@ -68,25 +69,26 @@ impl CtrlError {
                 SvcError::NotFound(err) => {
                     Ro::warn("找不到数据".to_string()).detail(Some(err.to_string()))
                 }
-                #[cfg(feature = "crud")]
-                SvcError::DuplicateKey(field_name, field_value) => {
-                    Ro::warn(format!("{}<{}>已存在！", field_name, field_value))
-                }
-                #[cfg(feature = "crud")]
-                SvcError::DeleteViolateConstraint(pk_table, foreign_key, fk_table) => {
-                    Ro::warn("删除失败，有其它数据依赖于本数据".to_string())
-                        .code(Some(RO_CODE_WARNING_DELETE_VIOLATE_CONSTRAINT.to_string()))
-                        .detail(Some(format!(
-                            "{} <- {} <- {}>",
-                            pk_table, foreign_key, fk_table
-                        )))
-                }
-                #[cfg(feature = "crud")]
-                SvcError::Database(db_err) => match db_err {
-                    DbErr::RecordNotUpdated => {
-                        Ro::warn("未更新数据，请检查记录是否存在".to_string())
+                #[cfg(feature = "db")]
+                SvcError::Database(error) => match error {
+                    DaoError::DuplicateKey(field_name, field_value) => {
+                        Ro::warn(format!("{}<{}>已存在！", field_name, field_value))
                     }
-                    _ => Ro::fail("数据库错误".to_string()).detail(Some(db_err.to_string())),
+                    DaoError::DeleteViolateConstraint(pk_table, foreign_key, fk_table) => {
+                        Ro::warn("删除失败，有其它数据依赖于本数据".to_string())
+                            .code(Some(RO_CODE_WARNING_DELETE_VIOLATE_CONSTRAINT.to_string()))
+                            .detail(Some(format!(
+                                "{} <- {} <- {}>",
+                                pk_table, foreign_key, fk_table
+                            )))
+                    }
+                    DaoError::Db(db_err) => match db_err {
+                        DbErr::RecordNotUpdated => {
+                            Ro::warn("未更新数据，请检查记录是否存在".to_string())
+                        }
+                        _ => Ro::fail("数据库错误".to_string()).detail(Some(db_err.to_string())),
+                    },
+                    _ => Ro::fail("数据层错误".to_string()).detail(Some(error.to_string())),
                 },
                 _ => Ro::fail(error.to_string()),
             },
@@ -107,10 +109,13 @@ impl ResponseError for CtrlError {
             CtrlError::Io(_) => StatusCode::INTERNAL_SERVER_ERROR,
             CtrlError::Svc(error) => match error {
                 SvcError::NotFound(_) => StatusCode::NOT_FOUND,
-                #[cfg(feature = "crud")]
-                SvcError::DuplicateKey(_, _) | SvcError::DeleteViolateConstraint(_, _, _) => {
-                    StatusCode::OK
-                }
+                #[cfg(feature = "db")]
+                SvcError::Database(error) => match error {
+                    DaoError::DuplicateKey(_, _) | DaoError::DeleteViolateConstraint(_, _, _) => {
+                        StatusCode::OK
+                    }
+                    _ => StatusCode::INTERNAL_SERVER_ERROR,
+                },
                 _ => StatusCode::INTERNAL_SERVER_ERROR,
             },
         }

@@ -16,7 +16,7 @@ base = ["dep:log", "dep:tracing-log", "dep:tracing-core", "dep:tracing-subscribe
 api-client = ["base", "dep:reqwest"]
 app = ["base", "dep:anyhow", "dep:config", "dep:libc", "dep:validator", "dep:wheel-rs"]
 web = ["app", "dep:actix-web", "dep:actix-cors", "dep:actix-service", "dep:actix-http", "dep:socket2", "dep:rustls", "dep:reqwest"]
-crud = ["app", "dep:sea-orm", "dep:regex", "dep:once_cell"]
+db = ["app", "dep:sea-orm", "dep:regex", "dep:once_cell"]
 
 [dependencies]
 anyhow = { version = "1.0.51", optional = true }

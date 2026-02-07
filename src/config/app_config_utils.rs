@@ -41,9 +41,9 @@ pub fn build_app_config<'a, T: serde::Deserialize<'a>>(
         // E.g. `APP_DEBUG=1 ./target/app` would set the `debug` key
         .add_source(config::Environment::with_prefix("APP"))
         .build()
-        .map_err(|e| AppConfigError::Build(e))?;
+        .map_err(AppConfigError::Build)?;
 
     Ok(config
         .try_deserialize()
-        .map_err(|e| AppConfigError::Deserialize(e))?)
+        .map_err(AppConfigError::Deserialize)?)
 }

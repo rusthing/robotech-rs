@@ -1,4 +1,4 @@
-use crate::env::{Env, ENV};
+use crate::env::{Env, EnvError, ENV};
 use crate::signal::signal_manager_error::SignalManagerError;
 use libc::pid_t;
 use log::{debug, error};
@@ -16,7 +16,7 @@ pub struct SignalManager {
 impl SignalManager {
     pub fn new(signal_instruction: String) -> Result<Self, SignalManagerError> {
         debug!("初始化信号管理者");
-        let Env { app_file_path, .. } = ENV.get().expect("Environment not initialized");
+        let Env { app_file_path, .. } = ENV.get().ok_or(EnvError::GetEnv())?;
         let old_pid = Self::parse_and_handle_signal_args(signal_instruction, app_file_path)?;
         let pid_file_guard = PidFileGuard::new(app_file_path)?;
         // 监听系统信号

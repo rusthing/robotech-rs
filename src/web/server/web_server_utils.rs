@@ -222,7 +222,7 @@ pub async fn start_web_server(
     });
 
     info!("启动Web服务器...");
-    server.await.map_err(|e| WebServerError::Runtime(e))?;
+    server.await?;
     Ok(())
 }
 
@@ -386,9 +386,7 @@ async fn terminate_old_web_server(
 ) -> Result<(), WebServerError> {
     if let Some(old_pid) = old_pid {
         debug!("停止运行旧的Web服务器...");
-        terminate_process(old_pid, wait_timeout, retry_interval)
-            .await
-            .map_err(|e| WebServerError::TerminateOldWebServer(e))?;
+        terminate_process(old_pid, wait_timeout, retry_interval).await?;
     }
     Ok(())
 }

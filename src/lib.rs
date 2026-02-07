@@ -4,7 +4,9 @@ pub mod api_client;
 pub mod config;
 #[cfg(feature = "base")]
 pub mod cst;
-#[cfg(feature = "crud")]
+#[cfg(feature = "db")]
+pub mod dao;
+#[cfg(feature = "db")]
 pub mod db;
 #[cfg(feature = "app")]
 pub mod env;

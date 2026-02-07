@@ -62,12 +62,15 @@ pub fn get_id_from_query_params(
 pub fn get_current_user_id(req: HttpRequest) -> Result<u64, validator::ValidationError> {
     req.headers()
         .get(USER_ID_HEADER_NAME)
-        .ok_or_else(|| {
+        .ok_or({
             let msg = format!("缺少必要参数<{}>", USER_ID_HEADER_NAME);
             validator::ValidationError::new(Box::leak(msg.into_boxed_str()))
         })?
         .to_str()
-        .unwrap()
+        .map_err(|_| {
+            let msg = format!("参数<{}>格式不正确", USER_ID_HEADER_NAME);
+            validator::ValidationError::new(Box::leak(msg.into_boxed_str()))
+        })?
         .to_string()
         .parse::<u64>()
         .map_err(|_| {

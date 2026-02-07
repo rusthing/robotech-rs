@@ -1,4 +1,4 @@
-use crate::env::{Env, ENV};
+use crate::env::{Env, EnvError, ENV};
 use crate::log::LogError;
 use log::debug;
 use std::sync::OnceLock;
@@ -109,7 +109,7 @@ pub fn init_log() -> Result<(), LogError> {
         app_dir,
         app_file_name,
         ..
-    } = ENV.get().expect("Environment not initialized");
+    } = ENV.get().ok_or(EnvError::GetEnv())?;
     let log_dir = app_dir.join("log");
     fs::create_dir_all(log_dir.as_path())
         .map_err(|e| LogError::CreateDirectory(format!("{log_dir:?}-{e}")))?;

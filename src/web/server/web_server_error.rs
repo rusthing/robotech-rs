@@ -13,5 +13,5 @@ pub enum WebServerError {
     #[error("Socket error: {0}")]
     Socket(String),
     #[error("Web server runtime error: {0}")]
-    Runtime(#[source] io::Error),
+    Runtime(#[from] io::Error),
 }
