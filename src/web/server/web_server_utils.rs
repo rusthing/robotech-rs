@@ -12,6 +12,7 @@ use socket2::{Domain, Socket, Type};
 use std::fmt::Debug;
 use std::net::{IpAddr, SocketAddr, TcpListener};
 use std::time::Duration;
+use tokio::sync::oneshot;
 use tokio::time::timeout;
 use wheel_rs::process::terminate_process;
 
@@ -58,6 +59,7 @@ pub async fn start_web_server(
     configure: fn(&mut web::ServiceConfig),
     port_of_args: Option<u16>,
     old_pid: Option<pid_t>,
+    app_stated_sender: oneshot::Sender<()>,
 ) -> Result<(), WebServerError> {
     info!("初始化Web服务器({:?})...", web_server_config);
 
@@ -130,6 +132,7 @@ pub async fn start_web_server(
         }
     }
 
+    // 如果是随机端口，端口复用无意义
     if is_random_port {
         reuse_port = false;
     }
@@ -206,7 +209,13 @@ pub async fn start_web_server(
             error!("启动Web服务器超时: {}", e);
             return;
         }
-        // 如果是随机端口或复用端口，则先启动新服务器，再停止旧服务器
+
+        if let Err(_) = app_stated_sender.send(()) {
+            error!("发送应用启动完成消息错误");
+            return;
+        };
+
+        // 如果是随机端口或复用端口，则可以在前面先启动新服务器，后面这里再停止旧服务器
         if is_random_port || reuse_port {
             if let Err(e) = terminate_old_web_server(
                 old_pid,

@@ -1,7 +1,8 @@
+use crate::env::EnvError;
+use libc::pid_t;
 use std::path::PathBuf;
 use thiserror::Error;
 use wheel_rs::process::{PidError, ProcessError};
-use crate::env::EnvError;
 
 #[derive(Error, Debug)]
 pub enum SignalManagerError {
@@ -14,5 +15,5 @@ pub enum SignalManagerError {
     #[error("PID file not found: {0}")]
     NotFoundPidFile(PathBuf),
     #[error("Program is running: {0}")]
-    ProgramIsRunning(PathBuf),
+    ProgramIsRunning(pid_t),
 }

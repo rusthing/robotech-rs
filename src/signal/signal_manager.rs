@@ -4,27 +4,51 @@ use libc::pid_t;
 use log::{debug, error};
 use std::path::PathBuf;
 use std::process;
+use std::sync::RwLock;
+use tokio::sync::oneshot;
 use wheel_rs::process::{
-    check_process, read_pid, send_signal_by_instruction, watch_signal, PidFileGuard,
+    check_process, delete_pid_file, get_pid_file_path, read_pid, send_signal_by_instruction,
+    watch_signal, PidFileGuard,
 };
 
-pub struct SignalManager {
-    _pid_file_guard: PidFileGuard,
-    pub old_pid: Option<pid_t>,
+static PID_FILE_GUARD: RwLock<Option<PidFileGuard>> = RwLock::new(None);
+
+pub struct SignalManager;
+impl Drop for SignalManager {
+    fn drop(&mut self) {
+        let mut pid_file_guard_lock = PID_FILE_GUARD
+            .write()
+            .expect("Failed to write to PID_FILE_GUARD");
+        *pid_file_guard_lock = None;
+    }
 }
 
 impl SignalManager {
-    pub fn new(signal_instruction: String) -> Result<Self, SignalManagerError> {
+    pub fn new(
+        signal_instruction: String,
+    ) -> Result<(Self, Option<pid_t>, oneshot::Sender<()>), SignalManagerError> {
         debug!("初始化信号管理者");
         let Env { app_file_path, .. } = ENV.get().ok_or(EnvError::GetEnv())?;
-        let old_pid = Self::parse_and_handle_signal_args(signal_instruction, app_file_path)?;
-        let pid_file_guard = PidFileGuard::new(app_file_path)?;
+        let pid_file_path = get_pid_file_path(app_file_path);
+        let old_pid = Self::parse_and_handle_signal_args(signal_instruction, &pid_file_path)?;
+
+        let (app_started_sender, app_stated_receiver) = oneshot::channel::<()>();
+
         // 监听系统信号
         watch_signal();
-        Ok(Self {
-            _pid_file_guard: pid_file_guard,
-            old_pid,
-        })
+
+        tokio::spawn(async move {
+            if let Ok(_) = app_stated_receiver.await
+                && let Ok(pid_file_guard) = PidFileGuard::new(pid_file_path)
+            {
+                let mut pid_file_guard_lock = PID_FILE_GUARD
+                    .write()
+                    .expect("Failed to write to PID_FILE_GUARD");
+                *pid_file_guard_lock = Some(pid_file_guard);
+            }
+        });
+
+        Ok((Self {}, old_pid, app_started_sender))
     }
 
     /// # 解析并处理信号参数
@@ -57,32 +81,39 @@ impl SignalManager {
     /// 当PID文件已存在且对应进程正在运行时，函数会panic并输出提示信息
     fn parse_and_handle_signal_args(
         signal_instruction: String,
-        app_file_path: &PathBuf,
+        pid_file_path: &PathBuf,
     ) -> Result<Option<pid_t>, SignalManagerError> {
         debug!("parse_and_handle_signal_args: {:?}", signal_instruction);
+        let old_pid = read_pid(pid_file_path)?;
         if signal_instruction == "restart" {
             // 不处理，直接返回(restart指令在本函数中不处理，后续在需要时再单独发送信号停止旧程序)
-            if let Some(pid) = read_pid(app_file_path)?
-                && check_process(pid)?
+            if let Some(old_pid) = old_pid
+                && check_process(old_pid)?
             {
-                return Ok(Some(pid));
+                return Ok(Some(old_pid));
             }
             Ok(None)
         } else if signal_instruction == "start" {
             // 如果存在PID文件且进程存在，则报错
-            if let Some(pid) = read_pid(app_file_path)?
-                && check_process(pid)?
+            if let Some(old_pid) = old_pid
+                && check_process(old_pid)?
             {
-                Err(SignalManagerError::ProgramIsRunning(app_file_path.clone()))?
+                Err(SignalManagerError::ProgramIsRunning(old_pid))?
             }
             Ok(None)
         } else {
-            let pid = read_pid(app_file_path)?
-                .ok_or(SignalManagerError::NotFoundPidFile(app_file_path.clone()))?;
-            if let Err(e) = send_signal_by_instruction(&signal_instruction, pid) {
+            let old_pid =
+                old_pid.ok_or(SignalManagerError::NotFoundPidFile(pid_file_path.clone()))?;
+            if let Err(e) = send_signal_by_instruction(&signal_instruction, old_pid) {
                 error!("Failed to send signal: {e}");
                 process::exit(1);
             } else {
+                if signal_instruction == "kill" {
+                    if let Err(e) = delete_pid_file(&pid_file_path) {
+                        error!("Failed to delete pid file: {e}");
+                        process::exit(1);
+                    }
+                }
                 process::exit(0);
             };
         }

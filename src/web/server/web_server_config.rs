@@ -100,11 +100,11 @@ fn start_wait_timeout_default() -> Duration {
     Duration::from_secs(10)
 }
 fn start_retry_interval_default() -> Duration {
-    Duration::from_secs(500)
+    Duration::from_millis(500)
 }
 fn terminate_old_wait_timeout_default() -> Duration {
-    Duration::from_secs(10)
+    Duration::from_secs(15)
 }
 fn terminate_old_retry_interval_default() -> Duration {
-    Duration::from_secs(1)
+    Duration::from_millis(500)
 }
