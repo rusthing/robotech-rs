@@ -1,7 +1,7 @@
 #[cfg(feature = "api-client")]
 pub mod api_client;
 #[cfg(feature = "app")]
-pub mod config;
+pub mod app;
 #[cfg(feature = "base")]
 pub mod cst;
 #[cfg(feature = "db")]

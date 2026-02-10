@@ -1,4 +1,4 @@
-use crate::config::AppConfigError;
+use crate::app::AppConfigError;
 use crate::env::{Env, EnvError, ENV};
 use config::Config;
 
@@ -37,7 +37,7 @@ pub fn build_app_config<'a, T: serde::Deserialize<'a>>(
 
     // 后续添加环境变量，以覆盖配置文件中的设置
     let config = config
-        // Add in config from the environment (with a prefix of APP)
+        // Add in app from the environment (with a prefix of APP)
         // E.g. `APP_DEBUG=1 ./target/app` would set the `debug` key
         .add_source(config::Environment::with_prefix("APP"))
         .build()
