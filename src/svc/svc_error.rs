@@ -1,6 +1,7 @@
 #[cfg(feature = "api-client")]
 use crate::api_client::ApiClientError;
 use crate::dao::DaoError;
+use idworker::IdWorkerError;
 use std::time::SystemTimeError;
 
 /// # 自定义服务层的错误枚举
@@ -18,8 +19,10 @@ use std::time::SystemTimeError;
 pub enum SvcError {
     #[error("{0}")]
     Runtime(#[from] anyhow::Error),
-    #[error("系统时间错误: {0}")]
+    #[error("系统时钟错误: {0}")]
     SystemTime(#[from] SystemTimeError),
+    #[error("ID工作者错误: {0}")]
+    IdWorker(#[from] IdWorkerError),
     #[error("参数校验错误: {0}")]
     Validation(#[from] validator::ValidationError),
     #[error("参数校验错误: {0}")]

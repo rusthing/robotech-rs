@@ -1,4 +1,5 @@
 use anyhow::anyhow;
+use idworker::IdWorkerError;
 use once_cell::sync::Lazy;
 use regex::{Captures, Regex};
 use sea_orm::DbErr;
@@ -42,8 +43,10 @@ pub enum DaoError {
     Runtime(#[from] anyhow::Error),
     #[error("获取DB_CONN错误")]
     GetDbConn(),
-    #[error("系统时间错误: {0}")]
+    #[error("系统时钟错误: {0}")]
     SystemTime(#[from] SystemTimeError),
+    #[error("ID工作者错误: {0}")]
+    IdWorker(#[from] IdWorkerError),
     #[error("重复键错误: {0} {1}")]
     DuplicateKey(String, String),
     #[error("删除操作违反了数据库约束条件: {0} {1} {2}")]

@@ -6,6 +6,7 @@ use std::path::PathBuf;
 use std::process;
 use std::sync::RwLock;
 use tokio::sync::oneshot;
+use tracing::instrument;
 use wheel_rs::process::{
     check_process, delete_pid_file, get_pid_file_path, read_pid, send_signal_by_instruction,
     watch_signal, PidFileGuard,
@@ -13,6 +14,7 @@ use wheel_rs::process::{
 
 static PID_FILE_GUARD: RwLock<Option<PidFileGuard>> = RwLock::new(None);
 
+#[derive(Debug)]
 pub struct SignalManager;
 impl Drop for SignalManager {
     fn drop(&mut self) {
@@ -24,10 +26,11 @@ impl Drop for SignalManager {
 }
 
 impl SignalManager {
+    #[instrument(ret, err)]
     pub fn new(
         signal_instruction: String,
     ) -> Result<(Self, Option<pid_t>, oneshot::Sender<()>), SignalManagerError> {
-        debug!("初始化信号管理者");
+        debug!("初始化信号管理者...");
         let Env { app_file_path, .. } = ENV.get().ok_or(EnvError::GetEnv())?;
         let pid_file_path = get_pid_file_path(app_file_path);
         let old_pid = Self::parse_and_handle_signal_args(signal_instruction, &pid_file_path)?;
@@ -79,11 +82,12 @@ impl SignalManager {
     /// # Panics
     ///
     /// 当PID文件已存在且对应进程正在运行时，函数会panic并输出提示信息
+    #[instrument(ret, err)]
     fn parse_and_handle_signal_args(
         signal_instruction: String,
         pid_file_path: &PathBuf,
     ) -> Result<Option<pid_t>, SignalManagerError> {
-        debug!("parse_and_handle_signal_args: {:?}", signal_instruction);
+        debug!("解析并处理信号参数...");
         let old_pid = read_pid(pid_file_path)?;
         if signal_instruction == "restart" {
             // 不处理，直接返回(restart指令在本函数中不处理，后续在需要时再单独发送信号停止旧程序)

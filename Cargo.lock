@@ -1497,6 +1497,13 @@ dependencies = [
 ]
 
 [[package]]
+name = "idworker"
+version = "1.1.0"
+dependencies = [
+ "thiserror 2.0.18",
+]
+
+[[package]]
 name = "impl-more"
 version = "0.1.9"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2427,6 +2434,7 @@ dependencies = [
  "anyhow",
  "chrono",
  "config",
+ "idworker",
  "libc",
  "log",
  "once_cell",
@@ -2439,6 +2447,7 @@ dependencies = [
  "socket2 0.6.2",
  "thiserror 2.0.18",
  "tokio",
+ "tracing",
  "tracing-appender",
  "tracing-core",
  "tracing-log",
@@ -3922,6 +3931,7 @@ dependencies = [
  "sha2",
  "thiserror 2.0.18",
  "tokio",
+ "tracing",
 ]
 
 [[package]]

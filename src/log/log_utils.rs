@@ -3,6 +3,7 @@ use crate::log::LogError;
 use log::debug;
 use std::sync::OnceLock;
 use std::{env, fs};
+use tracing::field::Visit;
 use tracing_core::{Event, Level, Subscriber};
 use tracing_log::NormalizeEvent;
 use tracing_subscriber::fmt::format::{DefaultFields, Writer};
@@ -41,7 +42,7 @@ where
         let normalized_meta = event.normalized_metadata();
         let meta = normalized_meta.as_ref().unwrap_or_else(|| event.metadata());
 
-        // 根据日志级别添加不同颜色
+        // 根据日志级别设置不同字体颜色
         let level = event.metadata().level();
         write!(
             writer,
@@ -62,17 +63,32 @@ where
 
         write!(writer, "{:<5} ", *level)?;
 
+        // 获取当前活动的 Span 上下文
+        if let Some(span) = _ctx.lookup_current() {
+            write!(writer, "{}(", span.name())?;
+            let fields: Vec<_> = span.fields().iter().collect();
+            for (i, field) in fields.iter().enumerate() {
+                write!(writer, "{}:{}", field.name(), field.value())?;
+                if i < fields.len() - 1 {
+                    write!(writer, ",")?;
+                } else {
+                    write!(writer, "): ")?;
+                }
+            }
+        }
+
         // 格式化事件字段
         // 设置字体颜色
         let visitor = DefaultFields::default();
         visitor.format_fields(writer.by_ref(), event)?;
+
+        // 重置字体颜色
         write!(writer, "\x1B[0m")?;
 
         write!(writer, " \x1B[1;93m-\x1B[0m ")?;
-
-        // 获取文件和行号信息，添加色彩
         // 设置字体颜色为蓝色
         write!(writer, "\x1B[34m")?;
+        // 获取文件和行号信息
         if let (Some(file_path), Some(line_number)) = (meta.file(), meta.line()) {
             let current_dir = env::current_dir().map_err(|_| std::fmt::Error)?;
             let absolute_path = current_dir.join(file_path);
@@ -94,7 +110,7 @@ where
 /// 初始化日志
 pub fn init_log() -> Result<(), LogError> {
     // 创建环境过滤器，支持 RUST_LOG 环境变量
-    let env_filter = EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new("warn"));
+    let env_filter = EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new("info"));
 
     // 控制台输出层
     let console_layer = tracing_subscriber::fmt::layer()
@@ -127,8 +143,8 @@ pub fn init_log() -> Result<(), LogError> {
 
     tracing_subscriber::registry()
         .with(env_filter)
-        .with(console_layer) // 控制台输出层
         .with(file_layer) // 文件输出层
+        .with(console_layer) // 控制台输出层
         .init();
     debug!("初始化日志成功");
     Ok(())
