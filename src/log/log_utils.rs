@@ -1,8 +1,9 @@
 use crate::env::{Env, EnvError, ENV};
 use crate::log::LogError;
 use log::debug;
+use std::env;
 use std::sync::OnceLock;
-use std::{env, fs};
+use tracing_appender::rolling::RollingFileAppender;
 use tracing_core::{Event, Level, Subscriber};
 use tracing_log::NormalizeEvent;
 use tracing_subscriber::fmt::format::{DefaultFields, Writer};
@@ -95,7 +96,6 @@ where
                 // 重置字体颜色
                 write!(writer, "\x1B[0m")?;
                 write!(writer, "{}(", span.name())?;
-
                 // 打印 span 的字段（参数）
                 let extensions = span.extensions();
                 if let Some(fields) = extensions.get::<fmt::FormattedFields<N>>() {
@@ -129,16 +129,18 @@ pub fn init_log() -> Result<(), LogError> {
     let Env {
         app_dir,
         app_file_name,
+        log_rotation,
         ..
     } = ENV.get().ok_or(EnvError::GetEnv())?;
     let log_dir = app_dir.join("log");
-    fs::create_dir_all(log_dir.as_path())
-        .map_err(|e| LogError::CreateDirectory(format!("{log_dir:?}-{e}")))?;
-    let log_file_name_prefix = format!("{}.log", app_file_name);
-    let file_appender = tracing_appender::rolling::hourly(log_dir, log_file_name_prefix);
+    let file_appender = RollingFileAppender::builder()
+        .rotation(log_rotation.clone()) // 滚动策略：每天
+        .filename_prefix(format!("{}.log", app_file_name)) // 文件名前缀
+        .filename_suffix("json") // 文件后缀，如 "log", "txt" 等
+        .build(log_dir) // 日志目录
+        .map_err(|e| LogError::CreateFileAppender(e))?;
     let (non_blocking, guard) = tracing_appender::non_blocking(file_appender);
-    // 解决锁在初始化方法结束后被提前释放导致后续日志不能输出
-    LOG_GUARD.set(guard).map_err(|_| LogError::SetLogGuard())?;
+    LOG_GUARD.set(guard).map_err(|_| LogError::SetLogGuard())?; // 解决锁在初始化方法结束后被提前释放导致后续日志不能输出
     let file_layer = fmt::layer()
         .with_timer(ChronoLocal::new("%Y-%m-%d %H:%M:%S%.6f".to_string()))
         .with_file(true)
