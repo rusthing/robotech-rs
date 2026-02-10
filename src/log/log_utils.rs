@@ -3,7 +3,6 @@ use crate::log::LogError;
 use log::debug;
 use std::sync::OnceLock;
 use std::{env, fs};
-use tracing::field::Visit;
 use tracing_core::{Event, Level, Subscriber};
 use tracing_log::NormalizeEvent;
 use tracing_subscriber::fmt::format::{DefaultFields, Writer};
@@ -39,11 +38,13 @@ where
         mut writer: Writer<'_>,
         event: &Event<'_>,
     ) -> std::fmt::Result {
-        let normalized_meta = event.normalized_metadata();
-        let meta = normalized_meta.as_ref().unwrap_or_else(|| event.metadata());
+        let normalized_metadata = event.normalized_metadata();
+        let metadata = normalized_metadata
+            .as_ref()
+            .unwrap_or_else(|| event.metadata());
 
         // 根据日志级别设置不同字体颜色
-        let level = event.metadata().level();
+        let level = metadata.level();
         write!(
             writer,
             "\x1B[{}m ",
@@ -63,33 +64,18 @@ where
 
         write!(writer, "{:<5} ", *level)?;
 
-        // 获取当前活动的 Span 上下文
-        if let Some(span) = _ctx.lookup_current() {
-            write!(writer, "{}(", span.name())?;
-            let fields: Vec<_> = span.fields().iter().collect();
-            for (i, field) in fields.iter().enumerate() {
-                write!(writer, "{}:{}", field.name(), field.value())?;
-                if i < fields.len() - 1 {
-                    write!(writer, ",")?;
-                } else {
-                    write!(writer, "): ")?;
-                }
-            }
-        }
-
         // 格式化事件字段
         // 设置字体颜色
         let visitor = DefaultFields::default();
         visitor.format_fields(writer.by_ref(), event)?;
 
-        // 重置字体颜色
-        write!(writer, "\x1B[0m")?;
-
+        // 添加一个分隔符"-"
         write!(writer, " \x1B[1;93m-\x1B[0m ")?;
         // 设置字体颜色为蓝色
         write!(writer, "\x1B[34m")?;
+
         // 获取文件和行号信息
-        if let (Some(file_path), Some(line_number)) = (meta.file(), meta.line()) {
+        if let (Some(file_path), Some(line_number)) = (metadata.file(), metadata.line()) {
             let current_dir = env::current_dir().map_err(|_| std::fmt::Error)?;
             let absolute_path = current_dir.join(file_path);
             let path = format!("{}:{}", absolute_path.display(), line_number);
@@ -100,6 +86,25 @@ where
                 path, label
             )?;
         }
+
+        // 打印 span 链（包括函数名和参数）
+        if let Some(scope) = _ctx.event_scope() {
+            for span in scope.from_root() {
+                // 添加一个箭头"->"
+                write!(writer, " \x1B[1;93m->\x1B[0m ")?;
+                // 重置字体颜色
+                write!(writer, "\x1B[0m")?;
+                write!(writer, "{}(", span.name())?;
+
+                // 打印 span 的字段（参数）
+                let extensions = span.extensions();
+                if let Some(fields) = extensions.get::<fmt::FormattedFields<N>>() {
+                    write!(writer, "{}", fields)?;
+                }
+                write!(writer, ")")?;
+            }
+        }
+
         // 重置字体颜色
         write!(writer, "\x1B[0m")?;
 

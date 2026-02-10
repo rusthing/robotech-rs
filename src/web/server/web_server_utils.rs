@@ -14,6 +14,7 @@ use std::net::{IpAddr, SocketAddr, TcpListener};
 use std::time::Duration;
 use tokio::sync::oneshot;
 use tokio::time::timeout;
+use tracing::instrument;
 use wheel_rs::process::terminate_process;
 
 /// # 健康检查端点
@@ -54,6 +55,7 @@ async fn health() -> impl Responder {
 /// let config = WebServerConfig::default();
 /// start_web_server(config, app_config, None, None).await;
 /// ```
+#[instrument]
 pub async fn start_web_server(
     web_server_config: WebServerConfig,
     configure: fn(&mut web::ServiceConfig),
@@ -61,7 +63,7 @@ pub async fn start_web_server(
     old_pid: Option<pid_t>,
     app_stated_sender: oneshot::Sender<()>,
 ) -> Result<(), WebServerError> {
-    info!("初始化Web服务器({:?})...", web_server_config);
+    info!("初始化Web服务器...");
 
     let WebServerConfig {
         bind: binds,
