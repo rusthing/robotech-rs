@@ -55,7 +55,7 @@ async fn health() -> impl Responder {
 /// let config = WebServerConfig::default();
 /// start_web_server(config, app_config, None, None).await;
 /// ```
-#[instrument]
+#[instrument(level = "debug", err)]
 pub async fn start_web_server(
     web_server_config: WebServerConfig,
     configure: fn(&mut web::ServiceConfig),
@@ -63,7 +63,7 @@ pub async fn start_web_server(
     old_pid: Option<pid_t>,
     app_stated_sender: oneshot::Sender<()>,
 ) -> Result<(), WebServerError> {
-    info!("初始化Web服务器...");
+    debug!("初始化Web服务器...");
 
     let WebServerConfig {
         bind: binds,
@@ -232,7 +232,7 @@ pub async fn start_web_server(
         }
     });
 
-    info!("启动Web服务器...");
+    debug!("启动Web服务器...");
     server.await?;
     Ok(())
 }

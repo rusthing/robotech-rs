@@ -7,10 +7,8 @@ pub enum EnvError {
     GetAppPath(io::Error),
     #[error("Failed to get application file name")]
     GetAppFileName(),
-    #[error("Failed to set ENV")]
-    SetEnv(),
-    #[error("Failed to get ENV")]
-    GetEnv(),
-    #[error("Invalid environment variable: {0}-{1}, only support {2}")]
-    InvalidEnvironmentVariable(String, String, String),
+    #[error("Failed to set APP_ENV")]
+    SetAppEnv(),
+    #[error("Failed to get APP_ENV")]
+    GetAppEnv(),
 }

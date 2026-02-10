@@ -4,6 +4,7 @@ use crate::cst::user_id_cst::USER_ID_HEADER_NAME;
 use crate::ro::Ro;
 use reqwest::Client;
 use std::sync::LazyLock;
+use tracing::instrument;
 
 pub static REQWEST_CLIENT: LazyLock<Client> = LazyLock::new(|| Client::new());
 
@@ -14,6 +15,7 @@ pub struct CrudApiClient {
 
 impl CrudApiClient {
     /// 执行GET请求的通用方法
+    #[instrument(level = "debug", ret, err)]
     pub async fn get(
         &self,
         path: &str,
@@ -51,6 +53,7 @@ impl CrudApiClient {
     }
 
     /// 执行GET请求的通用方法，返回bytes
+    #[instrument(level = "debug", ret, err)]
     pub async fn get_bytes(
         &self,
         path: &str,
@@ -84,7 +87,8 @@ impl CrudApiClient {
     }
 
     /// 执行POST请求的通用方法
-    pub async fn post<B: serde::Serialize + Sync>(
+    #[instrument(level = "debug", ret, err)]
+    pub async fn post<B: serde::Serialize + Sync + std::fmt::Debug>(
         &self,
         path: &str,
         body: &B,
@@ -122,7 +126,8 @@ impl CrudApiClient {
         Ok(result)
     }
     /// 执行PUT请求的通用方法
-    pub async fn put<B: serde::Serialize + Sync>(
+    #[instrument(level = "debug", ret, err)]
+    pub async fn put<B: serde::Serialize + Sync + std::fmt::Debug>(
         &self,
         path: &str,
         body: &B,
@@ -160,6 +165,7 @@ impl CrudApiClient {
         Ok(result)
     }
     /// 执行DELETE请求的通用方法
+    #[instrument(level = "debug", ret, err)]
     pub async fn delete<B: serde::Serialize>(
         &self,
         path: &str,

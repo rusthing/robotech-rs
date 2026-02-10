@@ -1,6 +1,7 @@
 #[cfg(feature = "api-client")]
 use crate::api_client::ApiClientError;
 use crate::dao::DaoError;
+use crate::env::EnvError;
 use idworker::IdWorkerError;
 use std::time::SystemTimeError;
 
@@ -19,6 +20,8 @@ use std::time::SystemTimeError;
 pub enum SvcError {
     #[error("{0}")]
     Runtime(#[from] anyhow::Error),
+    #[error("环境变量错误: {0}")]
+    GetAppEnv(#[from] EnvError),
     #[error("系统时钟错误: {0}")]
     SystemTime(#[from] SystemTimeError),
     #[error("ID工作者错误: {0}")]

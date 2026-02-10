@@ -1,4 +1,4 @@
-use crate::env::{Env, EnvError, ENV};
+use crate::env::{AppEnv, EnvError, APP_ENV};
 use crate::signal::signal_manager_error::SignalManagerError;
 use libc::pid_t;
 use log::{debug, error};
@@ -26,12 +26,12 @@ impl Drop for SignalManager {
 }
 
 impl SignalManager {
-    #[instrument(ret, err)]
+    #[instrument(level = "debug", ret, err)]
     pub fn new(
         signal_instruction: String,
     ) -> Result<(Self, Option<pid_t>, oneshot::Sender<()>), SignalManagerError> {
         debug!("初始化信号管理者...");
-        let Env { app_file_path, .. } = ENV.get().ok_or(EnvError::GetEnv())?;
+        let AppEnv { app_file_path, .. } = APP_ENV.get().ok_or(EnvError::GetAppEnv())?;
         let pid_file_path = get_pid_file_path(app_file_path);
         let old_pid = Self::parse_and_handle_signal_args(signal_instruction, &pid_file_path)?;
 
@@ -82,7 +82,7 @@ impl SignalManager {
     /// # Panics
     ///
     /// 当PID文件已存在且对应进程正在运行时，函数会panic并输出提示信息
-    #[instrument(ret, err)]
+    #[instrument(level = "debug", ret, err)]
     fn parse_and_handle_signal_args(
         signal_instruction: String,
         pid_file_path: &PathBuf,

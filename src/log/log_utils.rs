@@ -1,5 +1,6 @@
-use crate::env::{Env, EnvError, ENV};
-use crate::log::LogError;
+use crate::env::{AppEnv, EnvError, APP_ENV};
+use crate::log::{LogConfig, LogError};
+use config::Config;
 use log::debug;
 use std::env;
 use std::sync::OnceLock;
@@ -20,11 +21,15 @@ static LOG_GUARD: OnceLock<tracing_appender::non_blocking::WorkerGuard> = OnceLo
 
 struct CustomFormatter {
     timer_format: String,
+    show_spans: bool,
 }
 
 impl CustomFormatter {
-    pub fn new(timer_format: String) -> Self {
-        Self { timer_format }
+    pub fn new(timer_format: String, show_spans: bool) -> Self {
+        Self {
+            timer_format,
+            show_spans,
+        }
     }
 }
 
@@ -72,10 +77,10 @@ where
 
         // 添加一个分隔符"-"
         write!(writer, " \x1B[1;93m-\x1B[0m ")?;
-        // 设置字体颜色为蓝色
-        write!(writer, "\x1B[34m")?;
 
         // 获取文件和行号信息
+        // 设置字体颜色为蓝色
+        write!(writer, "\x1B[34m")?;
         if let (Some(file_path), Some(line_number)) = (metadata.file(), metadata.line()) {
             let current_dir = env::current_dir().map_err(|_| std::fmt::Error)?;
             let absolute_path = current_dir.join(file_path);
@@ -89,19 +94,27 @@ where
         }
 
         // 打印 span 链（包括函数名和参数）
-        if let Some(scope) = _ctx.event_scope() {
-            for span in scope.from_root() {
-                // 添加一个箭头"->"
-                write!(writer, " \x1B[1;93m->\x1B[0m ")?;
-                // 重置字体颜色
-                write!(writer, "\x1B[0m")?;
-                write!(writer, "{}(", span.name())?;
-                // 打印 span 的字段（参数）
-                let extensions = span.extensions();
-                if let Some(fields) = extensions.get::<fmt::FormattedFields<N>>() {
-                    write!(writer, "{}", fields)?;
+        if self.show_spans {
+            if let Some(scope) = _ctx.event_scope() {
+                for span in scope.from_root() {
+                    // 添加一个箭头"->"
+                    write!(writer, " \x1B[1;93m->\x1B[0m ")?;
+                    // 设置字体颜色为蓝色
+                    write!(writer, "\x1B[34m")?;
+                    write!(writer, "{}(", span.name())?;
+                    // 重置字体颜色
+                    write!(writer, "\x1B[0m")?;
+                    // 打印 span 的字段（参数）
+                    let extensions = span.extensions();
+                    if let Some(fields) = extensions.get::<fmt::FormattedFields<N>>() {
+                        write!(writer, "{}", fields)?;
+                    }
+                    // 设置字体颜色为蓝色
+                    write!(writer, "\x1B[34m")?;
+                    write!(writer, ")")?;
+                    // 重置字体颜色
+                    write!(writer, "\x1B[0m")?;
                 }
-                write!(writer, ")")?;
             }
         }
 
@@ -113,28 +126,33 @@ where
 }
 
 /// 初始化日志
-pub fn init_log() -> Result<(), LogError> {
+pub fn init_log(path: Option<String>) -> Result<(), LogError> {
+    let log_config = build_log_config(path)?;
+
     // 创建环境过滤器，支持 RUST_LOG 环境变量
-    let env_filter = EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new("info"));
+    let env_filter =
+        EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new(log_config.level));
 
     // 控制台输出层
     let console_layer = tracing_subscriber::fmt::layer()
         // .with_timer(ChronoLocal::new("%H:%M:%S%.6f".to_string()))
         // .with_target(false)
         // .pretty()
-        .event_format(CustomFormatter::new("%H:%M:%S%.6f".to_string()))
+        .event_format(CustomFormatter::new(
+            "%H:%M:%S%.6f".to_string(),
+            log_config.show_spans,
+        ))
         .with_writer(std::io::stdout);
 
     // 文件输出层
-    let Env {
+    let AppEnv {
         app_dir,
         app_file_name,
-        log_rotation,
         ..
-    } = ENV.get().ok_or(EnvError::GetEnv())?;
+    } = APP_ENV.get().ok_or(EnvError::GetAppEnv())?;
     let log_dir = app_dir.join("log");
     let file_appender = RollingFileAppender::builder()
-        .rotation(log_rotation.clone()) // 滚动策略：每天
+        .rotation(log_config.rotation.clone()) // 滚动策略：每天
         .filename_prefix(format!("{}.log", app_file_name)) // 文件名前缀
         .filename_suffix("json") // 文件后缀，如 "log", "txt" 等
         .build(log_dir) // 日志目录
@@ -155,4 +173,36 @@ pub fn init_log() -> Result<(), LogError> {
         .init();
     debug!("初始化日志成功");
     Ok(())
+}
+
+fn build_log_config(path: Option<String>) -> Result<LogConfig, LogError> {
+    let mut config = Config::builder();
+    let AppEnv { app_dir, .. } = APP_ENV.get().ok_or(EnvError::GetAppEnv())?;
+    let temp_path = app_dir.join("log").to_string_lossy().to_string();
+
+    // Add in `./xxx.toml`, `./xxx.yml`, `./xxx.json`, `./xxx.ini`, `./xxx.ron`
+    config = config
+        .add_source(config::File::with_name(format!("{}.toml", temp_path).as_str()).required(false))
+        .add_source(config::File::with_name(format!("{}.yml", temp_path).as_str()).required(false))
+        .add_source(config::File::with_name(format!("{}.json", temp_path).as_str()).required(false))
+        .add_source(config::File::with_name(format!("{}.ini", temp_path).as_str()).required(false))
+        .add_source(config::File::with_name(format!("{}.ron", temp_path).as_str()).required(false));
+
+    if let Some(temp_path) = path.clone() {
+        // 如果已指定配置文件路径
+        let temp_path = config::File::with_name(temp_path.as_str());
+        config = config.add_source(temp_path);
+    };
+
+    // 后续添加环境变量，以覆盖配置文件中的设置
+    let config = config
+        // Add in log config from the environment (with a prefix of LOG)
+        // E.g. `LOG_SHOW_SPANS=true ./target/app` would set the `show_spans` to `true`
+        .add_source(config::Environment::with_prefix("LOG"))
+        .build()
+        .map_err(LogError::BuildConfig)?;
+
+    Ok(config
+        .try_deserialize()
+        .map_err(LogError::DeserializeConfig)?)
 }

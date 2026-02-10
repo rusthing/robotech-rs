@@ -1,13 +1,15 @@
 use crate::app::AppConfigError;
-use crate::env::{Env, EnvError, ENV};
+use crate::env::{AppEnv, EnvError, APP_ENV};
 use config::Config;
+use tracing::instrument;
 
+#[instrument(level = "debug", err)]
 pub fn build_app_config<'a, T: serde::Deserialize<'a>>(
     path: Option<String>,
 ) -> Result<T, AppConfigError> {
     let mut config = Config::builder();
     if path.is_none() {
-        let Env { app_file_path, .. } = ENV.get().ok_or(EnvError::GetEnv())?;
+        let AppEnv { app_file_path, .. } = APP_ENV.get().ok_or(EnvError::GetAppEnv())?;
         let temp_path = app_file_path.to_string_lossy().to_string();
 
         // Add in `./xxx.toml`, `./xxx.yml`, `./xxx.json`, `./xxx.ini`, `./xxx.ron`
