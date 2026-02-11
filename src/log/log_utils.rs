@@ -1,6 +1,6 @@
+use crate::cfg::{build_config, CfgError};
 use crate::env::{AppEnv, EnvError, APP_ENV};
 use crate::log::{LogConfig, LogError};
-use config::Config;
 use log::debug;
 use std::env;
 use std::sync::OnceLock;
@@ -126,8 +126,8 @@ where
 }
 
 /// 初始化日志
-pub fn init_log(path: Option<String>) -> Result<(), LogError> {
-    let log_config = build_log_config(path)?;
+pub fn init_log() -> Result<(), LogError> {
+    let log_config = build_log_config()?;
 
     // 创建环境过滤器，支持 RUST_LOG 环境变量
     let env_filter =
@@ -152,7 +152,7 @@ pub fn init_log(path: Option<String>) -> Result<(), LogError> {
     } = APP_ENV.get().ok_or(EnvError::GetAppEnv())?;
     let log_dir = app_dir.join("log");
     let file_appender = RollingFileAppender::builder()
-        .rotation(log_config.rotation.clone()) // 滚动策略：每天
+        .rotation(log_config.rotation.clone()) // 滚动策略
         .filename_prefix(format!("{}.log", app_file_name)) // 文件名前缀
         .filename_suffix("json") // 文件后缀，如 "log", "txt" 等
         .build(log_dir) // 日志目录
@@ -175,34 +175,6 @@ pub fn init_log(path: Option<String>) -> Result<(), LogError> {
     Ok(())
 }
 
-fn build_log_config(path: Option<String>) -> Result<LogConfig, LogError> {
-    let mut config = Config::builder();
-    let AppEnv { app_dir, .. } = APP_ENV.get().ok_or(EnvError::GetAppEnv())?;
-    let temp_path = app_dir.join("log").to_string_lossy().to_string();
-
-    // Add in `./xxx.toml`, `./xxx.yml`, `./xxx.json`, `./xxx.ini`, `./xxx.ron`
-    config = config
-        .add_source(config::File::with_name(format!("{}.toml", temp_path).as_str()).required(false))
-        .add_source(config::File::with_name(format!("{}.yml", temp_path).as_str()).required(false))
-        .add_source(config::File::with_name(format!("{}.json", temp_path).as_str()).required(false))
-        .add_source(config::File::with_name(format!("{}.ini", temp_path).as_str()).required(false))
-        .add_source(config::File::with_name(format!("{}.ron", temp_path).as_str()).required(false));
-
-    if let Some(temp_path) = path.clone() {
-        // 如果已指定配置文件路径
-        let temp_path = config::File::with_name(temp_path.as_str());
-        config = config.add_source(temp_path);
-    };
-
-    // 后续添加环境变量，以覆盖配置文件中的设置
-    let config = config
-        // Add in log config from the environment (with a prefix of LOG)
-        // E.g. `LOG_SHOW_SPANS=true ./target/app` would set the `show_spans` to `true`
-        .add_source(config::Environment::with_prefix("LOG"))
-        .build()
-        .map_err(LogError::BuildConfig)?;
-
-    Ok(config
-        .try_deserialize()
-        .map_err(LogError::DeserializeConfig)?)
+fn build_log_config() -> Result<LogConfig, CfgError> {
+    build_config("LOG", None)
 }

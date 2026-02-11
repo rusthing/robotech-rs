@@ -2,7 +2,6 @@
 pub mod api_client;
 #[cfg(feature = "app")]
 pub mod app;
-#[cfg(feature = "base")]
 pub mod cst;
 #[cfg(feature = "db")]
 pub mod dao;
@@ -12,7 +11,6 @@ pub mod db;
 pub mod env;
 #[cfg(feature = "app")]
 pub mod log;
-#[cfg(feature = "base")]
 pub mod ro;
 #[cfg(feature = "app")]
 pub mod signal;
@@ -20,3 +18,4 @@ pub mod signal;
 pub mod svc;
 #[cfg(feature = "web")]
 pub mod web;
+mod cfg;
