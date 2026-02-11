@@ -4,24 +4,47 @@ use config::Config;
 
 pub fn build_config<'a, T: serde::Deserialize<'a>>(
     env_var_prefix: &str,
-    path: Option<String>,
+    cfg_file_name_without_suffix: Option<&str>,
+    cfg_file_path: Option<String>,
 ) -> Result<T, CfgError> {
-    let mut config = Config::builder();
-    let AppEnv { app_dir, .. } = APP_ENV.get().ok_or(EnvError::GetAppEnv())?;
-    let temp_path = app_dir.join("log").to_string_lossy().to_string();
-
     // Add in `./xxx.toml`, `./xxx.yml`, `./xxx.json`, `./xxx.ini`, `./xxx.ron`
-    config = config
-        .add_source(config::File::with_name(format!("{}.toml", temp_path).as_str()).required(false))
-        .add_source(config::File::with_name(format!("{}.yml", temp_path).as_str()).required(false))
-        .add_source(config::File::with_name(format!("{}.json", temp_path).as_str()).required(false))
-        .add_source(config::File::with_name(format!("{}.ini", temp_path).as_str()).required(false))
-        .add_source(config::File::with_name(format!("{}.ron", temp_path).as_str()).required(false));
+    let mut config = Config::builder();
 
-    if let Some(temp_path) = path.clone() {
-        // 如果已指定配置文件路径
-        let temp_path = config::File::with_name(temp_path.as_str());
-        config = config.add_source(temp_path);
+    // 如果已指定配置文件路径
+    config = if let Some(cfg_file_path) = cfg_file_path.clone() {
+        config.add_source(config::File::with_name(cfg_file_path.as_str()))
+    } else {
+        let AppEnv {
+            app_dir,
+            app_file_name_without_suffix,
+            ..
+        } = APP_ENV.get().ok_or(EnvError::GetAppEnv())?;
+        let temp_path = app_dir
+            .join(
+                if let Some(cfg_file_name_without_suffix) = cfg_file_name_without_suffix {
+                    cfg_file_name_without_suffix
+                } else {
+                    app_file_name_without_suffix
+                },
+            )
+            .to_string_lossy()
+            .to_string();
+        config
+            .add_source(
+                config::File::with_name(format!("{}.toml", temp_path).as_str()).required(false),
+            )
+            .add_source(
+                config::File::with_name(format!("{}.yml", temp_path).as_str()).required(false),
+            )
+            .add_source(
+                config::File::with_name(format!("{}.json", temp_path).as_str()).required(false),
+            )
+            .add_source(
+                config::File::with_name(format!("{}.ini", temp_path).as_str()).required(false),
+            )
+            .add_source(
+                config::File::with_name(format!("{}.ron", temp_path).as_str()).required(false),
+            )
     };
 
     // 后续添加环境变量，以覆盖配置文件中的设置

@@ -5,5 +5,5 @@ use tracing::instrument;
 pub fn build_app_config<'a, T: serde::Deserialize<'a>>(
     path: Option<String>,
 ) -> Result<T, CfgError> {
-    build_config("APP", path)
+    build_config("APP", None, path)
 }

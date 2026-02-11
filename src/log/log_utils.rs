@@ -176,5 +176,5 @@ pub fn init_log() -> Result<(), LogError> {
 }
 
 fn build_log_config() -> Result<LogConfig, CfgError> {
-    build_config("LOG", None)
+    build_config("LOG", Some("log"), None)
 }
