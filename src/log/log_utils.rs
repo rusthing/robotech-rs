@@ -127,21 +127,23 @@ where
 
 /// 初始化日志
 pub fn init_log() -> Result<(), LogError> {
-    let log_config = build_log_config()?;
+    let LogConfig {
+        level,
+        console_time_format,
+        file_time_format,
+        show_spans,
+        rotation,
+    } = build_log_config()?;
 
     // 创建环境过滤器，支持 RUST_LOG 环境变量
-    let env_filter =
-        EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new(log_config.level));
+    let env_filter = EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new(level));
 
     // 控制台输出层
     let console_layer = tracing_subscriber::fmt::layer()
         // .with_timer(ChronoLocal::new("%H:%M:%S%.6f".to_string()))
         // .with_target(false)
         // .pretty()
-        .event_format(CustomFormatter::new(
-            "%H:%M:%S%.6f".to_string(),
-            log_config.show_spans,
-        ))
+        .event_format(CustomFormatter::new(console_time_format, show_spans))
         .with_writer(std::io::stdout);
 
     // 文件输出层
@@ -152,7 +154,7 @@ pub fn init_log() -> Result<(), LogError> {
     } = APP_ENV.get().ok_or(EnvError::GetAppEnv())?;
     let log_dir = app_dir.join("log");
     let file_appender = RollingFileAppender::builder()
-        .rotation(log_config.rotation.clone()) // 滚动策略
+        .rotation(rotation.clone()) // 滚动策略
         .filename_prefix(format!("{}.log", app_file_name)) // 文件名前缀
         .filename_suffix("json") // 文件后缀，如 "log", "txt" 等
         .build(log_dir) // 日志目录
@@ -160,7 +162,7 @@ pub fn init_log() -> Result<(), LogError> {
     let (non_blocking, guard) = tracing_appender::non_blocking(file_appender);
     LOG_GUARD.set(guard).map_err(|_| LogError::SetLogGuard())?; // 解决锁在初始化方法结束后被提前释放导致后续日志不能输出
     let file_layer = fmt::layer()
-        .with_timer(ChronoLocal::new("%Y-%m-%d %H:%M:%S%.6f".to_string()))
+        .with_timer(ChronoLocal::new(file_time_format.to_string()))
         .with_file(true)
         .with_line_number(true)
         .json()
