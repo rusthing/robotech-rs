@@ -13,4 +13,6 @@ pub enum LogError {
     CreateFileAppender(InitError),
     #[error("Fail to set LOG_GUARD")]
     SetLogGuard(),
+    #[error("Fail to set LOG_CONFIG_GUARD")]
+    SetLogConfigGuard(),
 }

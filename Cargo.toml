@@ -24,6 +24,8 @@ tracing-log = "0.2.0"
 tracing-core = "0.1.36"
 tracing-appender = "0.2.4"
 tracing-subscriber = { version = "0.3.22", features = ["env-filter", "json", "chrono", "tracing-log"] }
+notify = "8.2.0"
+notify-debouncer-mini = "0.7.0"
 thiserror = "2.0.18"
 chrono = "0.4.43"
 serde = "1.0.228"

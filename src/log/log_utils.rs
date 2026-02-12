@@ -1,9 +1,12 @@
-use crate::cfg::{build_config, CfgError};
+use crate::cfg::{build_config, watch_config_file, CfgError};
 use crate::env::{AppEnv, EnvError, APP_ENV};
 use crate::log::{LogConfig, LogError};
 use log::debug;
 use std::env;
-use std::sync::OnceLock;
+use std::path::Path;
+use std::sync::{mpsc, RwLock};
+use tracing::instrument;
+use tracing_appender::non_blocking::WorkerGuard;
 use tracing_appender::rolling::RollingFileAppender;
 use tracing_core::{Event, Level, Subscriber};
 use tracing_log::NormalizeEvent;
@@ -13,18 +16,18 @@ use tracing_subscriber::fmt::{FmtContext, FormatEvent, FormatFields};
 use tracing_subscriber::layer::SubscriberExt;
 use tracing_subscriber::registry::LookupSpan;
 use tracing_subscriber::util::SubscriberInitExt;
-use tracing_subscriber::{fmt, EnvFilter};
+use tracing_subscriber::{fmt, reload, EnvFilter};
 
 /// 日志文件输出锁
 /// 解决锁在初始化方法结束后被提前释放导致后续日志不能输出
-static LOG_GUARD: OnceLock<tracing_appender::non_blocking::WorkerGuard> = OnceLock::new();
+static LOG_GUARD: RwLock<Option<WorkerGuard>> = RwLock::new(None);
 
-struct CustomFormatter {
+struct CustomConsoleFormatter {
     timer_format: String,
     show_spans: bool,
 }
 
-impl CustomFormatter {
+impl CustomConsoleFormatter {
     pub fn new(timer_format: String, show_spans: bool) -> Self {
         Self {
             timer_format,
@@ -33,7 +36,7 @@ impl CustomFormatter {
     }
 }
 
-impl<S, N> FormatEvent<S, N> for CustomFormatter
+impl<S, N> FormatEvent<S, N> for CustomConsoleFormatter
 where
     S: Subscriber + for<'a> LookupSpan<'a>,
     N: for<'a> FormatFields<'a> + 'static,
@@ -126,25 +129,31 @@ where
 }
 
 /// 初始化日志
+#[instrument(level = "debug", err)]
 pub fn init_log() -> Result<(), LogError> {
-    let LogConfig {
-        level,
-        console_time_format,
-        file_time_format,
-        show_spans,
-        rotation,
-    } = build_log_config()?;
+    let (
+        LogConfig {
+            level,
+            console_time_format,
+            file_time_format,
+            show_spans,
+            rotation,
+        },
+        files,
+    ) = build_log_config()?;
 
     // 创建环境过滤器，支持 RUST_LOG 环境变量
-    let env_filter = EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new(level));
+    let env_filter = create_env_filter(level);
+    let (env_filter_layer, env_layer_reload_handle) = reload::Layer::new(env_filter);
 
     // 控制台输出层
-    let console_layer = tracing_subscriber::fmt::layer()
+    let console_layer = fmt::layer()
         // .with_timer(ChronoLocal::new("%H:%M:%S%.6f".to_string()))
         // .with_target(false)
         // .pretty()
-        .event_format(CustomFormatter::new(console_time_format, show_spans))
+        .event_format(CustomConsoleFormatter::new(console_time_format, show_spans))
         .with_writer(std::io::stdout);
+    let (console_layer, console_layer_reload_handle) = reload::Layer::new(console_layer);
 
     // 文件输出层
     let AppEnv {
@@ -152,31 +161,105 @@ pub fn init_log() -> Result<(), LogError> {
         app_file_name,
         ..
     } = APP_ENV.get().ok_or(EnvError::GetAppEnv())?;
-    let log_dir = app_dir.join("log");
+    let log_dir_path = app_dir.join("log");
+    let log_dir = log_dir_path.to_string_lossy().to_string();
     let file_appender = RollingFileAppender::builder()
         .rotation(rotation.clone()) // 滚动策略
         .filename_prefix(format!("{}.log", app_file_name)) // 文件名前缀
         .filename_suffix("json") // 文件后缀，如 "log", "txt" 等
-        .build(log_dir) // 日志目录
+        .build(log_dir_path) // 日志目录
         .map_err(|e| LogError::CreateFileAppender(e))?;
-    let (non_blocking, guard) = tracing_appender::non_blocking(file_appender);
-    LOG_GUARD.set(guard).map_err(|_| LogError::SetLogGuard())?; // 解决锁在初始化方法结束后被提前释放导致后续日志不能输出
+    let (non_blocking, log_guard) = tracing_appender::non_blocking(file_appender);
     let file_layer = fmt::layer()
         .with_timer(ChronoLocal::new(file_time_format.to_string()))
         .with_file(true)
         .with_line_number(true)
         .json()
         .with_writer(non_blocking);
+    {
+        let mut log_guard_write_lock = LOG_GUARD.write().map_err(|_| LogError::SetLogGuard())?;
+        *log_guard_write_lock = Some(log_guard); // 解决锁在初始化方法结束后被提前释放导致后续日志不能输出
+    }
+    let (file_layer, file_layer_reload_handle) = reload::Layer::new(file_layer);
 
     tracing_subscriber::registry()
-        .with(env_filter)
-        .with(file_layer) // 文件输出层
+        .with(env_filter_layer)
         .with(console_layer) // 控制台输出层
+        .with(file_layer) // 文件输出层
         .init();
     debug!("初始化日志成功");
+
+    debug!("watch log config file...");
+    tokio::spawn(async move {
+        let (sender, receiver) = mpsc::channel();
+        let _watcher = watch_config_file(files, sender).expect("watch log config file error");
+
+        loop {
+            if let Ok(_) = receiver.recv() {
+                debug!("log config file changed, reload log config...");
+                let (
+                    LogConfig {
+                        level,
+                        console_time_format,
+                        show_spans,
+                        file_time_format,
+                        rotation,
+                    },
+                    _,
+                ) = build_log_config().expect("build log config error");
+                env_layer_reload_handle
+                    .modify(|filter| {
+                        *filter = create_env_filter(level);
+                    })
+                    .expect("reload log config error");
+                console_layer_reload_handle
+                    .modify(|filter| {
+                        *filter = fmt::layer()
+                            // .with_timer(ChronoLocal::new("%H:%M:%S%.6f".to_string()))
+                            // .with_target(false)
+                            // .pretty()
+                            .event_format(CustomConsoleFormatter::new(
+                                console_time_format,
+                                show_spans,
+                            ))
+                            .with_writer(std::io::stdout);
+                    })
+                    .expect("reload log config error");
+                file_layer_reload_handle
+                    .modify(|filter| {
+                        let file_appender = RollingFileAppender::builder()
+                            .rotation(rotation.clone()) // 滚动策略
+                            .filename_prefix(format!("{}.log", app_file_name)) // 文件名前缀
+                            .filename_suffix("json") // 文件后缀，如 "log", "txt" 等
+                            .build(Path::new(log_dir.as_str())) // 日志目录
+                            .expect("create file appender error");
+                        let (non_blocking, log_guard) =
+                            tracing_appender::non_blocking(file_appender);
+                        let file_layer = fmt::layer()
+                            .with_timer(ChronoLocal::new(file_time_format.to_string()))
+                            .with_file(true)
+                            .with_line_number(true)
+                            .json()
+                            .with_writer(non_blocking);
+                        {
+                            let mut log_guard_write_lock =
+                                LOG_GUARD.write().expect("set log guard error");
+                            *log_guard_write_lock = Some(log_guard); // 解决锁在初始化方法结束后被提前释放导致后续日志不能输出
+                        }
+                        *filter = file_layer;
+                    })
+                    .expect("reload log config error");
+            }
+        }
+    });
+
     Ok(())
 }
 
-fn build_log_config() -> Result<LogConfig, CfgError> {
+fn build_log_config() -> Result<(LogConfig, Vec<String>), CfgError> {
     build_config("LOG", Some("log"), None)
+}
+
+fn create_env_filter(level: String) -> EnvFilter {
+    EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new(level))
 }
