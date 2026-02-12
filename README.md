@@ -91,7 +91,7 @@ cargo build
 cargo build --features web
 
 # Build with all features
-cargo build --features web,db
+cargo build --features web,db_conn
 ```
 
 ### Run Service
@@ -101,7 +101,7 @@ cargo build --features web,db
 cargo run --features web
 
 # Run service with database support
-cargo run --features web,db
+cargo run --features web,db_conn
 ```
 
 ## Modules

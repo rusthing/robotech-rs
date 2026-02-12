@@ -1,6 +1,8 @@
 #[cfg(feature = "api-client")]
 use crate::api_client::ApiClientError;
+use crate::app::AppError;
 use crate::dao::DaoError;
+use crate::db_conn::DbConnError;
 use crate::env::EnvError;
 use idworker::IdWorkerError;
 use std::time::SystemTimeError;
@@ -26,6 +28,8 @@ pub enum SvcError {
     SystemTime(#[from] SystemTimeError),
     #[error("ID工作者错误: {0}")]
     IdWorker(#[from] IdWorkerError),
+    #[error("APP错误: {0}")]
+    App(#[from] AppError),
     #[error("参数校验错误: {0}")]
     Validation(#[from] validator::ValidationError),
     #[error("参数校验错误: {0}")]
@@ -35,8 +39,11 @@ pub enum SvcError {
     #[error("IO错误: {0}")]
     Io(#[from] std::io::Error),
     #[cfg(feature = "db")]
-    #[error("数据库错误: {0}")]
-    Database(#[from] DaoError),
+    #[error("数据层错误: {0}")]
+    Dao(#[from] DaoError),
+    #[cfg(feature = "db")]
+    #[error("数据库连接错误: {0}")]
+    DbConn(#[from] DbConnError),
     #[cfg(feature = "api-client")]
     #[error("API客户端错误, {0}")]
     ApiClient(#[from] ApiClientError),

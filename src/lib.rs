@@ -6,7 +6,7 @@ pub mod cst;
 #[cfg(feature = "db")]
 pub mod dao;
 #[cfg(feature = "db")]
-pub mod db;
+pub mod db_conn;
 #[cfg(feature = "app")]
 pub mod env;
 #[cfg(feature = "app")]

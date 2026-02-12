@@ -88,7 +88,7 @@ cargo build
 cargo build --features web
 
 # 构建所有 features
-cargo build --features web,db
+cargo build --features web,db_conn
 ```
 
 ### 运行服务
@@ -98,7 +98,7 @@ cargo build --features web,db
 cargo run --features web
 
 # 运行带数据库支持的服务
-cargo run --features web,db
+cargo run --features web,db_conn
 ```
 
 ## 模块说明

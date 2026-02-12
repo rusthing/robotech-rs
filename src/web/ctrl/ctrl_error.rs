@@ -70,7 +70,7 @@ impl CtrlError {
                     Ro::warn("找不到数据".to_string()).detail(Some(err.to_string()))
                 }
                 #[cfg(feature = "db")]
-                SvcError::Database(error) => match error {
+                SvcError::Dao(error) => match error {
                     DaoError::DuplicateKey(field_name, field_value) => {
                         Ro::warn(format!("{}<{}>已存在！", field_name, field_value))
                     }
@@ -110,7 +110,7 @@ impl ResponseError for CtrlError {
             CtrlError::Svc(error) => match error {
                 SvcError::NotFound(_) => StatusCode::NOT_FOUND,
                 #[cfg(feature = "db")]
-                SvcError::Database(error) => match error {
+                SvcError::Dao(error) => match error {
                     DaoError::DuplicateKey(_, _) | DaoError::DeleteViolateConstraint(_, _, _) => {
                         StatusCode::OK
                     }
