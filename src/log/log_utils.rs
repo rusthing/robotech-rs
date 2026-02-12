@@ -4,7 +4,7 @@ use crate::log::{LogConfig, LogError};
 use log::debug;
 use std::env;
 use std::path::Path;
-use std::sync::{mpsc, RwLock};
+use std::sync::RwLock;
 use tracing::instrument;
 use tracing_appender::non_blocking::WorkerGuard;
 use tracing_appender::rolling::RollingFileAppender;
@@ -191,8 +191,7 @@ pub fn init_log() -> Result<(), LogError> {
 
     debug!("watch log config file...");
     tokio::spawn(async move {
-        let (sender, receiver) = mpsc::channel();
-        let _watcher = watch_config_file(files, sender).expect("watch log config file error");
+        let (_watcher, receiver) = watch_config_file(files).expect("watch log config file error");
 
         loop {
             if let Ok(_) = receiver.recv() {

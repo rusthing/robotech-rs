@@ -2,9 +2,11 @@ use crate::cfg::cfg_error::CfgError;
 use crate::env::{AppEnv, EnvError, APP_ENV};
 use config::builder::DefaultState;
 use config::{Config, ConfigBuilder};
-use notify::{recommended_watcher, Event, EventKind, RecommendedWatcher, RecursiveMode, Watcher};
+use notify::{RecommendedWatcher, RecursiveMode};
+use notify_debouncer_mini::{new_debouncer, DebounceEventResult, Debouncer};
 use std::path::Path;
 use std::sync::mpsc;
+use std::time::Duration;
 
 pub fn build_config<'a, T: serde::Deserialize<'a>>(
     env_var_prefix: &str,
@@ -78,21 +80,41 @@ fn add_source(
 
 pub fn watch_config_file(
     files: Vec<String>,
-    sender: mpsc::Sender<()>,
-) -> Result<RecommendedWatcher, notify::Error> {
-    let mut watcher = recommended_watcher(move |res: Result<Event, notify::Error>| {
-        if let Ok(event) = res {
-            // 只关心文件修改事件
-            if matches!(event.kind, EventKind::Modify(_)) {
-                sender.send(()).ok();
-            }
-        }
-    })?;
+    // sender: mpsc::Sender<()>,
+) -> Result<
+    (
+        Debouncer<RecommendedWatcher>,
+        mpsc::Receiver<DebounceEventResult>,
+    ),
+    notify::Error,
+> {
+    // let mut watcher = recommended_watcher(move |res: Result<Event, notify::Error>| {
+    //     if let Ok(event) = res {
+    //         // 只关心文件修改事件
+    //         if matches!(event.kind, EventKind::Modify(_)) {
+    //             sender.send(()).ok();
+    //         }
+    //     }
+    // })?;
+    //
+    // for file in files {
+    //     // 监控配置文件
+    //     watcher.watch(Path::new(&file), RecursiveMode::NonRecursive)?;
+    // }
 
+    let (sender, receiver) = mpsc::channel();
+
+    let mut debouncer = new_debouncer(
+        Duration::from_millis(500), // 防抖延迟时间
+        sender,
+    )?;
+
+    // 开始监控
     for file in files {
-        // 监控配置文件
-        watcher.watch(Path::new(&file), RecursiveMode::NonRecursive)?;
+        debouncer
+            .watcher()
+            .watch(Path::new(&file), RecursiveMode::NonRecursive)?;
     }
 
-    Ok(watcher)
+    Ok((debouncer, receiver))
 }
