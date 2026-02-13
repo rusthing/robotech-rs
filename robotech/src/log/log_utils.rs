@@ -1,5 +1,5 @@
-use crate::cfg::{build_config, watch_config_file, CfgError};
-use crate::env::{AppEnv, EnvError, APP_ENV};
+use crate::cfg::{CfgError, build_config, watch_config_file};
+use crate::env::{APP_ENV, AppEnv, EnvError};
 use crate::log::{LogConfig, LogError};
 use log::debug;
 use std::env;
@@ -16,7 +16,7 @@ use tracing_subscriber::fmt::{FmtContext, FormatEvent, FormatFields};
 use tracing_subscriber::layer::SubscriberExt;
 use tracing_subscriber::registry::LookupSpan;
 use tracing_subscriber::util::SubscriberInitExt;
-use tracing_subscriber::{fmt, reload, EnvFilter};
+use tracing_subscriber::{EnvFilter, fmt, reload};
 
 /// 日志文件输出锁
 /// 解决锁在初始化方法结束后被提前释放导致后续日志不能输出

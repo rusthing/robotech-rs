@@ -1,5 +1,5 @@
-use crate::db_conn::db_conn_error::DbConnError;
 use crate::db_conn::DbConfig;
+use crate::db_conn::db_conn_error::DbConnError;
 use log::debug;
 use sea_orm::{ConnectOptions, Database, DbConn};
 use std::sync::{Arc, RwLock};

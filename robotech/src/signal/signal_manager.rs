@@ -1,4 +1,4 @@
-use crate::env::{AppEnv, EnvError, APP_ENV};
+use crate::env::{APP_ENV, AppEnv, EnvError};
 use crate::signal::signal_manager_error::SignalManagerError;
 use libc::pid_t;
 use log::{debug, error};
@@ -8,8 +8,8 @@ use std::sync::RwLock;
 use tokio::sync::oneshot;
 use tracing::instrument;
 use wheel_rs::process::{
-    check_process, delete_pid_file, get_pid_file_path, read_pid, send_signal_by_instruction,
-    watch_signal, PidFileGuard,
+    PidFileGuard, check_process, delete_pid_file, get_pid_file_path, read_pid,
+    send_signal_by_instruction, watch_signal,
 };
 
 static PID_FILE_GUARD: RwLock<Option<PidFileGuard>> = RwLock::new(None);

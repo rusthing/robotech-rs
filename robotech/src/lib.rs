@@ -2,6 +2,7 @@
 pub mod api_client;
 #[cfg(feature = "app")]
 pub mod app;
+#[cfg(feature = "app")]
 pub mod cfg;
 pub mod cst;
 #[cfg(feature = "db")]

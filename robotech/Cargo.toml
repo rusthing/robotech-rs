@@ -13,7 +13,7 @@ readme = "README.md"
 
 [features]
 api-client = ["dep:reqwest"]
-app = ["dep:anyhow", "dep:config", "dep:libc", "dep:validator", "dep:wheel-rs"]
+app = ["dep:anyhow", "dep:config", "dep:libc", "dep:validator", "dep:wheel-rs", "dep:idworker"]
 web = ["app", "dep:actix-web", "dep:actix-cors", "dep:actix-service", "dep:actix-http", "dep:socket2", "dep:rustls", "dep:reqwest"]
 db = ["app", "dep:sea-orm", "dep:regex", "dep:once_cell"]
 
@@ -23,7 +23,7 @@ tracing = { workspace = true }
 tracing-log = { workspace = true }
 tracing-core = { workspace = true }
 tracing-appender = { workspace = true }
-tracing-subscriber = { version = "0.3.22", features = ["env-filter", "json", "chrono", "tracing-log"] }
+tracing-subscriber = { workspace = true, features = ["env-filter", "json", "chrono", "tracing-log"] }
 notify = { workspace = true }
 notify-debouncer-mini = { workspace = true }
 thiserror = { workspace = true }
@@ -47,6 +47,6 @@ once_cell = { workspace = true, optional = true }
 validator = { workspace = true, optional = true }
 reqwest = { workspace = true, features = ["multipart", "json", "stream"], optional = true }
 
-idworker = { workspace = true }
+idworker = { workspace = true, optional = true }
 wheel-rs = { workspace = true, optional = true }
 

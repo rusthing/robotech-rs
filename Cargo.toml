@@ -1,5 +1,5 @@
 [workspace]
-members = ["robotech"]
+members = ["robotech", "robotech-macros"]
 resolver = "3"
 
 
@@ -36,6 +36,11 @@ reqwest = "0.13.2"
 
 idworker = "1.1.0"
 wheel-rs = "1.4.0"
+
+# macro依赖
+proc-macro2 = "1.0.106"                                 # 提供与标准库 proc_macro 兼容但更易测试的接口
+quote = "1.0.44"                                        # 用于将语法树转换回代码
+syn = { version = "2.0.115", features = ["full"] }      # 用于解析 Rust 代码为语法树（AST）
 
 [patch.crates-io]
 idworker = { path = "../idworker" }

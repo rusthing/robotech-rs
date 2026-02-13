@@ -1,7 +1,7 @@
 use crate::dao::DaoError;
-use crate::ro::Ro;
 #[cfg(feature = "db")]
 use crate::ro::RO_CODE_WARNING_DELETE_VIOLATE_CONSTRAINT;
+use crate::ro::Ro;
 use crate::svc::SvcError;
 use actix_web::http::StatusCode;
 use actix_web::{HttpResponse, ResponseError};

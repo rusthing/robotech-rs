@@ -1,4 +1,4 @@
-use crate::cfg::{build_config, CfgError};
+use crate::cfg::{CfgError, build_config};
 use tracing::instrument;
 
 #[instrument(level = "debug", err)]

@@ -2600,6 +2600,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "robotech-macros"
+version = "1.5.0"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "syn 2.0.115",
+]
+
+[[package]]
 name = "ron"
 version = "0.12.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"

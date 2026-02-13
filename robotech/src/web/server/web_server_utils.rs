@@ -1,11 +1,11 @@
 use crate::web::cors::build_cors;
-use crate::web::server::web_server_error::WebServerError;
 use crate::web::server::WebServerConfig;
+use crate::web::server::web_server_error::WebServerError;
 use actix_http::body::MessageBody;
 use actix_service::{IntoServiceFactory, ServiceFactory};
 use actix_web::dev::AppConfig;
 use actix_web::middleware::Logger;
-use actix_web::{get, web, App, Error, HttpServer, Responder};
+use actix_web::{App, Error, HttpServer, Responder, get, web};
 use libc::pid_t;
 use log::{debug, error, info};
 use socket2::{Domain, Socket, Type};
