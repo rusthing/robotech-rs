@@ -1,6 +1,6 @@
 use crate::dao::DaoError;
 use crate::db_conn::get_db_conn;
-use sea_orm::{ConnectionTrait, DatabaseConnection, DatabaseTransaction, TransactionTrait};
+use sea_orm::{ConnectionTrait, DatabaseConnection, DatabaseTransaction, DbConn, TransactionTrait};
 use std::sync::Arc;
 
 pub fn unwrap_db<C>(db: Option<Arc<C>>) -> Result<Arc<C>, DaoError>
@@ -17,9 +17,7 @@ where
     }
 }
 
-pub async fn begin_transaction(
-    db: Arc<DatabaseConnection>,
-) -> Result<DatabaseTransaction, DaoError> {
+pub async fn begin_transaction(db: &DbConn) -> Result<DatabaseTransaction, DaoError> {
     Ok(db.begin().await?)
 }
 
