@@ -194,7 +194,7 @@ pub fn init_log() -> Result<(), LogError> {
         let (_watcher, receiver) = watch_config_file(files).expect("watch log config file error");
 
         loop {
-            if let Ok(_) = receiver.recv() {
+            if let Ok(_) = receiver.try_recv() {
                 debug!("log config file changed, reload log config...");
                 let (
                     LogConfig {
@@ -248,6 +248,8 @@ pub fn init_log() -> Result<(), LogError> {
                         *filter = file_layer;
                     })
                     .expect("reload log config error");
+            } else {
+                break;
             }
         }
     });

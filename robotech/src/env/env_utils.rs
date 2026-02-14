@@ -1,5 +1,4 @@
 use crate::env::EnvError;
-use log::info;
 use std::env;
 use std::path::PathBuf;
 use std::sync::OnceLock;
@@ -18,7 +17,6 @@ pub struct AppEnv {
 
 /// 初始化环境变量
 pub fn init_env() -> Result<(), EnvError> {
-    info!("init env...");
     // 获取当前执行文件路径
     let app_file_path = env::current_exe().map_err(EnvError::GetAppPath)?;
 
