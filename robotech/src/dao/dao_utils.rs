@@ -21,7 +21,7 @@ pub async fn begin_transaction(db: &DbConn) -> Result<DatabaseTransaction, DaoEr
     Ok(db.begin().await?)
 }
 
-pub async fn commit_transaction(tx: DatabaseTransaction) -> Result<(), DaoError> {
-    tx.commit().await?;
+pub async fn commit_transaction(db: DatabaseTransaction) -> Result<(), DaoError> {
+    db.commit().await?;
     Ok(())
 }
