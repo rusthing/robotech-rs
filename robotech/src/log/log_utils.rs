@@ -2,7 +2,6 @@ use crate::cfg::{CfgError, build_config, watch_config_file};
 use crate::env::{APP_ENV, AppEnv, EnvError};
 use crate::log::{LogConfig, LogError};
 use log::{debug, warn};
-use notify_debouncer_mini::DebounceEventResult;
 use std::env;
 use std::path::Path;
 use std::sync::{RwLock, mpsc};
