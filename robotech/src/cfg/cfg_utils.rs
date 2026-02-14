@@ -109,11 +109,11 @@ pub fn watch_config_file(
         sender,
     )?;
 
+    let watcher = debouncer.watcher();
+
     // 开始监控
     for file in files {
-        debouncer
-            .watcher()
-            .watch(Path::new(&file), RecursiveMode::NonRecursive)?;
+        watcher.watch(Path::new(&file), RecursiveMode::NonRecursive)?;
     }
 
     Ok((debouncer, receiver))
