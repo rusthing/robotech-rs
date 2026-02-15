@@ -8,6 +8,7 @@ use actix_web::middleware::Logger;
 use actix_web::{App, Error, HttpServer, Responder, get, web};
 use libc::pid_t;
 use log::{debug, error, info};
+use robotech_macros::log_call;
 use socket2::{Domain, Socket, Type};
 use std::fmt::Debug;
 use std::net::{IpAddr, SocketAddr, TcpListener};
@@ -15,7 +16,6 @@ use std::time::Duration;
 use tokio::sync::oneshot;
 use tokio::time::timeout;
 use tracing::instrument;
-use robotech_macros::log_call;
 use wheel_rs::process::terminate_process;
 
 /// # 健康检查端点
