@@ -1,0 +1,20 @@
+[package]
+name = "robotech-macros"
+version = "1.5.0"
+edition = "2024"
+authors = ["zbz"]
+keywords = ["crud", "microservice", "service", "RESTful"]
+description = "Backend service implementation for the RoboTech platform, providing RESTful APIs and business logic for web applications."
+categories = ["web-programming::http-server"]
+license = "MIT"
+homepage = "https://github.com/rusthing/robotech-rs"
+repository = "https://github.com/rusthing/robotech-rs"
+readme = "README.md"
+
+[lib]
+proc-macro = true
+
+[dependencies]
+proc-macro2 = { workspace = true }                  # 提供与标准库 proc_macro 兼容但更易测试的接口
+quote = { workspace = true }                        # 用于将语法树转换回代码
+syn = { workspace = true, features = ["full"] }     # 用于解析 Rust 代码为语法树（AST）
