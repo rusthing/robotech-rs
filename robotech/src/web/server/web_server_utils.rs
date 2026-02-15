@@ -15,6 +15,7 @@ use std::time::Duration;
 use tokio::sync::oneshot;
 use tokio::time::timeout;
 use tracing::instrument;
+use robotech_macros::log_call;
 use wheel_rs::process::terminate_process;
 
 /// # 健康检查端点
@@ -24,6 +25,7 @@ use wheel_rs::process::terminate_process;
 /// ## 返回值
 /// 返回实现了 Responder trait 的响应对象
 #[get("/health")]
+#[log_call]
 async fn health() -> impl Responder {
     "Ok"
 }

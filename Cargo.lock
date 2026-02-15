@@ -2582,6 +2582,7 @@ dependencies = [
  "once_cell",
  "regex",
  "reqwest",
+ "robotech-macros",
  "rustls",
  "sea-orm",
  "serde",

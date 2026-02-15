@@ -13,6 +13,8 @@ pub mod db_conn;
 pub mod env;
 #[cfg(feature = "app")]
 pub mod log;
+#[cfg(feature = "macros")]
+pub mod macros;
 pub mod ro;
 #[cfg(feature = "app")]
 pub mod signal;

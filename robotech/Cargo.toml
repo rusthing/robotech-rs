@@ -16,6 +16,7 @@ api-client = ["dep:reqwest"]
 app = ["dep:anyhow", "dep:config", "dep:libc", "dep:validator", "dep:wheel-rs", "dep:idworker"]
 web = ["app", "dep:actix-web", "dep:actix-cors", "dep:actix-service", "dep:actix-http", "dep:socket2", "dep:rustls", "dep:reqwest"]
 db = ["app", "dep:sea-orm", "dep:regex", "dep:once_cell"]
+macros = ["robotech-macros"]
 
 [dependencies]
 log = { workspace = true }
@@ -50,3 +51,4 @@ reqwest = { workspace = true, features = ["multipart", "json", "stream"], option
 idworker = { workspace = true, optional = true }
 wheel-rs = { workspace = true, optional = true }
 
+robotech-macros = { path = "../robotech-macros", optional = true }
