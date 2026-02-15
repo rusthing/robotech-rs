@@ -203,14 +203,13 @@ pub fn init_log() -> Result<(), LogError> {
             // 使用 try_recv 非阻塞检查
             match receiver.try_recv() {
                 Ok(event_result) => {
-                    debug!("log config file changed, reload log config...");
-
                     match event_result {
                         Ok(events) => {
                             // 处理文件事件
                             for event in events {
-                                debug!("file event: {:?}", event);
+                                debug!("log config file change event: {:?}", event);
                             }
+                            debug!("reload log config...");
 
                             // 重新加载配置
                             let (
