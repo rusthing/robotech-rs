@@ -114,16 +114,16 @@ pub fn log_call(attr: TokenStream, item: TokenStream) -> TokenStream {
 
 /// DAO方法生成宏参数解析
 #[derive(Debug, Default)]
-struct DaoMethodsArgs {
+struct DaoArgs {
     insert: bool,
     update: bool,
     delete: bool,
     get_by_id: bool,
 }
 
-impl Parse for DaoMethodsArgs {
+impl Parse for DaoArgs {
     fn parse(input: ParseStream) -> syn::Result<Self> {
-        let mut result = DaoMethodsArgs::default();
+        let mut result = DaoArgs::default();
         let mut first = true;
 
         while !input.is_empty() {
@@ -177,7 +177,7 @@ impl Parse for DaoMethodsArgs {
 /// - all: 生成所有方法
 #[proc_macro_attribute]
 pub fn dao(attr: TokenStream, item: TokenStream) -> TokenStream {
-    let methods_args = parse_macro_input!(attr as DaoMethodsArgs);
+    let methods_args = parse_macro_input!(attr as DaoArgs);
     let input = parse_macro_input!(item as syn::ItemStruct);
     let struct_name = &input.ident;
     // let struct_vis = &input.vis;
