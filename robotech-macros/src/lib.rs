@@ -115,6 +115,7 @@ pub fn log_call(attr: TokenStream, item: TokenStream) -> TokenStream {
 /// DAO方法生成宏参数解析
 #[derive(Debug, Default)]
 struct DaoArgs {
+    exclude: bool,
     insert: bool,
     update: bool,
     delete: bool,
@@ -124,20 +125,22 @@ struct DaoArgs {
 impl Parse for DaoArgs {
     fn parse(input: ParseStream) -> syn::Result<Self> {
         let mut result = DaoArgs::default();
-        let mut first = true;
-
         while !input.is_empty() {
-            if !first {
-                let _: Token![,] = input.parse()?;
-            }
-            first = false;
-
             let ident: Ident = input.parse()?;
             match ident.to_string().as_str() {
-                "insert" => result.insert = true,
-                "update" => result.update = true,
-                "delete" => result.delete = true,
-                "get_by_id" => result.get_by_id = true,
+                "exclude" => {
+                    result.exclude = true;
+                    result.insert = true;
+                    result.update = true;
+                    result.delete = true;
+                    result.get_by_id = true;
+                    let _: Token![:] = input.parse()?;
+                    continue;
+                }
+                "insert" => result.insert = !result.exclude,
+                "update" => result.update = !result.exclude,
+                "delete" => result.delete = !result.exclude,
+                "get_by_id" => result.get_by_id = !result.exclude,
                 "all" => {
                     result.insert = true;
                     result.update = true;
@@ -145,6 +148,9 @@ impl Parse for DaoArgs {
                     result.get_by_id = true;
                 }
                 _ => return Err(syn::Error::new_spanned(ident, "Unknown method name")),
+            }
+            if let Err(_) = input.parse::<Token![,]>() {
+                return Ok(result);
             }
         }
 
