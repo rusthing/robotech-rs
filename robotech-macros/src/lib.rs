@@ -124,6 +124,9 @@ struct DaoArgs {
 
 impl Parse for DaoArgs {
     fn parse(input: ParseStream) -> syn::Result<Self> {
+        if input.is_empty() {
+            return return_all();
+        }
         let mut result = DaoArgs::default();
         while !input.is_empty() {
             let ident: Ident = input.parse()?;
@@ -142,10 +145,7 @@ impl Parse for DaoArgs {
                 "delete" => result.delete = !result.exclude,
                 "get_by_id" => result.get_by_id = !result.exclude,
                 "all" => {
-                    result.insert = true;
-                    result.update = true;
-                    result.delete = true;
-                    result.get_by_id = true;
+                    return return_all();
                 }
                 _ => return Err(syn::Error::new_spanned(ident, "Unknown method name")),
             }
@@ -156,6 +156,16 @@ impl Parse for DaoArgs {
 
         Ok(result)
     }
+}
+
+fn return_all() -> syn::Result<DaoArgs> {
+    Ok(DaoArgs {
+        exclude: false,
+        insert: true,
+        update: true,
+        delete: true,
+        get_by_id: true,
+    })
 }
 
 /// 属性宏：为DAO结构体生成标准的CRUD方法
