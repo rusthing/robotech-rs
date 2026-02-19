@@ -130,7 +130,7 @@ impl Parse for DaoArgs {
         let mut result = DaoArgs::default();
         while !input.is_empty() {
             let ident: Ident = input.parse()?;
-            match ident.to_string().as_str() {
+            match ident.to_string().to_lowercase().as_str() {
                 "exclude" => {
                     result.exclude = true;
                     result.insert = true;
@@ -330,6 +330,107 @@ pub fn dao(attr: TokenStream, item: TokenStream) -> TokenStream {
 
         impl #struct_name {
             #(#generated_methods)*
+        }
+    };
+
+    TokenStream::from(expanded)
+}
+
+/// db_unwrap属性宏参数解析
+#[derive(Debug, Default)]
+struct DbUnwrapArgs {
+    /// 需要事务
+    transaction_required: bool,
+}
+
+impl Parse for DbUnwrapArgs {
+    fn parse(input: ParseStream) -> syn::Result<Self> {
+        if input.is_empty() {
+            return Ok(DbUnwrapArgs::default());
+        }
+
+        let ident: Ident = input.parse()?;
+        match ident.to_string().to_lowercase().as_str() {
+            "transaction_required" => Ok(DbUnwrapArgs {
+                transaction_required: true,
+            }),
+            unknown => Err(syn::Error::new_spanned(
+                ident,
+                format!("Unknown argument: {unknown}"),
+            )),
+        }
+    }
+}
+
+/// 属性宏：为Service查询方法生成标准结构
+///
+/// 此宏会自动处理数据库连接逻辑，用户只需编写返回语句
+///
+/// # 使用示例
+/// ```
+/// #[db_unwrap]
+/// pub async fn get_by_name<C>(name: &str, db: Option<&C>) -> Result<Ro<OssBucketVo>, SvcError>
+/// where
+///     C: ConnectionTrait,
+/// {
+///     let one = OssBucketDao::get_by_name(name, db).await?;
+///     Ok(
+///         Ro::success("查询成功".to_string())
+///             .extra(one.map(|value| OssBucketVo::from(value))),
+///     )
+/// }
+/// ```
+/// 注意：用户代码中应该包含完整的返回逻辑
+#[proc_macro_attribute]
+pub fn db_unwrap(attr: TokenStream, item: TokenStream) -> TokenStream {
+    let args = parse_macro_input!(attr as DbUnwrapArgs);
+    let input = parse_macro_input!(item as ItemFn);
+
+    let fn_vis = &input.vis;
+    let fn_sig = &input.sig;
+
+    let transaction_required = args.transaction_required;
+
+    // 分析函数签名，提取参数和返回类型
+    let has_db_param = input.sig.inputs.iter().any(|arg| match arg {
+        FnArg::Typed(pat_type) => {
+            if let Pat::Ident(pat_ident) = &*pat_type.pat {
+                pat_ident.ident == "db"
+            } else {
+                false
+            }
+        }
+        _ => false,
+    });
+
+    // 如果没有db参数，报错
+    if !has_db_param {
+        return syn::Error::new_spanned(
+            &fn_sig,
+            "Service query method must have a 'db: Option<&C>' parameter",
+        )
+        .to_compile_error()
+        .into();
+    }
+
+    // 提取用户编写的代码块
+    let user_block = &input.block;
+
+    // 生成包装后的方法
+    let expanded = quote! {
+        #fn_vis #fn_sig {
+            if let Some(db) = db {
+                #user_block
+            } else {
+                let db_conn = robotech::db_conn::get_db_conn()?;
+                let db = db_conn.as_ref();
+                if #transaction_required {
+                    // 开启事务
+                    let tx = begin_transaction(db).await?;
+                    let db = &tx;
+                }
+                #user_block
+            }
         }
     };
 
