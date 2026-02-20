@@ -18,4 +18,3 @@ proc-macro = true
 proc-macro2 = { workspace = true }                  # 提供与标准库 proc_macro 兼容但更易测试的接口
 quote = { workspace = true }                        # 用于将语法树转换回代码
 syn = { workspace = true, features = ["full"] }     # 用于解析 Rust 代码为语法树（AST）
-strum = { workspace = true, features = ["derive"] }
