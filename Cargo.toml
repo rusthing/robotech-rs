@@ -19,7 +19,7 @@ serde = "1.0.228"
 serde_json = "1.0.149"
 tokio = "1.49.0"
 utoipa = "5.4.0"
-anyhow = "1.0.101"
+anyhow = "1.0.102"
 config = "0.15.19"
 libc = "0.2.180"
 regex = "1.12.3"
@@ -40,7 +40,7 @@ wheel-rs = "1.4.0"
 # macro依赖
 proc-macro2 = "1.0.106"             # 提供与标准库 proc_macro 兼容但更易测试的接口
 quote = "1.0.44"                    # 用于将语法树转换回代码
-syn = "2.0.116"                     # 用于解析 Rust 代码为语法树（AST）
+syn = "2.0.117"                     # 用于解析 Rust 代码为语法树（AST）
 
 [patch.crates-io]
 idworker = { path = "../idworker" }
