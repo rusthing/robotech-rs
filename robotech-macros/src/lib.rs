@@ -1,7 +1,87 @@
 use proc_macro::TokenStream;
 use quote::{format_ident, quote};
-use syn::{FnArg, Ident, ItemFn, Pat, Token, parse::Parse, parse::ParseStream, parse_macro_input};
+use syn::{
+    Block, Expr, FnArg, Ident, ItemFn, Pat, Token, parse::Parse, parse::ParseStream,
+    parse_macro_input,
+};
 use wheel_rs::str_utils::{CamelFormat, split_camel_case};
+
+struct WatchFileArgs {
+    title: String,
+    files: Expr,
+    reload_action: Block,
+}
+
+impl Parse for WatchFileArgs {
+    fn parse(input: ParseStream) -> syn::Result<Self> {
+        let title = input.parse::<syn::LitStr>()?.value();
+        let _: Token![,] = input.parse()?;
+        let files = input.parse()?;
+        let _: Token![,] = input.parse()?;
+        let reload_action = input.parse()?;
+
+        Ok(WatchFileArgs {
+            title,
+            files,
+            reload_action,
+        })
+    }
+}
+
+#[proc_macro]
+pub fn watch_file(args: TokenStream) -> TokenStream {
+    let WatchFileArgs {
+        title,
+        files,
+        reload_action,
+    } = parse_macro_input!(args as WatchFileArgs);
+
+    let expanded = quote! {
+        debug!("watch {} file...", #title);
+        tokio::spawn(async move {
+            let (_watcher, receiver) = watch_config_file(#files).expect(&format!("watch {} file error", #title));
+
+            // 创建一个1秒间隔的定时器
+            let mut interval = interval(Duration::from_secs(1));
+            loop {
+                // 等待下一个时间点
+                interval.tick().await;
+                // 使用 try_recv 非阻塞检查
+                match receiver.try_recv() {
+                    Ok(event_result) => {
+                        match event_result {
+                            Ok(events) => {
+                                // 处理文件事件
+                                for event in events {
+                                    debug!("{} file change event: {:?}", #title, event);
+                                }
+                                debug!("reload from {} file...", #title);
+
+                                #reload_action
+                            }
+                            Err(e) => {
+                                warn!("error receiving {} file events: {:?}", #title, e);
+                            }
+                        }
+                    }
+                    Err(mpsc::TryRecvError::Empty) => {
+                        // 没有消息，继续下一次循环
+                        continue;
+                    }
+                    Err(mpsc::TryRecvError::Disconnected) => {
+                        // 通道关闭
+                        debug!("{} file watcher channel closed, exiting watcher loop", #title);
+                        break;
+                    }
+                }
+            }
+
+            debug!("{} file watcher task finished", #title);
+        });
+    };
+
+    TokenStream::from(expanded)
+}
 
 /// 宏参数解析结构
 struct LogCallArgs {

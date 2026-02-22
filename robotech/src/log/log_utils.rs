@@ -2,6 +2,7 @@ use crate::cfg::{CfgError, build_config, watch_config_file};
 use crate::env::{APP_ENV, AppEnv, EnvError};
 use crate::log::{LogConfig, LogError};
 use log::{debug, warn};
+use robotech_macros::watch_file;
 use std::env;
 use std::path::Path;
 use std::sync::{RwLock, mpsc};
@@ -191,99 +192,57 @@ pub fn init_log() -> Result<(), LogError> {
         .init();
     debug!("初始化日志成功");
 
-    debug!("watch log config file...");
-    tokio::spawn(async move {
-        let (_watcher, receiver) = watch_config_file(files).expect("watch log config file error");
+    watch_file!("log config", files, {
+        // 重新加载配置
+        let (
+            LogConfig {
+                level,
+                console_time_format,
+                show_spans,
+                file_time_format,
+                rotation,
+            },
+            _,
+        ) = build_log_config().expect("build log config error");
 
-        // 创建一个1秒间隔的定时器
-        let mut interval = interval(Duration::from_secs(1));
-        loop {
-            // 等待下一个时间点
-            interval.tick().await;
-            // 使用 try_recv 非阻塞检查
-            match receiver.try_recv() {
-                Ok(event_result) => {
-                    match event_result {
-                        Ok(events) => {
-                            // 处理文件事件
-                            for event in events {
-                                debug!("log config file change event: {:?}", event);
-                            }
-                            debug!("reload log config...");
+        // 应用新配置
+        env_layer_reload_handle
+            .modify(|filter| {
+                *filter = create_env_filter(level);
+            })
+            .expect("reload log config error");
 
-                            // 重新加载配置
-                            let (
-                                LogConfig {
-                                    level,
-                                    console_time_format,
-                                    show_spans,
-                                    file_time_format,
-                                    rotation,
-                                },
-                                _,
-                            ) = build_log_config().expect("build log config error");
+        console_layer_reload_handle
+            .modify(|layer| {
+                *layer = fmt::layer()
+                    .event_format(CustomConsoleFormatter::new(console_time_format, show_spans))
+                    .with_writer(std::io::stdout);
+            })
+            .expect("reload console config error");
 
-                            // 应用新配置
-                            env_layer_reload_handle
-                                .modify(|filter| {
-                                    *filter = create_env_filter(level);
-                                })
-                                .expect("reload log config error");
+        file_layer_reload_handle
+            .modify(|layer| {
+                // 重新创建文件appender
+                let file_appender = RollingFileAppender::builder()
+                    .rotation(rotation.clone())
+                    .filename_prefix(format!("{}.log", app_file_name))
+                    .filename_suffix("json")
+                    .build(Path::new(log_dir.as_str()))
+                    .expect("create file appender error");
+                let (non_blocking, log_guard) = tracing_appender::non_blocking(file_appender);
 
-                            console_layer_reload_handle
-                                .modify(|layer| {
-                                    *layer = fmt::layer()
-                                        .event_format(CustomConsoleFormatter::new(
-                                            console_time_format,
-                                            show_spans,
-                                        ))
-                                        .with_writer(std::io::stdout);
-                                })
-                                .expect("reload console config error");
+                *layer = fmt::layer()
+                    .with_timer(ChronoLocal::new(file_time_format.to_string()))
+                    .with_file(true)
+                    .with_line_number(true)
+                    .json()
+                    .with_writer(non_blocking);
 
-                            file_layer_reload_handle
-                                .modify(|layer| {
-                                    // 重新创建文件appender
-                                    let file_appender = RollingFileAppender::builder()
-                                        .rotation(rotation.clone())
-                                        .filename_prefix(format!("{}.log", app_file_name))
-                                        .filename_suffix("json")
-                                        .build(Path::new(log_dir.as_str()))
-                                        .expect("create file appender error");
-                                    let (non_blocking, log_guard) =
-                                        tracing_appender::non_blocking(file_appender);
-
-                                    *layer = fmt::layer()
-                                        .with_timer(ChronoLocal::new(file_time_format.to_string()))
-                                        .with_file(true)
-                                        .with_line_number(true)
-                                        .json()
-                                        .with_writer(non_blocking);
-
-                                    // 更新全局guard
-                                    let mut guard = LOG_GUARD.write().expect("write log guard");
-                                    *guard = Some(log_guard);
-                                })
-                                .expect("reload file config error");
-                        }
-                        Err(e) => {
-                            warn!("error receiving file events: {:?}", e);
-                        }
-                    }
-                }
-                Err(mpsc::TryRecvError::Empty) => {
-                    // 没有消息，继续下一次循环
-                    continue;
-                }
-                Err(mpsc::TryRecvError::Disconnected) => {
-                    // 通道关闭
-                    debug!("config watcher channel closed, exiting watcher loop");
-                    break;
-                }
-            }
-        }
-
-        debug!("config watcher task finished");
+                // 更新全局guard
+                let mut guard = LOG_GUARD.write().expect("write log guard");
+                *guard = Some(log_guard);
+            })
+            .expect("reload file config error");
     });
 
     Ok(())
