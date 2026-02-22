@@ -131,6 +131,31 @@ where
     }
 }
 
+macro_rules! creat_console_layer {
+    ($console_time_format:expr, $show_spans:expr) => {
+        fmt::layer()
+            // .with_timer(ChronoLocal::new("%H:%M:%S%.6f".to_string()))
+            // .with_target(false)
+            // .pretty()
+            .event_format(CustomConsoleFormatter::new(
+                $console_time_format,
+                $show_spans,
+            ))
+            .with_writer(std::io::stdout)
+    };
+}
+
+macro_rules! creat_file_layer {
+    ($file_time_format:expr,$non_blocking:expr) => {
+        fmt::layer()
+            .with_timer(ChronoLocal::new($file_time_format.to_string()))
+            .with_file(true)
+            .with_line_number(true)
+            .json()
+            .with_writer($non_blocking)
+    };
+}
+
 /// 初始化日志
 #[instrument(level = "debug", err)]
 pub fn init_log() -> Result<(), LogError> {
@@ -150,12 +175,7 @@ pub fn init_log() -> Result<(), LogError> {
     let (env_filter_layer, env_layer_reload_handle) = reload::Layer::new(env_filter);
 
     // 控制台输出层
-    let console_layer = fmt::layer()
-        // .with_timer(ChronoLocal::new("%H:%M:%S%.6f".to_string()))
-        // .with_target(false)
-        // .pretty()
-        .event_format(CustomConsoleFormatter::new(console_time_format, show_spans))
-        .with_writer(std::io::stdout);
+    let console_layer = creat_console_layer!(console_time_format, show_spans);
     let (console_layer, console_layer_reload_handle) = reload::Layer::new(console_layer);
 
     // 文件输出层
@@ -173,12 +193,7 @@ pub fn init_log() -> Result<(), LogError> {
         .build(log_dir_path) // 日志目录
         .map_err(|e| LogError::CreateFileAppender(e))?;
     let (non_blocking, log_guard) = tracing_appender::non_blocking(file_appender);
-    let file_layer = fmt::layer()
-        .with_timer(ChronoLocal::new(file_time_format.to_string()))
-        .with_file(true)
-        .with_line_number(true)
-        .json()
-        .with_writer(non_blocking);
+    let file_layer = creat_file_layer!(file_time_format, non_blocking);
     {
         let mut log_guard_write_lock = LOG_GUARD.write().map_err(|_| LogError::SetLogGuard())?;
         *log_guard_write_lock = Some(log_guard); // 解决锁在初始化方法结束后被提前释放导致后续日志不能输出
@@ -214,9 +229,7 @@ pub fn init_log() -> Result<(), LogError> {
 
         console_layer_reload_handle
             .modify(|layer| {
-                *layer = fmt::layer()
-                    .event_format(CustomConsoleFormatter::new(console_time_format, show_spans))
-                    .with_writer(std::io::stdout);
+                *layer = creat_console_layer!(console_time_format, show_spans);
             })
             .expect("reload console config error");
 
@@ -231,12 +244,7 @@ pub fn init_log() -> Result<(), LogError> {
                     .expect("create file appender error");
                 let (non_blocking, log_guard) = tracing_appender::non_blocking(file_appender);
 
-                *layer = fmt::layer()
-                    .with_timer(ChronoLocal::new(file_time_format.to_string()))
-                    .with_file(true)
-                    .with_line_number(true)
-                    .json()
-                    .with_writer(non_blocking);
+                *layer = creat_file_layer!(file_time_format, non_blocking);
 
                 // 更新全局guard
                 let mut guard = LOG_GUARD.write().expect("write log guard");
