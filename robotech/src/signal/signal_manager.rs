@@ -4,8 +4,7 @@ use libc::pid_t;
 use log::{debug, error};
 use std::path::PathBuf;
 use std::process;
-use std::sync::RwLock;
-use tokio::sync::oneshot;
+use std::sync::{RwLock, mpsc};
 use tracing::instrument;
 use wheel_rs::process::{
     PidFileGuard, check_process, delete_pid_file, get_pid_file_path, read_pid,
@@ -29,19 +28,19 @@ impl SignalManager {
     #[instrument(level = "debug", ret, err)]
     pub fn new(
         signal_instruction: String,
-    ) -> Result<(Self, Option<pid_t>, oneshot::Sender<()>), SignalManagerError> {
+    ) -> Result<(Self, Option<pid_t>, mpsc::Sender<()>), SignalManagerError> {
         debug!("初始化信号管理者...");
         let AppEnv { app_file_path, .. } = APP_ENV.get().ok_or(EnvError::GetAppEnv())?;
         let pid_file_path = get_pid_file_path(app_file_path);
         let old_pid = Self::parse_and_handle_signal_args(signal_instruction, &pid_file_path)?;
 
-        let (app_started_sender, app_stated_receiver) = oneshot::channel::<()>();
+        let (app_started_sender, app_stated_receiver) = mpsc::channel::<()>();
 
         // 监听系统信号
         watch_signal();
 
         tokio::spawn(async move {
-            if let Ok(_) = app_stated_receiver.await
+            if let Ok(_) = app_stated_receiver.recv()
                 && let Ok(pid_file_guard) = PidFileGuard::new(pid_file_path)
             {
                 let mut pid_file_guard_lock = PID_FILE_GUARD

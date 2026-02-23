@@ -5,7 +5,7 @@ use config::{Config, ConfigBuilder};
 use notify::{RecommendedWatcher, RecursiveMode};
 use notify_debouncer_mini::{DebounceEventResult, Debouncer, new_debouncer};
 use std::path::Path;
-use std::sync::mpsc;
+use std::sync::{Arc, mpsc};
 use std::time::Duration;
 
 pub fn build_config<'a, T: serde::Deserialize<'a>>(
@@ -79,8 +79,7 @@ fn add_source(
 }
 
 pub fn watch_config_file(
-    files: Vec<String>,
-    // sender: mpsc::Sender<()>,
+    files: Arc<Vec<String>>,
 ) -> Result<
     (
         Debouncer<RecommendedWatcher>,
@@ -88,20 +87,6 @@ pub fn watch_config_file(
     ),
     notify::Error,
 > {
-    // let mut watcher = recommended_watcher(move |res: Result<Event, notify::Error>| {
-    //     if let Ok(event) = res {
-    //         // 只关心文件修改事件
-    //         if matches!(event.kind, EventKind::Modify(_)) {
-    //             sender.send(()).ok();
-    //         }
-    //     }
-    // })?;
-    //
-    // for file in files {
-    //     // 监控配置文件
-    //     watcher.watch(Path::new(&file), RecursiveMode::NonRecursive)?;
-    // }
-
     let (sender, receiver) = mpsc::channel();
 
     let mut debouncer = new_debouncer(
@@ -112,7 +97,7 @@ pub fn watch_config_file(
     let watcher = debouncer.watcher();
 
     // 开始监控
-    for file in files {
+    for file in &*files {
         watcher.watch(Path::new(&file), RecursiveMode::NonRecursive)?;
     }
 

@@ -1,84 +1,92 @@
 use proc_macro::TokenStream;
 use quote::{format_ident, quote};
 use syn::{
-    Block, Expr, FnArg, Ident, ItemFn, Pat, Token, parse::Parse, parse::ParseStream,
-    parse_macro_input,
+    Block, FnArg, Ident, ItemFn, Pat, Token, parse::Parse, parse::ParseStream, parse_macro_input,
 };
 use wheel_rs::str_utils::{CamelFormat, split_camel_case};
 
 struct WatchFileArgs {
     title: String,
-    files: Expr,
-    reload_action: Block,
+    clone_block: Block,
+    reload_block: Block,
 }
 
 impl Parse for WatchFileArgs {
     fn parse(input: ParseStream) -> syn::Result<Self> {
         let title = input.parse::<syn::LitStr>()?.value();
         let _: Token![,] = input.parse()?;
-        let files = input.parse()?;
+        let clone_block = input.parse()?;
         let _: Token![,] = input.parse()?;
-        let reload_action = input.parse()?;
+        let reload_block = input.parse()?;
 
         Ok(WatchFileArgs {
             title,
-            files,
-            reload_action,
+            clone_block,
+            reload_block,
         })
     }
 }
 
 #[proc_macro]
-pub fn watch_file(args: TokenStream) -> TokenStream {
+pub fn watch_config_file(args: TokenStream) -> TokenStream {
     let WatchFileArgs {
         title,
-        files,
-        reload_action,
+        clone_block,
+        reload_block,
     } = parse_macro_input!(args as WatchFileArgs);
 
+    let clone_block = &clone_block.stmts;
+    let reload_block = &reload_block.stmts;
+
     let expanded = quote! {
-        debug!("watch {} file...", #title);
-        tokio::spawn(async move {
-            let (_watcher, receiver) = watch_config_file(#files).expect(&format!("watch {} file error", #title));
+        debug!("watch {} config file...", #title);
+        tokio::spawn({
+            #( #clone_block )*
+            async move {
+                let (_watcher, receiver) = watch_config_file(files).expect(&format!("watch {} config file error", #title));
 
-            // 创建一个1秒间隔的定时器
-            let mut interval = interval(Duration::from_secs(1));
-            loop {
-                // 等待下一个时间点
-                interval.tick().await;
-                // 使用 try_recv 非阻塞检查
-                match receiver.try_recv() {
-                    Ok(event_result) => {
-                        match event_result {
-                            Ok(events) => {
-                                // 处理文件事件
-                                for event in events {
-                                    debug!("{} file change event: {:?}", #title, event);
+                // 创建一个1秒间隔的定时器
+                let mut interval = interval(Duration::from_secs(1));
+                loop {
+                    // 等待下一个时间点
+                    interval.tick().await;
+                    // 使用 try_recv 非阻塞检查
+                    match receiver.try_recv() {
+                        Ok(event_result) => {
+                            match event_result {
+                                Ok(events) => {
+                                    // 处理文件事件
+                                    for event in events {
+                                        debug!("{} config file change event: {:?}", #title, event);
+                                    }
+                                    debug!("reload from {} config file...", #title);
+
+                                    #( #reload_block )*
                                 }
-                                debug!("reload from {} file...", #title);
-
-                                #reload_action
-                            }
-                            Err(e) => {
-                                warn!("error receiving {} file events: {:?}", #title, e);
+                                Err(e) => {
+                                    warn!("error receiving {} config file events: {:?}", #title, e);
+                                }
                             }
                         }
-                    }
-                    Err(mpsc::TryRecvError::Empty) => {
-                        // 没有消息，继续下一次循环
-                        continue;
-                    }
-                    Err(mpsc::TryRecvError::Disconnected) => {
-                        // 通道关闭
-                        debug!("{} file watcher channel closed, exiting watcher loop", #title);
-                        break;
+                        Err(mpsc::TryRecvError::Empty) => {
+                            // 没有消息，继续下一次循环
+                            continue;
+                        }
+                        Err(mpsc::TryRecvError::Disconnected) => {
+                            // 通道关闭
+                            debug!("{} config file watcher channel closed, exiting watcher loop", #title);
+                            break;
+                        }
                     }
                 }
-            }
 
-            debug!("{} file watcher task finished", #title);
+                debug!("{} config file watcher task finished", #title);
+            }
         });
     };
+
+    // 调试：打印完整展开的代码
+    // println!("Full expanded code:\n{}", expanded);
 
     TokenStream::from(expanded)
 }
@@ -932,6 +940,7 @@ pub fn ctrl(attr: TokenStream, item: TokenStream) -> TokenStream {
             )]
             #[post("")]
             #[log_call]
+            #[instrument(level = "debug", err)]
             pub async fn add(
                 json_body: web::Json<#add_dto_name>,
                 req: HttpRequest,
@@ -975,6 +984,7 @@ pub fn ctrl(attr: TokenStream, item: TokenStream) -> TokenStream {
                 responses((status = OK, body = Ro<#vo_name>))
             )]
             #[put("")]
+            #[instrument(level = "debug", err)]
             #[log_call]
             pub async fn modify(
                 json_body: web::Json<#modify_dto_name>,
@@ -1019,6 +1029,7 @@ pub fn ctrl(attr: TokenStream, item: TokenStream) -> TokenStream {
                 responses((status = OK, body = Ro<#vo_name>))
             )]
             #[post("/save")]
+            #[instrument(level = "debug", err)]
             #[log_call]
             pub async fn save(
                 json_body: web::Json<#save_dto_name>,
@@ -1057,6 +1068,7 @@ pub fn ctrl(attr: TokenStream, item: TokenStream) -> TokenStream {
                 responses((status = OK, body = Ro<String>))
             )]
             #[delete("")]
+            #[instrument(level = "debug", err)]
             #[log_call]
             pub async fn del(
                 query: Query<HashMap<String, String>>,
@@ -1100,6 +1112,7 @@ pub fn ctrl(attr: TokenStream, item: TokenStream) -> TokenStream {
                 )
             )]
             #[get("/get-by-id")]
+            #[instrument(level = "debug", err)]
             #[log_call]
             pub async fn get_by_id(query: Query<HashMap<String, String>>) -> Result<HttpResponse, CtrlError> {
                 let id = get_id_from_query_params(query)?;

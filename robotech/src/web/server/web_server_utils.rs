@@ -1,19 +1,15 @@
 use crate::web::cors::build_cors;
 use crate::web::server::WebServerConfig;
 use crate::web::server::web_server_error::WebServerError;
-use actix_http::body::MessageBody;
-use actix_service::{IntoServiceFactory, ServiceFactory};
-use actix_web::dev::AppConfig;
 use actix_web::middleware::Logger;
-use actix_web::{App, Error, HttpServer, Responder, get, web};
+use actix_web::{App, HttpServer, Responder, get, web};
 use libc::pid_t;
 use log::{debug, error, info};
 use robotech_macros::log_call;
 use socket2::{Domain, Socket, Type};
-use std::fmt::Debug;
 use std::net::{IpAddr, SocketAddr, TcpListener};
+use std::sync::{Arc, mpsc};
 use std::time::Duration;
-use tokio::sync::oneshot;
 use tokio::time::timeout;
 use tracing::instrument;
 use wheel_rs::process::terminate_process;
@@ -25,6 +21,7 @@ use wheel_rs::process::terminate_process;
 /// ## 返回值
 /// 返回实现了 Responder trait 的响应对象
 #[get("/health")]
+#[instrument(level = "debug")]
 #[log_call]
 async fn health() -> impl Responder {
     "Ok"
@@ -63,7 +60,7 @@ pub async fn start_web_server(
     configure: fn(&mut web::ServiceConfig),
     port_of_args: Option<u16>,
     old_pid: Option<pid_t>,
-    app_stated_sender: oneshot::Sender<()>,
+    app_stated_sender: Arc<mpsc::Sender<()>>,
 ) -> Result<(), WebServerError> {
     debug!("初始化Web服务器...");
 
@@ -146,7 +143,6 @@ pub async fn start_web_server(
 
     let mut http_server = HttpServer::new(move || {
         debug!("HttpServer创建worker，并拥有独立的app...");
-        // let cors_config = cors_config.clone();
         let mut app = App::new()
             .wrap(Logger::default())
             .wrap(build_cors(&cors_config))
@@ -180,7 +176,10 @@ pub async fn start_web_server(
                 .listen(tcp_listener)
                 .map_err(|e| WebServerError::Socket(format!("监听自定义tcp socket失败: {}", e)))?;
         } else {
-            http_server = http_server_bind(http_server, bind, *port)?;
+            let ip = bind.to_string();
+            http_server = http_server.bind((ip.to_string(), *port)).map_err(|e| {
+                WebServerError::Socket(format!("绑定地址失败: {}:{} - {}", ip, port, e).to_string())
+            })?;
         }
     }
 
@@ -237,46 +236,6 @@ pub async fn start_web_server(
     debug!("启动Web服务器...");
     server.await?;
     Ok(())
-}
-
-/// # 绑定HTTP服务器到指定地址
-///
-/// 将HTTP服务器绑定到指定的IP地址和端口
-///
-/// ## 参数
-/// * `http_server` - HTTP服务器实例
-/// * `ip` - 要绑定的IP地址字符串
-/// * `port` - 要绑定的端口号
-///
-/// ## 泛型参数
-/// * `F` - 工厂函数类型
-/// * `I` - 服务实例类型
-/// * `S` - 服务工厂类型
-/// * `B` - 消息体类型
-///
-/// ## 返回值
-/// 返回绑定了地址的HTTP服务器实例
-///
-/// ## 错误处理
-/// 绑定失败时会返回错误信息
-fn http_server_bind<F, I, S, B>(
-    http_server: HttpServer<F, I, S, B>,
-    ip: &str,
-    port: u16,
-) -> Result<HttpServer<F, I, S, B>, WebServerError>
-where
-    F: Fn() -> I + Send + Clone + 'static,
-    I: IntoServiceFactory<S, actix_http::Request> + 'static,
-    S: ServiceFactory<actix_http::Request, Config = AppConfig> + 'static,
-    S::Error: Into<Error> + 'static,
-    S::InitError: Debug + 'static,
-    S::Response: Into<actix_http::Response<B>> + 'static,
-    B: MessageBody + 'static,
-{
-    debug!("绑定地址: [{ip}]:{port}");
-    Ok(http_server.bind((ip.to_string(), port)).map_err(|e| {
-        WebServerError::Socket(format!("绑定地址失败: {}:{} - {}", ip, port, e).to_string())
-    })?)
 }
 
 /// # 创建支持端口复用的TCP监听器
