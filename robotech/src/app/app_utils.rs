@@ -1,9 +1,9 @@
-use crate::cfg::{CfgError, build_config};
+use crate::cfg::{CfgError, build_cfg};
 use tracing::instrument;
 
 #[instrument(level = "debug", err)]
-pub fn build_app_config<'a, T: serde::Deserialize<'a>>(
+pub fn build_app_cfg<'a, T: serde::Deserialize<'a>>(
     path: Option<String>,
 ) -> Result<(T, Vec<String>), CfgError> {
-    build_config("APP", None, path)
+    build_cfg("APP", None, path)
 }

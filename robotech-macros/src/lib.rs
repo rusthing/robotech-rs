@@ -5,13 +5,13 @@ use syn::{
 };
 use wheel_rs::str_utils::{CamelFormat, split_camel_case};
 
-struct WatchFileArgs {
+struct WatchCfgFileArgs {
     title: String,
     clone_block: Block,
     reload_block: Block,
 }
 
-impl Parse for WatchFileArgs {
+impl Parse for WatchCfgFileArgs {
     fn parse(input: ParseStream) -> syn::Result<Self> {
         let title = input.parse::<syn::LitStr>()?.value();
         let _: Token![,] = input.parse()?;
@@ -19,7 +19,7 @@ impl Parse for WatchFileArgs {
         let _: Token![,] = input.parse()?;
         let reload_block = input.parse()?;
 
-        Ok(WatchFileArgs {
+        Ok(WatchCfgFileArgs {
             title,
             clone_block,
             reload_block,
@@ -28,22 +28,22 @@ impl Parse for WatchFileArgs {
 }
 
 #[proc_macro]
-pub fn watch_config_file(args: TokenStream) -> TokenStream {
-    let WatchFileArgs {
+pub fn watch_cfg_file(args: TokenStream) -> TokenStream {
+    let WatchCfgFileArgs {
         title,
         clone_block,
         reload_block,
-    } = parse_macro_input!(args as WatchFileArgs);
+    } = parse_macro_input!(args as WatchCfgFileArgs);
 
     let clone_block = &clone_block.stmts;
     let reload_block = &reload_block.stmts;
 
     let expanded = quote! {
-        debug!("watch {} config file...", #title);
+        debug!("watch {} cfg file...", #title);
         tokio::spawn({
             #( #clone_block )*
             async move {
-                let (_watcher, receiver) = watch_config_file(files).expect(&format!("watch {} config file error", #title));
+                let (_watcher, receiver) = watch_cfg_file(files).expect(&format!("watch {} cfg file error", #title));
 
                 // 创建一个1秒间隔的定时器
                 let mut interval = interval(Duration::from_secs(1));
@@ -57,14 +57,14 @@ pub fn watch_config_file(args: TokenStream) -> TokenStream {
                                 Ok(events) => {
                                     // 处理文件事件
                                     for event in events {
-                                        debug!("{} config file change event: {:?}", #title, event);
+                                        debug!("{} cfg file change event: {:?}", #title, event);
                                     }
-                                    debug!("reload from {} config file...", #title);
+                                    debug!("reload from {} cfg file...", #title);
 
                                     #( #reload_block )*
                                 }
                                 Err(e) => {
-                                    warn!("error receiving {} config file events: {:?}", #title, e);
+                                    warn!("error receiving {} cfg file events: {:?}", #title, e);
                                 }
                             }
                         }
@@ -74,13 +74,13 @@ pub fn watch_config_file(args: TokenStream) -> TokenStream {
                         }
                         Err(mpsc::TryRecvError::Disconnected) => {
                             // 通道关闭
-                            debug!("{} config file watcher channel closed, exiting watcher loop", #title);
+                            debug!("{} cfg file watcher channel closed, exiting watcher loop", #title);
                             break;
                         }
                     }
                 }
 
-                debug!("{} config file watcher task finished", #title);
+                debug!("{} cfg file watcher task finished", #title);
             }
         });
     };

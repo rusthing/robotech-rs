@@ -8,7 +8,7 @@ use std::path::Path;
 use std::sync::{Arc, mpsc};
 use std::time::Duration;
 
-pub fn build_config<'a, T: serde::Deserialize<'a>>(
+pub fn build_cfg<'a, T: serde::Deserialize<'a>>(
     env_var_prefix: &str,
     cfg_file_name_without_ext: Option<&str>,
     cfg_file_path: Option<String>,
@@ -78,7 +78,7 @@ fn add_source(
     config.add_source(file)
 }
 
-pub fn watch_config_file(
+pub fn watch_cfg_file(
     files: Arc<Vec<String>>,
 ) -> Result<
     (

@@ -1,8 +1,8 @@
-use crate::cfg::{CfgError, build_config, watch_config_file};
+use crate::cfg::{CfgError, build_cfg, watch_cfg_file};
 use crate::env::{APP_ENV, AppEnv, EnvError};
 use crate::log::{LogConfig, LogError};
 use log::{debug, warn};
-use robotech_macros::watch_config_file;
+use robotech_macros::watch_cfg_file;
 use std::env;
 use std::path::Path;
 use std::sync::{Arc, RwLock, mpsc};
@@ -168,7 +168,7 @@ pub fn init_log() -> Result<(), LogError> {
             rotation,
         },
         files,
-    ) = build_log_config()?;
+    ) = build_log_cfg()?;
     let files = Arc::new(files);
 
     // 创建环境过滤器，支持 RUST_LOG 环境变量
@@ -208,7 +208,7 @@ pub fn init_log() -> Result<(), LogError> {
         .init();
     debug!("初始化日志成功");
 
-    watch_config_file!(
+    watch_cfg_file!(
         "log",
         {
             let files = files.clone();
@@ -224,7 +224,7 @@ pub fn init_log() -> Result<(), LogError> {
                     rotation,
                 },
                 _,
-            ) = build_log_config().expect("build log config error");
+            ) = build_log_cfg().expect("build log config error");
 
             // 应用新配置
             env_layer_reload_handle
@@ -263,8 +263,8 @@ pub fn init_log() -> Result<(), LogError> {
     Ok(())
 }
 
-fn build_log_config() -> Result<(LogConfig, Vec<String>), CfgError> {
-    build_config("LOG", Some("log"), None)
+fn build_log_cfg() -> Result<(LogConfig, Vec<String>), CfgError> {
+    build_cfg("LOG", Some("log"), None)
 }
 
 fn create_env_filter(level: String) -> EnvFilter {
