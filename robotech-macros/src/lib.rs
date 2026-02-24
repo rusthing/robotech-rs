@@ -1,14 +1,14 @@
 mod cfg;
-mod ctrl;
 mod dao;
 mod log;
 mod svc;
+mod web;
 
 use crate::cfg::{WatchCfgFileArgs, watch_cfg_file_macro};
-use crate::ctrl::{CtrlArgs, ctrl_macro};
 use crate::dao::{DaoArgs, dao_macro};
 use crate::log::{LogCallArgs, log_call_macro};
 use crate::svc::{DbUnwrapArgs, SvcArgs, db_unwrap_macro, svc_macro};
+use crate::web::{CtrlArgs, StartWebServerArgs, ctrl_macro, start_web_server_macro};
 use proc_macro::TokenStream;
 use syn::{ItemFn, ItemStruct, parse_macro_input};
 
@@ -16,6 +16,12 @@ use syn::{ItemFn, ItemStruct, parse_macro_input};
 pub fn watch_cfg_file(args: TokenStream) -> TokenStream {
     let args = parse_macro_input!(args as WatchCfgFileArgs);
     watch_cfg_file_macro(args).into()
+}
+
+#[proc_macro]
+pub fn start_web_server(args: TokenStream) -> TokenStream {
+    let args = parse_macro_input!(args as StartWebServerArgs);
+    start_web_server_macro(args).into()
 }
 
 /// 属性宏：在进入方法时使用 log 库记录方法名、参数及参数值

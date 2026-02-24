@@ -1,5 +1,4 @@
-use proc_macro::TokenStream;
-use proc_macro2::Ident;
+use proc_macro2::{Ident, TokenStream};
 use quote::{format_ident, quote};
 use syn::parse::{Parse, ParseStream};
 use syn::{ItemStruct, Token};
@@ -7,7 +6,7 @@ use wheel_rs::str_utils::{CamelFormat, split_camel_case};
 
 /// Ctrl方法生成宏参数解析
 #[derive(Debug)]
-pub(super) struct CtrlArgs {
+pub(crate) struct CtrlArgs {
     exclude: bool,
     add: bool,
     modify: bool,
@@ -70,7 +69,7 @@ impl Parse for CtrlArgs {
     }
 }
 
-pub(super) fn ctrl_macro(args: CtrlArgs, input: ItemStruct) -> TokenStream {
+pub(crate) fn ctrl_macro(args: CtrlArgs, input: ItemStruct) -> TokenStream {
     let struct_name = &input.ident;
 
     // 解析结构体的名称，必须是Svc结尾，符合大驼峰命名规范
