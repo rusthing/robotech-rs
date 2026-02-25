@@ -1,14 +1,13 @@
-use crate::env::{APP_ENV, AppEnv, EnvError};
+use crate::env::{AppEnv, EnvError, APP_ENV};
 use crate::signal::signal_manager_error::SignalManagerError;
-use libc::pid_t;
 use log::{debug, error};
 use std::path::PathBuf;
 use std::process;
-use std::sync::{RwLock, mpsc};
+use std::sync::{mpsc, RwLock};
 use tracing::instrument;
 use wheel_rs::process::{
-    PidFileGuard, check_process, delete_pid_file, get_pid_file_path, read_pid,
-    send_signal_by_instruction, watch_signal,
+    check_process, delete_pid_file, get_pid_file_path, read_pid, send_signal_by_instruction,
+    watch_signal, PidFileGuard,
 };
 
 static PID_FILE_GUARD: RwLock<Option<PidFileGuard>> = RwLock::new(None);
@@ -28,7 +27,7 @@ impl SignalManager {
     #[instrument(level = "debug", ret, err)]
     pub fn new(
         signal_instruction: String,
-    ) -> Result<(Self, Option<pid_t>, mpsc::Sender<()>), SignalManagerError> {
+    ) -> Result<(Self, Option<i32>, mpsc::Sender<()>), SignalManagerError> {
         debug!("初始化信号管理者...");
         let AppEnv { app_file_path, .. } = APP_ENV.get().ok_or(EnvError::GetAppEnv())?;
         let pid_file_path = get_pid_file_path(app_file_path);
@@ -85,7 +84,7 @@ impl SignalManager {
     fn parse_and_handle_signal_args(
         signal_instruction: String,
         pid_file_path: &PathBuf,
-    ) -> Result<Option<pid_t>, SignalManagerError> {
+    ) -> Result<Option<i32>, SignalManagerError> {
         debug!("解析并处理信号参数...");
         let old_pid = read_pid(pid_file_path)?;
         if signal_instruction == "restart" {

@@ -1,7 +1,7 @@
 use proc_macro2::{Ident, TokenStream};
 use quote::quote;
-use syn::Token;
 use syn::parse::{Parse, ParseStream};
+use syn::Token;
 
 pub(crate) struct StartWebServerArgs {
     web_server_config: Ident,
@@ -43,9 +43,10 @@ pub(crate) fn start_web_server_macro(input: StartWebServerArgs) -> TokenStream {
     } = input;
 
     let expanded = quote! {
+        use log::{debug, error};
         use actix_web::middleware::Logger;
         use actix_web::{App, HttpServer, web};
-        use robotech::web::{create_reusable_listener, terminate_old_web_server, wait_for_web_server_ready};
+        use robotech::web::{health, build_cors, create_reusable_listener, terminate_old_web_server, wait_for_web_server_ready, WebServerConfig, WebServerError};
 
         debug!("初始化Web服务器...");
         let WebServerConfig {
@@ -122,6 +123,16 @@ pub(crate) fn start_web_server_macro(input: StartWebServerArgs) -> TokenStream {
             reuse_port = false;
         }
 
+        // 如果不是随机端口，且不是复用端口，且是重启服务器，则先停止旧服务器，再启动新服务器
+        if !is_random_port && !reuse_port {
+            terminate_old_web_server(
+                #old_pid,
+                terminate_old_wait_timeout,
+                terminate_old_retry_interval,
+            )
+            .await?;
+        }
+
         // 是否支持健康检查
         let support_health_check = is_random_port || reuse_port || support_health_check;
 
@@ -140,16 +151,6 @@ pub(crate) fn start_web_server_macro(input: StartWebServerArgs) -> TokenStream {
             debug!("HttpServer创建worker，并配置完成app.");
             app
         });
-
-        // 如果不是随机端口，且不是复用端口，且是重启服务器，则先停止旧服务器，再启动新服务器
-        if !is_random_port && !reuse_port {
-            terminate_old_web_server(
-                #old_pid,
-                terminate_old_wait_timeout,
-                terminate_old_retry_interval,
-            )
-            .await?;
-        }
 
         debug!("监听绑定地址...");
         for (bind, port) in &listen_binds {
@@ -222,7 +223,7 @@ pub(crate) fn start_web_server_macro(input: StartWebServerArgs) -> TokenStream {
     };
 
     // 调试：打印完整展开的代码
-    // println!("Full expanded code:\n{}", expanded);
+    println!("Full expanded code:\n{expanded}");
 
     TokenStream::from(expanded)
 }

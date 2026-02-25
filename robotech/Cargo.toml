@@ -13,7 +13,7 @@ readme = "README.md"
 
 [features]
 api-client = ["dep:reqwest"]
-app = ["dep:anyhow", "dep:config", "dep:libc", "dep:validator", "dep:wheel-rs", "dep:idworker"]
+app = ["dep:anyhow", "dep:config", "dep:validator", "dep:wheel-rs", "dep:idworker"]
 web = ["app", "dep:actix-web", "dep:actix-cors", "dep:actix-service", "dep:actix-http", "dep:socket2", "dep:rustls", "dep:reqwest"]
 db = ["app", "dep:sea-orm", "dep:regex", "dep:once_cell"]
 macros = ["robotech-macros"]
@@ -35,7 +35,6 @@ tokio = { workspace = true, features = ["macros"] }
 utoipa = { workspace = true }
 anyhow = { workspace = true, optional = true }
 config = { workspace = true, optional = true }
-libc = { workspace = true, optional = true }
 regex = { workspace = true, optional = true }
 actix-web = { workspace = true, features = ["rustls-0_23"], optional = true }
 actix-cors = { workspace = true, optional = true }

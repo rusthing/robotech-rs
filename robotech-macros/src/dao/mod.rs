@@ -204,7 +204,7 @@ pub(super) fn dao_macro(args: DaoArgs, input: ItemStruct) -> TokenStream {
     };
 
     // 调试：打印完整展开的代码
-    // println!("Full expanded code:\n{}", expanded);
+    // println!("Full expanded code:\n{expanded}");
 
     TokenStream::from(expanded)
 }

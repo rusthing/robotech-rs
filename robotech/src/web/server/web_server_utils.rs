@@ -1,13 +1,9 @@
-use crate::web::cors::build_cors;
-use crate::web::server::WebServerConfig;
-use crate::web::server::web_server_error::WebServerError;
-use actix_web::{App, HttpServer, Responder, get, web};
-use libc::pid_t;
-use log::{debug, error, info};
+use crate::web::WebServerError;
+use actix_web::{get, Responder};
+use log::{debug, info};
 use robotech_macros::log_call;
 use socket2::{Domain, Socket, Type};
 use std::net::{IpAddr, SocketAddr, TcpListener};
-use std::sync::{Arc, mpsc};
 use std::time::Duration;
 use tokio::time::timeout;
 use tracing::instrument;
@@ -140,7 +136,7 @@ pub async fn wait_for_web_server_ready(
 /// stop_old_web_server(12345).await?;
 /// ```
 pub async fn terminate_old_web_server(
-    old_pid: Option<pid_t>,
+    old_pid: Option<i32>,
     wait_timeout: Duration,
     retry_interval: Duration,
 ) -> Result<(), WebServerError> {

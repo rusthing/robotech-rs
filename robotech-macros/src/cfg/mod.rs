@@ -83,7 +83,7 @@ pub(super) fn watch_cfg_file_macro(input: WatchCfgFileArgs) -> TokenStream {
     };
 
     // 调试：打印完整展开的代码
-    // println!("Full expanded code:\n{}", expanded);
+    // println!("Full expanded code:\n{expanded}");
 
     TokenStream::from(expanded)
 }

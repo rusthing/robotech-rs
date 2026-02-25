@@ -2575,7 +2575,6 @@ dependencies = [
  "chrono",
  "config",
  "idworker",
- "libc",
  "log",
  "notify",
  "notify-debouncer-mini",
