@@ -1,12 +1,12 @@
-use crate::web::{WebServerConfig, WebServerError};
+use crate::web::{build_cors, WebServerConfig, WebServerError};
 use axum::{routing::get, Router};
 use log::{debug, info};
 use robotech_macros::log_call;
 use socket2::{Domain, Socket, Type};
 use std::net::{IpAddr, SocketAddr, TcpListener};
-use std::sync::{mpsc, Arc};
 use std::time::Duration;
 use tokio::time::timeout;
+use tower_http::trace::TraceLayer;
 use wheel_rs::process::terminate_process;
 
 /// # 健康检查端点
@@ -39,12 +39,17 @@ pub async fn health() -> &'static str {
 /// * 开始监听失败时会返回错误
 #[log_call]
 pub fn create_listener(
-    ip: &str,
+    mut bind: String,
     port: u16,
     reuse_port: bool,
 ) -> Result<TcpListener, WebServerError> {
+    // 如果是IPv6地址，去除方括号
+    if bind.starts_with('[') && bind.ends_with(']') {
+        bind = bind[1..bind.len() - 1].to_string();
+    }
+
     // 解析 IP 地址
-    let ip_addr: IpAddr = ip
+    let ip_addr: IpAddr = bind
         .parse()
         .map_err(|_| WebServerError::Socket("无效的 IP 地址格式".to_string()))?;
     let addr: &SocketAddr = &SocketAddr::new(ip_addr, port);
@@ -90,7 +95,7 @@ pub fn create_listener(
 /// 通过健康检查端点轮询等待Web服务器完全启动并准备好接受请求
 ///
 /// ## 参数
-/// * `health_url` - 健康检查URL
+/// * `health_check_url` - 健康检查URL
 /// * `wait_timeout` - 最大等待时间
 /// * `retry_interval` - 重试间隔时间
 ///
@@ -100,8 +105,8 @@ pub fn create_listener(
 ///
 /// ## 错误处理
 /// * 等待超时时返回错误字符串"启动超时"
-pub async fn wait_for_web_server_ready(
-    health_url: &str,
+async fn wait_for_web_server_ready(
+    health_check_url: &str,
     wait_timeout: Duration,
     retry_interval: Duration,
 ) -> Result<(), WebServerError> {
@@ -109,7 +114,7 @@ pub async fn wait_for_web_server_ready(
     timeout(wait_timeout, async move {
         Ok(loop {
             tokio::time::sleep(retry_interval).await;
-            if let Ok(response) = client.get(health_url).send().await {
+            if let Ok(response) = client.get(health_check_url).send().await {
                 if response.status().is_success() {
                     info!("Web服务器通过健康检查，启动完成.");
                     break;
@@ -118,7 +123,7 @@ pub async fn wait_for_web_server_ready(
         })
     })
     .await
-    .map_err(|_| WebServerError::StartWebServerTimeout(health_url.to_string()))?
+    .map_err(|_| WebServerError::StartWebServerTimeout(health_check_url.to_string()))?
 }
 
 /// # 停止旧的Web服务器
@@ -137,7 +142,7 @@ pub async fn wait_for_web_server_ready(
 /// use crate::web::server::stop_old_web_server;
 /// stop_old_web_server(12345).await?;
 /// ```
-pub async fn terminate_old_web_server(
+async fn terminate_old_web_server(
     old_pid: Option<i32>,
     wait_timeout: Duration,
     retry_interval: Duration,
@@ -162,6 +167,7 @@ pub async fn start_web_server(
         listen: listens,
         mut reuse_port,
         https: https_config,
+        log_enabled,
         cors: cors_config,
         support_health_check,
         start_wait_timeout,
@@ -205,7 +211,7 @@ pub async fn start_web_server(
                 if port != 0 {
                     is_random_port = false;
                 }
-                listen_binds.push(("::".to_string(), port));
+                listen_binds.push(("0.0.0.0".to_string(), port));
             }
             2 => {
                 let port: u16 = parts[0]
@@ -214,11 +220,7 @@ pub async fn start_web_server(
                 if port != 0 {
                     is_random_port = false;
                 }
-                let mut bind = parts[1].to_string();
-                // 如果是IPv6地址，去除方括号
-                if bind.starts_with('[') && bind.ends_with(']') {
-                    bind = bind[1..bind.len() - 1].to_string();
-                }
+                let bind = parts[1].to_string();
                 listen_binds.push((bind, port));
             }
             _ => Err(WebServerError::ParsePort(listen.to_string()))?,
@@ -226,10 +228,10 @@ pub async fn start_web_server(
     }
 
     if is_random_port {
-        // 如果是随机端口，端口复用无意义
+        // 如果是随机端口，则不会开启复用端口(无意义)
         reuse_port = false;
     } else if !reuse_port {
-        // 如果不是随机端口，且不是复用端口，且是重启服务器，则先停止旧服务器，再启动新服务器
+        // 如果不是随机端口，且不是复用端口，则先停止旧服务器，然后才能启动新服务器
         terminate_old_web_server(
             old_pid,
             terminate_old_wait_timeout,
@@ -239,8 +241,16 @@ pub async fn start_web_server(
     }
 
     // 判断是否支持健康检查
-    if is_random_port || reuse_port || support_health_check {
+    if support_health_check {
         router = router.route("/health", get(health));
+    }
+    // 添加日志中间件
+    if log_enabled {
+        router = router.layer(TraceLayer::new_for_http());
+    }
+    // 添加CORS中间件
+    if let Some(cors_layer) = build_cors(&cors_config)? {
+        router = router.layer(cors_layer);
     }
 
     // 判断HTTP协议
@@ -254,9 +264,9 @@ pub async fn start_web_server(
 
     debug!("监听绑定地址...");
     let mut server_handles = Vec::new();
-    let mut domain_url;
+    let mut domain_url = String::new();
     for (bind, port) in &listen_binds {
-        let tcp_listener = create_listener(bind, *port, reuse_port)?;
+        let tcp_listener = create_listener(bind.to_string(), *port, reuse_port)?;
         // 在 serve 之前获取实际端口
         let actual_addr = tcp_listener.local_addr()?;
 
@@ -270,9 +280,7 @@ pub async fn start_web_server(
 
         let ip = if bind == "0.0.0.0" {
             "127.0.0.1"
-        } else if bind == "::" {
-            r"[::1]"
-        } else if bind == "::1" {
+        } else if bind == r"[::]" {
             r"[::1]"
         } else {
             &bind
@@ -280,6 +288,27 @@ pub async fn start_web_server(
         domain_url = format!("{http_protocol}://{ip}:{port}");
 
         info!("监听 <{actual_addr}> 成功✅  -> 🌐 {domain_url}");
+    }
+
+    // 如果是随机端口或复用端口，则可以在前面先启动新服务器，后面这里再停止旧服务器
+    if is_random_port || reuse_port {
+        // 如果支持健康检查，则等待新服务器启动成功
+        if support_health_check {
+            let heath_check_url = format!("{domain_url}/health");
+            wait_for_web_server_ready(
+                heath_check_url.as_str(),
+                start_wait_timeout,
+                start_retry_interval,
+            )
+            .await?;
+        }
+
+        terminate_old_web_server(
+            old_pid,
+            terminate_old_wait_timeout,
+            terminate_old_retry_interval,
+        )
+        .await?;
     }
 
     Ok(())

@@ -6,6 +6,8 @@ use wheel_rs::process::ProcessError;
 pub enum WebServerError {
     #[error("Fail to parse port: {0}")]
     ParsePort(String),
+    #[error("Fail to parse CORS config form {0}: {1}")]
+    ParseCors(String, String),
     #[error("Start web server timeout: {0}")]
     StartWebServerTimeout(String),
     #[error("Fail to terminate old web server: {0}")]

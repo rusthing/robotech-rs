@@ -31,6 +31,10 @@ pub struct WebServerConfig {
     #[serde(default)]
     pub https: Option<HttpsConfig>,
 
+    /// 是否启用日志(默认关闭)
+    #[serde(default)]
+    pub log_enabled: bool,
+
     /// CORS配置(不设置默认不开启)
     #[serde(default)]
     pub cors: Option<CorsConfig>,
@@ -67,6 +71,7 @@ impl Default for WebServerConfig {
             listen: listen_default(),
             reuse_port: reuse_port_default(),
             https: None,
+            log_enabled: false,
             cors: None,
             support_health_check: support_health_check_default(),
             start_wait_timeout: start_wait_timeout_default(),

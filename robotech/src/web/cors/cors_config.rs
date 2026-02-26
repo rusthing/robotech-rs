@@ -1,4 +1,6 @@
 use serde::{Deserialize, Serialize};
+use std::time::Duration;
+use wheel_rs::serde::duration_option_serde;
 use wheel_rs::serde::vec_option_serde;
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
@@ -70,8 +72,8 @@ pub struct CorsConfig {
     /// - 推荐值 <br/>
     /// -- 开发环境：0(方便调试) <br/>
     /// -- 生产环境：不设置(默认1800，即30分钟)、3600(1小时) 或 86400(24小时)
-    #[serde(default = "max_age_default")]
-    pub max_age: Option<usize>,
+    #[serde(with = "duration_option_serde", default = "max_age_default")]
+    pub max_age: Option<Duration>,
     /// # 是否允许携带凭证
     /// ## 作用与原理
     /// 控制浏览器允许前端代码可以携带哪些用户凭据，如:
@@ -81,13 +83,13 @@ pub struct CorsConfig {
     /// 对应服务器预检时的响应头: Access-Control-Allow-Credentials
     /// ## 注意事项
     /// - 默认情况下，浏览器不允许携带凭证
-    /// - 如果启用了 supports_credentials，就不能使用通配符 * 作为 allowed_origin
+    /// - 如果启用了 allow_credentials，就不能使用通配符 * 作为 allowed_origin
     /// ## 使用场景
     /// - 需要: 使用基于 Session/Cookie 的认证
     /// - 需要: 在跨域请求中读写 Cookie
     /// - 不需要: 使用无状态 JWT（存在 localStorage）
-    #[serde(default = "supports_credentials_default")]
-    pub supports_credentials: Option<bool>,
+    #[serde(default = "allow_credentials_default")]
+    pub allow_credentials: Option<bool>,
 }
 
 fn enabled_default() -> bool {
@@ -105,9 +107,10 @@ fn allowed_headers_default() -> Option<Vec<String>> {
 fn expose_headers_default() -> Option<Vec<String>> {
     None
 }
-fn max_age_default() -> Option<usize> {
-    Some(1800)
+fn max_age_default() -> Option<Duration> {
+    None
 }
-fn supports_credentials_default() -> Option<bool> {
+
+fn allow_credentials_default() -> Option<bool> {
     None
 }
