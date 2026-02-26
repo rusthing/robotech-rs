@@ -1,12 +1,12 @@
-use crate::web::WebServerError;
-use actix_web::{get, Responder};
+use crate::web::{WebServerConfig, WebServerError};
+use axum::{routing::get, Router};
 use log::{debug, info};
 use robotech_macros::log_call;
 use socket2::{Domain, Socket, Type};
 use std::net::{IpAddr, SocketAddr, TcpListener};
+use std::sync::{mpsc, Arc};
 use std::time::Duration;
 use tokio::time::timeout;
-use tracing::instrument;
 use wheel_rs::process::terminate_process;
 
 /// # 健康检查端点
@@ -15,10 +15,8 @@ use wheel_rs::process::terminate_process;
 ///
 /// ## 返回值
 /// 返回实现了 Responder trait 的响应对象
-#[get("/health")]
-#[instrument(level = "debug")]
 #[log_call]
-pub async fn health() -> impl Responder {
+pub async fn health() -> &'static str {
     "Ok"
 }
 
@@ -145,4 +143,42 @@ pub async fn terminate_old_web_server(
         terminate_process(old_pid, wait_timeout, retry_interval).await?;
     }
     Ok(())
+}
+
+#[log_call]
+pub async fn start_web_server(
+    web_server_config: WebServerConfig,
+    router: Router,
+    port_of_args: Option<u16>,
+    old_pid: Option<i32>,
+    app_stated_sender: Arc<mpsc::Sender<()>>,
+) -> Result<(), WebServerError> {
+    let WebServerConfig {
+        bind: binds,
+        port: mut port_option,
+        listen: listens,
+        mut reuse_port,
+        https: https_config,
+        cors: cors_config,
+        support_health_check,
+        start_wait_timeout,
+        start_retry_interval,
+        terminate_old_wait_timeout,
+        terminate_old_retry_interval,
+    } = web_server_config;
+
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
+        .await
+        .expect("Failed to bind");
+    // 2. 【关键步骤】在 serve 之前获取实际端口
+    let actual_addr = listener.local_addr().expect("Failed to get local addr");
+    let port = actual_addr.port();
+
+    println!("✅ 服务器已启动，实际占用端口为: {}", port);
+    println!("🌐 访问地址: http://127.0.0.1:{}", port);
+
+    let router = router.route("/health", get(health));
+
+    // 3. 启动服务
+    Ok(axum::serve(listener, router).await?)
 }

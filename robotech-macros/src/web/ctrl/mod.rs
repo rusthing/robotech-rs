@@ -130,7 +130,6 @@ pub(crate) fn ctrl_macro(args: CtrlArgs, input: ItemStruct) -> TokenStream {
             )]
             #[post("")]
             #[log_call]
-            #[instrument(level = "debug", err)]
             pub async fn add(
                 json_body: web::Json<#add_dto_name>,
                 req: HttpRequest,
@@ -174,7 +173,6 @@ pub(crate) fn ctrl_macro(args: CtrlArgs, input: ItemStruct) -> TokenStream {
                 responses((status = OK, body = Ro<#vo_name>))
             )]
             #[put("")]
-            #[instrument(level = "debug", err)]
             #[log_call]
             pub async fn modify(
                 json_body: web::Json<#modify_dto_name>,
@@ -219,7 +217,6 @@ pub(crate) fn ctrl_macro(args: CtrlArgs, input: ItemStruct) -> TokenStream {
                 responses((status = OK, body = Ro<#vo_name>))
             )]
             #[post("/save")]
-            #[instrument(level = "debug", err)]
             #[log_call]
             pub async fn save(
                 json_body: web::Json<#save_dto_name>,
@@ -258,7 +255,6 @@ pub(crate) fn ctrl_macro(args: CtrlArgs, input: ItemStruct) -> TokenStream {
                 responses((status = OK, body = Ro<String>))
             )]
             #[delete("")]
-            #[instrument(level = "debug", err)]
             #[log_call]
             pub async fn del(
                 query: Query<HashMap<String, String>>,
@@ -302,7 +298,6 @@ pub(crate) fn ctrl_macro(args: CtrlArgs, input: ItemStruct) -> TokenStream {
                 )
             )]
             #[get("/get-by-id")]
-            #[instrument(level = "debug", err)]
             #[log_call]
             pub async fn get_by_id(query: Query<HashMap<String, String>>) -> Result<HttpResponse, CtrlError> {
                 let id = get_id_from_query_params(query)?;

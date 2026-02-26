@@ -1,10 +1,10 @@
 use crate::env::{AppEnv, EnvError, APP_ENV};
 use crate::signal::signal_manager_error::SignalManagerError;
 use log::{debug, error};
+use robotech_macros::log_call;
 use std::path::PathBuf;
 use std::process;
 use std::sync::{mpsc, RwLock};
-use tracing::instrument;
 use wheel_rs::process::{
     check_process, delete_pid_file, get_pid_file_path, read_pid, send_signal_by_instruction,
     watch_signal, PidFileGuard,
@@ -24,7 +24,7 @@ impl Drop for SignalManager {
 }
 
 impl SignalManager {
-    #[instrument(level = "debug", ret, err)]
+    #[log_call]
     pub fn new(
         signal_instruction: String,
     ) -> Result<(Self, Option<i32>, mpsc::Sender<()>), SignalManagerError> {
@@ -80,7 +80,7 @@ impl SignalManager {
     /// # Panics
     ///
     /// 当PID文件已存在且对应进程正在运行时，函数会panic并输出提示信息
-    #[instrument(level = "debug", ret, err)]
+    #[log_call]
     fn parse_and_handle_signal_args(
         signal_instruction: String,
         pid_file_path: &PathBuf,

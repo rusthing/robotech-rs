@@ -1,10 +1,11 @@
 use crate::dao::DaoError;
+use crate::ro::Ro;
 #[cfg(feature = "db")]
 use crate::ro::RO_CODE_WARNING_DELETE_VIOLATE_CONSTRAINT;
-use crate::ro::Ro;
 use crate::svc::SvcError;
-use actix_web::http::StatusCode;
-use actix_web::{HttpResponse, ResponseError};
+use axum::http::StatusCode;
+use axum::response::{IntoResponse, Response};
+use axum::Json;
 use log::warn;
 #[cfg(feature = "db")]
 use sea_orm::DbErr;
@@ -95,15 +96,11 @@ impl CtrlError {
         }
     }
 }
-/// # 为 CtrlError 实现 ResponseError trait
-/// 为 CtrlError 实现 ResponseError trait 以支持 Actix Web 的错误处理机制
-///
-/// 该实现定义了 控制器 错误如何转换为 HTTP 响应，包括状态码和响应体格式。
-/// 根据不同的错误类型，会返回相应的 HTTP 状态码和格式化的错误信息。
-impl ResponseError for CtrlError {
-    /// 根据异常获取状态码
-    fn status_code(&self) -> StatusCode {
-        match self {
+
+// 为错误类型实现 IntoResponse
+impl IntoResponse for CtrlError {
+    fn into_response(self) -> Response {
+        let status = match &self {
             CtrlError::Runtime(_) => StatusCode::INTERNAL_SERVER_ERROR,
             CtrlError::Validation(_) | CtrlError::Validations(_) => StatusCode::BAD_REQUEST,
             CtrlError::Io(_) => StatusCode::INTERNAL_SERVER_ERROR,
@@ -118,11 +115,8 @@ impl ResponseError for CtrlError {
                 },
                 _ => StatusCode::INTERNAL_SERVER_ERROR,
             },
-        }
-    }
+        };
 
-    /// 异常时响应的方法
-    fn error_response(&self) -> HttpResponse {
-        HttpResponse::build(self.status_code()).json(self.to_ro())
+        (status, Json(&self.to_ro())).into_response()
     }
 }

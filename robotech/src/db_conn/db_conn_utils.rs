@@ -1,9 +1,9 @@
-use crate::db_conn::DbConfig;
 use crate::db_conn::db_conn_error::DbConnError;
+use crate::db_conn::DbConfig;
 use log::debug;
+use robotech_macros::log_call;
 use sea_orm::{ConnectOptions, Database, DbConn};
 use std::sync::{Arc, RwLock};
-use tracing::instrument;
 
 /// 数据库连接
 static DB_CONN: RwLock<Option<Arc<DbConn>>> = RwLock::new(None);
@@ -34,7 +34,7 @@ pub fn set_db_conn(value: DbConn) -> Result<(), DbConnError> {
 ///
 /// * 如果数据库连接失败，程序将 panic
 /// * 如果无法设置全局数据库连接，程序将 panic
-#[instrument(level = "debug", err)]
+#[log_call]
 pub async fn init_db(db_config: DbConfig) -> Result<(), DbConnError> {
     debug!("init database...");
 

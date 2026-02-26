@@ -1,6 +1,6 @@
 use crate::cst::user_id_cst::USER_ID_HEADER_NAME;
-use actix_web::HttpRequest;
-use actix_web::web::Query;
+use axum::extract::Query;
+use axum::http::HeaderMap;
 use std::collections::HashMap;
 use validator;
 
@@ -22,15 +22,15 @@ use validator;
 ///
 /// * 如果Query参数中没有ID参数，返回`ValidationError`
 pub fn get_id_from_query_params(
-    query: Query<HashMap<String, String>>,
-) -> actix_web::Result<u64, validator::ValidationError> {
+    query: &Query<HashMap<String, String>>,
+) -> Result<u64, validator::ValidationError> {
     let id = match query.get("id") {
         Some(id_str) => match id_str.parse::<u64>() {
             Ok(id_val) => id_val,
             Err(_) => {
-                let msg = format!("参数<id>格式错误: {}", id_str);
+                let message = format!("参数<id>格式错误: {}", id_str);
                 return Err(validator::ValidationError::new(Box::leak(
-                    msg.into_boxed_str(),
+                    message.into_boxed_str(),
                 )));
             }
         },
@@ -59,22 +59,21 @@ pub fn get_id_from_query_params(
 ///
 /// * 如果请求头中缺少必要的用户ID参数，返回`ValidationError`
 /// * 如果用户ID格式不正确，无法解析为u64类型，返回`ValidationError`
-pub fn get_current_user_id(req: HttpRequest) -> Result<u64, validator::ValidationError> {
-    req.headers()
+pub fn get_current_user_id(headers: &HeaderMap) -> Result<u64, validator::ValidationError> {
+    headers
         .get(USER_ID_HEADER_NAME)
-        .ok_or({
-            let msg = format!("缺少必要参数<{}>", USER_ID_HEADER_NAME);
-            validator::ValidationError::new(Box::leak(msg.into_boxed_str()))
+        .ok_or_else(|| {
+            let message = format!("缺少必要参数<{}>", USER_ID_HEADER_NAME);
+            validator::ValidationError::new(Box::leak(message.into_boxed_str()))
         })?
         .to_str()
         .map_err(|_| {
-            let msg = format!("参数<{}>格式不正确", USER_ID_HEADER_NAME);
-            validator::ValidationError::new(Box::leak(msg.into_boxed_str()))
+            let message = format!("参数<{}>格式不正确", USER_ID_HEADER_NAME);
+            validator::ValidationError::new(Box::leak(message.into_boxed_str()))
         })?
-        .to_string()
         .parse::<u64>()
         .map_err(|_| {
-            let msg = format!("参数<{}>格式不正确", USER_ID_HEADER_NAME);
-            validator::ValidationError::new(Box::leak(msg.into_boxed_str()))
+            let message = format!("参数<{}>格式不正确", USER_ID_HEADER_NAME);
+            validator::ValidationError::new(Box::leak(message.into_boxed_str()))
         })
 }

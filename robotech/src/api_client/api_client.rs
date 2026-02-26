@@ -1,10 +1,10 @@
-use crate::api_client::ApiClientError;
 use crate::api_client::api_client_config::ApiClientConfig;
+use crate::api_client::ApiClientError;
 use crate::cst::user_id_cst::USER_ID_HEADER_NAME;
 use crate::ro::Ro;
 use reqwest::Client;
+use robotech_macros::log_call;
 use std::sync::LazyLock;
-use tracing::instrument;
 
 pub static REQWEST_CLIENT: LazyLock<Client> = LazyLock::new(|| Client::new());
 
@@ -15,7 +15,7 @@ pub struct CrudApiClient {
 
 impl CrudApiClient {
     /// 执行GET请求的通用方法
-    #[instrument(level = "debug", ret, err)]
+    #[log_call]
     pub async fn get(
         &self,
         path: &str,
@@ -53,7 +53,7 @@ impl CrudApiClient {
     }
 
     /// 执行GET请求的通用方法，返回bytes
-    #[instrument(level = "debug", ret, err)]
+    #[log_call]
     pub async fn get_bytes(
         &self,
         path: &str,
@@ -87,7 +87,7 @@ impl CrudApiClient {
     }
 
     /// 执行POST请求的通用方法
-    #[instrument(level = "debug", ret, err)]
+    #[log_call]
     pub async fn post<B: serde::Serialize + Sync + std::fmt::Debug>(
         &self,
         path: &str,
@@ -126,7 +126,7 @@ impl CrudApiClient {
         Ok(result)
     }
     /// 执行PUT请求的通用方法
-    #[instrument(level = "debug", ret, err)]
+    #[log_call]
     pub async fn put<B: serde::Serialize + Sync + std::fmt::Debug>(
         &self,
         path: &str,
@@ -165,7 +165,7 @@ impl CrudApiClient {
         Ok(result)
     }
     /// 执行DELETE请求的通用方法
-    #[instrument(level = "debug", ret, err)]
+    #[log_call]
     pub async fn delete<B: serde::Serialize>(
         &self,
         path: &str,
@@ -201,6 +201,8 @@ impl CrudApiClient {
             serde_json::from_str(&response_text).map_err(|e| ApiClientError::ParseJson(url, e))?;
         Ok(result)
     }
+
+    #[log_call]
     /// 执行post multipart请求的通用方法
     pub async fn multipart(
         &self,

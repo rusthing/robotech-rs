@@ -18,7 +18,7 @@ pub struct Ro<E> {
     /// 响应结果枚举值，表示请求处理的结果状态
     pub result: RoResult,
     /// 响应消息，对结果的简要描述
-    pub msg: String,
+    pub message: String,
     /// 时间戳，记录响应生成的时间（毫秒）
     pub timestamp: u64,
     /// 额外数据，可选的响应数据内容
@@ -37,14 +37,14 @@ impl<E> Ro<E> {
     ///
     /// ## 参数
     /// * `result` - 响应结果枚举值
-    /// * `msg` - 响应消息
+    /// * `message` - 响应消息
     ///
     /// ## 返回值
     /// 返回一个新的Ro实例
-    pub fn new(result: RoResult, msg: String) -> Self {
+    pub fn new(result: RoResult, message: String) -> Self {
         Ro {
             result,
-            msg,
+            message,
             timestamp: Utc::now().timestamp_millis() as u64,
             extra: None,
             detail: None,
@@ -71,56 +71,56 @@ impl<E> Ro<E> {
     /// # 创建一个成功的响应对象
     ///
     /// ## 参数
-    /// * `msg` - 成功消息
+    /// * `message` - 成功消息
     ///
     /// ## 返回值
     /// 返回一个结果为Success的Ro实例
-    pub fn success(msg: String) -> Self {
-        Self::new(RoResult::Success, msg)
+    pub fn success(message: String) -> Self {
+        Self::new(RoResult::Success, message)
     }
 
     /// # 创建一个非法参数的响应对象
     ///
     /// ## 参数
-    /// * `msg` - 错误消息
+    /// * `message` - 错误消息
     ///
     /// ## 返回值
     /// 返回一个结果为IllegalArgument的Ro实例
-    pub fn illegal_argument(msg: String) -> Self {
-        Self::new(RoResult::IllegalArgument, msg)
+    pub fn illegal_argument(message: String) -> Self {
+        Self::new(RoResult::IllegalArgument, message)
     }
 
     /// # 创建一个警告的响应对象
     ///
     /// ## 参数
-    /// * `msg` - 警告消息
+    /// * `message` - 警告消息
     ///
     /// ## 返回值
     /// 返回一个结果为Warn的Ro实例
-    pub fn warn(msg: String) -> Self {
-        Self::new(RoResult::Warn, msg)
+    pub fn warn(message: String) -> Self {
+        Self::new(RoResult::Warn, message)
     }
 
     /// # 创建一个失败的响应对象
     ///
     /// ## 参数
-    /// * `msg` - 失败消息
+    /// * `message` - 失败消息
     ///
     /// ## 返回值
     /// 返回一个结果为Fail的Ro实例
-    pub fn fail(msg: String) -> Self {
-        Self::new(RoResult::Fail, msg)
+    pub fn fail(message: String) -> Self {
+        Self::new(RoResult::Fail, message)
     }
 
     /// # 设置响应消息
     ///
     /// ## 参数
-    /// * `msg` - 新的消息内容
+    /// * `message` - 新的消息内容
     ///
     /// ## 返回值
     /// 返回更新消息后的本实例（支持链式调用）
-    pub fn msg(mut self, msg: String) -> Self {
-        self.msg = msg;
+    pub fn message(mut self, message: String) -> Self {
+        self.message = message;
         self
     }
 
