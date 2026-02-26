@@ -2642,6 +2642,7 @@ dependencies = [
  "config",
  "idworker",
  "log",
+ "nix",
  "notify",
  "notify-debouncer-mini",
  "once_cell",
@@ -2670,7 +2671,6 @@ dependencies = [
 name = "robotech-macros"
 version = "1.5.0"
 dependencies = [
- "log",
  "proc-macro2",
  "quote",
  "syn 2.0.117",

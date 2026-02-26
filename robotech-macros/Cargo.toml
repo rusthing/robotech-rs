@@ -22,4 +22,3 @@ syn = { workspace = true, features = ["full"] }     # 用于解析 Rust 代码�
 
 # 业务依赖
 wheel-rs = { workspace = true }
-log = "0.4.29"

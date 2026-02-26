@@ -37,8 +37,12 @@ pub async fn health() -> &'static str {
 /// * 设置socket选项失败时会返回错误
 /// * 绑定地址失败时会返回错误
 /// * 开始监听失败时会返回错误
-pub fn create_reusable_listener(ip: &str, port: u16) -> Result<TcpListener, WebServerError> {
-    debug!("创建绑定([{ip}]:{port})可复用端口的监听器...");
+#[log_call]
+pub fn create_listener(
+    ip: &str,
+    port: u16,
+    reuse_port: bool,
+) -> Result<TcpListener, WebServerError> {
     // 解析 IP 地址
     let ip_addr: IpAddr = ip
         .parse()
@@ -59,7 +63,7 @@ pub fn create_reusable_listener(ip: &str, port: u16) -> Result<TcpListener, WebS
         .set_reuse_address(true)
         .map_err(|e| WebServerError::Socket(format!("设置地址复用选项失败: {}", e)))?;
     socket
-        .set_reuse_port(true)
+        .set_reuse_port(reuse_port)
         .map_err(|e| WebServerError::Socket(format!("设置端口复用选项失败: {}", e)))?;
 
     // 设置非阻塞模式（actix-web 要求）
@@ -148,10 +152,9 @@ pub async fn terminate_old_web_server(
 #[log_call]
 pub async fn start_web_server(
     web_server_config: WebServerConfig,
-    router: Router,
+    mut router: Router,
     port_of_args: Option<u16>,
     old_pid: Option<i32>,
-    app_stated_sender: Arc<mpsc::Sender<()>>,
 ) -> Result<(), WebServerError> {
     let WebServerConfig {
         bind: binds,
@@ -167,18 +170,117 @@ pub async fn start_web_server(
         terminate_old_retry_interval,
     } = web_server_config;
 
-    let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
-        .await
-        .expect("Failed to bind");
-    // 2. 【关键步骤】在 serve 之前获取实际端口
-    let actual_addr = listener.local_addr().expect("Failed to get local addr");
-    let port = actual_addr.port();
+    // 如果命令行参数指定了端口，则使用命令行指定的端口
+    if port_of_args.is_some() {
+        port_option = port_of_args;
+    }
 
-    println!("✅ 服务器已启动，实际占用端口为: {}", port);
-    println!("🌐 访问地址: http://127.0.0.1:{}", port);
+    // 根据传入参数初步判断是否随机端口
+    let mut is_random_port = true;
+    let port = port_option.unwrap_or(0);
+    if port != 0 {
+        is_random_port = false;
+    }
 
-    let router = router.route("/health", get(health));
+    // 创建监听绑定地址数组
+    let mut listen_binds = vec![];
+    // 解析绑定地址
+    if !binds.is_empty() {
+        for bind in binds {
+            listen_binds.push((bind, port));
+        }
+    } else if listens.is_empty() {
+        // 如果bind和listen都未配置，默认绑定 "0.0.0.0"
+        listen_binds.push(("0.0.0.0".to_string(), port));
+    }
+    // 解析监听地址
+    for listen in &listens {
+        // 解析地址，从右侧开始分割，最多产生2部分，可以支持IPv4和IPv6，parts[0]为端口，parts[1]为IP地址
+        let parts: Vec<&str> = listen.rsplitn(2, ':').collect();
+        match parts.len() {
+            1 => {
+                let port: u16 = listen
+                    .parse()
+                    .map_err(|_| WebServerError::ParsePort(listen.to_string()))?;
+                if port != 0 {
+                    is_random_port = false;
+                }
+                listen_binds.push(("::".to_string(), port));
+            }
+            2 => {
+                let port: u16 = parts[0]
+                    .parse()
+                    .map_err(|_| WebServerError::ParsePort(listen.to_string()))?;
+                if port != 0 {
+                    is_random_port = false;
+                }
+                let mut bind = parts[1].to_string();
+                // 如果是IPv6地址，去除方括号
+                if bind.starts_with('[') && bind.ends_with(']') {
+                    bind = bind[1..bind.len() - 1].to_string();
+                }
+                listen_binds.push((bind, port));
+            }
+            _ => Err(WebServerError::ParsePort(listen.to_string()))?,
+        }
+    }
 
-    // 3. 启动服务
-    Ok(axum::serve(listener, router).await?)
+    if is_random_port {
+        // 如果是随机端口，端口复用无意义
+        reuse_port = false;
+    } else if !reuse_port {
+        // 如果不是随机端口，且不是复用端口，且是重启服务器，则先停止旧服务器，再启动新服务器
+        terminate_old_web_server(
+            old_pid,
+            terminate_old_wait_timeout,
+            terminate_old_retry_interval,
+        )
+        .await?;
+    }
+
+    // 判断是否支持健康检查
+    if is_random_port || reuse_port || support_health_check {
+        router = router.route("/health", get(health));
+    }
+
+    // 判断HTTP协议
+    let http_protocol = if let Some(https_config) = https_config
+        && https_config.enabled
+    {
+        "https"
+    } else {
+        "http"
+    };
+
+    debug!("监听绑定地址...");
+    let mut server_handles = Vec::new();
+    let mut domain_url;
+    for (bind, port) in &listen_binds {
+        let tcp_listener = create_listener(bind, *port, reuse_port)?;
+        // 在 serve 之前获取实际端口
+        let actual_addr = tcp_listener.local_addr()?;
+
+        let tokio_listener = tokio::net::TcpListener::from_std(tcp_listener)
+            .map_err(|e| WebServerError::Socket(format!("转换为tokio listener失败: {}", e)))?;
+
+        // 启动服务并收集句柄
+        let server = axum::serve(tokio_listener, router.clone());
+        let handle = tokio::spawn(async move { server.await });
+        server_handles.push(handle);
+
+        let ip = if bind == "0.0.0.0" {
+            "127.0.0.1"
+        } else if bind == "::" {
+            r"[::1]"
+        } else if bind == "::1" {
+            r"[::1]"
+        } else {
+            &bind
+        };
+        domain_url = format!("{http_protocol}://{ip}:{port}");
+
+        info!("监听 <{actual_addr}> 成功✅  -> 🌐 {domain_url}");
+    }
+
+    Ok(())
 }

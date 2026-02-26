@@ -68,7 +68,7 @@ pub(crate) fn start_web_server_macro(input: StartWebServerArgs) -> TokenStream {
             port_option = #port_of_args;
         }
 
-        // 是否随机端口
+        // 判断是否随机端口
         let mut is_random_port = true;
         let port = port_option.unwrap_or(0);
         if port != 0 {

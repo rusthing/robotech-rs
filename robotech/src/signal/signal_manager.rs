@@ -1,55 +1,43 @@
 use crate::env::{AppEnv, EnvError, APP_ENV};
 use crate::signal::signal_manager_error::SignalManagerError;
-use log::{debug, error};
+use log::error;
 use robotech_macros::log_call;
 use std::path::PathBuf;
 use std::process;
 use std::sync::{mpsc, RwLock};
+use tokio::sync::broadcast;
 use wheel_rs::process::{
     check_process, delete_pid_file, get_pid_file_path, read_pid, send_signal_by_instruction,
     watch_signal, PidFileGuard,
 };
 
-static PID_FILE_GUARD: RwLock<Option<PidFileGuard>> = RwLock::new(None);
-
 #[derive(Debug)]
-pub struct SignalManager;
-impl Drop for SignalManager {
-    fn drop(&mut self) {
-        let mut pid_file_guard_lock = PID_FILE_GUARD
-            .write()
-            .expect("Failed to write to PID_FILE_GUARD");
-        *pid_file_guard_lock = None;
-    }
+pub struct SignalManager {
+    pid_file_path: PathBuf,
+    pid_file_guard: Option<PidFileGuard>,
 }
 
 impl SignalManager {
     #[log_call]
-    pub fn new(
-        signal_instruction: String,
-    ) -> Result<(Self, Option<i32>, mpsc::Sender<()>), SignalManagerError> {
-        debug!("初始化信号管理者...");
+    pub fn new(signal_instruction: String) -> Result<(Self, Option<i32>), SignalManagerError> {
         let AppEnv { app_file_path, .. } = APP_ENV.get().ok_or(EnvError::GetAppEnv())?;
         let pid_file_path = get_pid_file_path(app_file_path);
         let old_pid = Self::parse_and_handle_signal_args(signal_instruction, &pid_file_path)?;
 
-        let (app_started_sender, app_stated_receiver) = mpsc::channel::<()>();
+        Ok((
+            Self {
+                pid_file_path,
+                pid_file_guard: None,
+            },
+            old_pid,
+        ))
+    }
 
-        // 监听系统信号
-        watch_signal();
-
-        tokio::spawn(async move {
-            if let Ok(_) = app_stated_receiver.recv()
-                && let Ok(pid_file_guard) = PidFileGuard::new(pid_file_path)
-            {
-                let mut pid_file_guard_lock = PID_FILE_GUARD
-                    .write()
-                    .expect("Failed to write to PID_FILE_GUARD");
-                *pid_file_guard_lock = Some(pid_file_guard);
-            }
-        });
-
-        Ok((Self {}, old_pid, app_started_sender))
+    pub fn watch_signal(
+        &mut self,
+    ) -> Result<broadcast::Receiver<nix::sys::signal::Signal>, SignalManagerError> {
+        self.pid_file_guard = Some(PidFileGuard::new(self.pid_file_path.clone())?);
+        Ok(watch_signal())
     }
 
     /// # 解析并处理信号参数
@@ -85,7 +73,6 @@ impl SignalManager {
         signal_instruction: String,
         pid_file_path: &PathBuf,
     ) -> Result<Option<i32>, SignalManagerError> {
-        debug!("解析并处理信号参数...");
         let old_pid = read_pid(pid_file_path)?;
         if signal_instruction == "restart" {
             // 不处理，直接返回(restart指令在本函数中不处理，后续在需要时再单独发送信号停止旧程序)
