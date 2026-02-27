@@ -206,57 +206,52 @@ pub fn init_log() -> Result<(), LogError> {
         .init();
     debug!("初始化日志成功");
 
-    watch_cfg_file!(
-        "log",
-        {
-            let files = files.clone();
-        },
-        {
-            // 重新加载配置
-            let (
-                LogConfig {
-                    level,
-                    console_time_format,
-                    show_spans,
-                    file_time_format,
-                    rotation,
-                },
-                _,
-            ) = build_log_cfg().expect("build log config error");
+    let files = files.clone();
+    watch_cfg_file!("log", {
+        // 重新加载配置
+        let (
+            LogConfig {
+                level,
+                console_time_format,
+                show_spans,
+                file_time_format,
+                rotation,
+            },
+            _,
+        ) = build_log_cfg().expect("build log config error");
 
-            // 应用新配置
-            env_layer_reload_handle
-                .modify(|filter| {
-                    *filter = create_env_filter(level);
-                })
-                .expect("reload log config error");
+        // 应用新配置
+        env_layer_reload_handle
+            .modify(|filter| {
+                *filter = create_env_filter(level);
+            })
+            .expect("reload log config error");
 
-            console_layer_reload_handle
-                .modify(|layer| {
-                    *layer = creat_console_layer!(console_time_format, show_spans);
-                })
-                .expect("reload console config error");
+        console_layer_reload_handle
+            .modify(|layer| {
+                *layer = creat_console_layer!(console_time_format, show_spans);
+            })
+            .expect("reload console config error");
 
-            file_layer_reload_handle
-                .modify(|layer| {
-                    // 重新创建文件appender
-                    let file_appender = RollingFileAppender::builder()
-                        .rotation(rotation.clone())
-                        .filename_prefix(format!("{}.log", app_file_name))
-                        .filename_suffix("json")
-                        .build(Path::new(log_dir.as_str()))
-                        .expect("create file appender error");
-                    let (non_blocking, log_guard) = tracing_appender::non_blocking(file_appender);
+        file_layer_reload_handle
+            .modify(|layer| {
+                // 重新创建文件appender
+                let file_appender = RollingFileAppender::builder()
+                    .rotation(rotation.clone())
+                    .filename_prefix(format!("{}.log", app_file_name))
+                    .filename_suffix("json")
+                    .build(Path::new(log_dir.as_str()))
+                    .expect("create file appender error");
+                let (non_blocking, log_guard) = tracing_appender::non_blocking(file_appender);
 
-                    *layer = creat_file_layer!(file_time_format, non_blocking);
+                *layer = creat_file_layer!(file_time_format, non_blocking);
 
-                    // 更新全局guard
-                    let mut guard = LOG_GUARD.write().expect("write log guard");
-                    *guard = Some(log_guard);
-                })
-                .expect("reload file config error");
-        }
-    );
+                // 更新全局guard
+                let mut guard = LOG_GUARD.write().expect("write log guard");
+                *guard = Some(log_guard);
+            })
+            .expect("reload file config error");
+    });
 
     Ok(())
 }

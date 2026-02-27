@@ -5,7 +5,6 @@ use syn::{Block, Token};
 
 pub(super) struct WatchCfgFileArgs {
     title: String,
-    clone_block: Block,
     reload_block: Block,
 }
 
@@ -13,13 +12,10 @@ impl Parse for WatchCfgFileArgs {
     fn parse(input: ParseStream) -> syn::Result<Self> {
         let title = input.parse::<syn::LitStr>()?.value();
         let _: Token![,] = input.parse()?;
-        let clone_block = input.parse()?;
-        let _: Token![,] = input.parse()?;
         let reload_block = input.parse()?;
 
         Ok(WatchCfgFileArgs {
             title,
-            clone_block,
             reload_block,
         })
     }
@@ -28,17 +24,14 @@ impl Parse for WatchCfgFileArgs {
 pub(super) fn watch_cfg_file_macro(input: WatchCfgFileArgs) -> TokenStream {
     let WatchCfgFileArgs {
         title,
-        clone_block,
         reload_block,
     } = input;
 
-    let clone_block = &clone_block.stmts;
     let reload_block = &reload_block.stmts;
 
     let expanded = quote! {
         debug!("watch {} cfg file...", #title);
         tokio::spawn({
-            #( #clone_block )*
             async move {
                 let (_watcher, receiver) = watch_cfg_file(files).expect(&format!("watch {} cfg file error", #title));
 
