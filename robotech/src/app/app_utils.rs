@@ -1,4 +1,5 @@
-use crate::cfg::{build_cfg, CfgError};
+use crate::app::AppError;
+use crate::cfg::build_cfg;
 use log::{debug, warn};
 use robotech_macros::log_call;
 use tokio::sync::broadcast;
@@ -6,11 +7,18 @@ use tokio::sync::broadcast;
 #[log_call]
 pub fn build_app_cfg<'a, T: serde::Deserialize<'a> + std::fmt::Debug>(
     path: Option<String>,
-) -> Result<(T, Vec<String>), CfgError> {
-    build_cfg("APP", None, path)
+) -> Result<(T, Vec<String>), AppError> {
+    Ok(build_cfg("APP", None, path)?)
 }
 
-pub async fn wait_app_exit(mut signal_receiver: broadcast::Receiver<nix::sys::signal::Signal>) {
+pub async fn wait_app_exit<F, Fut>(
+    mut signal_receiver: broadcast::Receiver<nix::sys::signal::Signal>,
+    graceful_shutdown: F,
+) -> Result<(), AppError>
+where
+    F: Fn() -> Fut,
+    Fut: Future<Output = Result<(), AppError>>,
+{
     loop {
         match signal_receiver.recv().await {
             Ok(signal) => {
@@ -30,4 +38,8 @@ pub async fn wait_app_exit(mut signal_receiver: broadcast::Receiver<nix::sys::si
             }
         }
     }
+    debug!("正在优雅退出...");
+    graceful_shutdown().await?;
+    debug!("优雅退出完成.");
+    Ok(())
 }
