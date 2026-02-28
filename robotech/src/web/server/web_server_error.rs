@@ -4,12 +4,18 @@ use wheel_rs::process::ProcessError;
 
 #[derive(Error, Debug)]
 pub enum WebServerError {
+    #[error("Fail to parse config: {0}")]
+    Config(String),
     #[error("Fail to parse port: {0}")]
     ParsePort(String),
     #[error("Fail to parse listen binds: {0}")]
     ParseListenBinds(String),
     #[error("Fail to parse CORS config form {0}: {1}")]
     ParseCors(String, String),
+    #[error("Fail to parse HTTPS cert: {0}")]
+    ParseHttpsCert(String),
+    #[error("Fail to parse HTTPS key: {0}")]
+    ParseHttpsKey(String),
     #[error("Start web server timeout: {0}")]
     StartWebServerTimeout(String),
     #[error("Fail to terminate old web server: {0}")]
@@ -22,4 +28,6 @@ pub enum WebServerError {
     SetWebServerHandles(),
     #[error("Fail to get web server handles")]
     GetWebServerHandles(),
+    #[error("Fail to build reqwest client: {0}")]
+    BuildReqwestClient(String),
 }

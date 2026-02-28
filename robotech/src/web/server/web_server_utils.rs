@@ -1,29 +1,20 @@
-use crate::web::{build_cors, HttpsConfig, WebServerConfig, WebServerError};
+use crate::web::{build_cors, build_https, HttpsConfig, WebServerConfig, WebServerError};
 use axum::{routing::get, Router};
-use log::{debug, info};
+use log::{debug, error, info};
 use robotech_macros::log_call;
-use rustls_pemfile::{certs, pkcs8_private_keys};
 use socket2::{Domain, Socket, Type};
-use std::fs::File;
-use std::io::BufReader;
 use std::net::{IpAddr, SocketAddr, TcpListener};
-use std::sync::{Arc, RwLock};
+use std::sync::RwLock;
 use std::time::Duration;
 use tokio::sync::broadcast;
 use tokio::task::JoinHandle;
 use tokio::time::timeout;
-use tokio_rustls::{
-    rustls::{self, ServerConfig},
-    TlsAcceptor,
-};
 use tower_http::trace::TraceLayer;
 use wheel_rs::process::terminate_process;
 
-static WEB_SERVER_HANDLES: RwLock<Option<Vec<JoinHandle<std::io::Result<()>>>>> = RwLock::new(None);
+static WEB_SERVER_HANDLES: RwLock<Option<Vec<JoinHandle<()>>>> = RwLock::new(None);
 
-fn set_web_server_handles(
-    value: Vec<JoinHandle<std::io::Result<()>>>,
-) -> Result<(), WebServerError> {
+fn set_web_server_handles(value: Vec<JoinHandle<()>>) -> Result<(), WebServerError> {
     let mut write_lock = WEB_SERVER_HANDLES
         .write()
         .map_err(|_| WebServerError::SetWebServerHandles())?;
@@ -31,7 +22,7 @@ fn set_web_server_handles(
     Ok(())
 }
 
-pub fn take_web_server_handles() -> Result<Vec<JoinHandle<std::io::Result<()>>>, WebServerError> {
+pub fn take_web_server_handles() -> Result<Vec<JoinHandle<()>>, WebServerError> {
     let mut write_lock = WEB_SERVER_HANDLES
         .write()
         .map_err(|_| WebServerError::GetWebServerHandles())?;
@@ -141,7 +132,14 @@ async fn wait_for_web_server_ready(
     wait_timeout: Duration,
     retry_interval: Duration,
 ) -> Result<(), WebServerError> {
-    let client = reqwest::Client::new();
+    let client = if health_check_url.starts_with("https://") {
+        reqwest::Client::builder()
+            .danger_accept_invalid_certs(true) // 忽略未认证的证书
+            .build()
+            .map_err(|e| WebServerError::BuildReqwestClient(e.to_string()))?
+    } else {
+        reqwest::Client::new()
+    };
     timeout(wait_timeout, async move {
         Ok(loop {
             tokio::time::sleep(retry_interval).await;
@@ -244,6 +242,64 @@ fn get_listen_binds(
     Ok((is_random_port, listen_binds))
 }
 
+fn bind(
+    router: Router,
+    reuse_port: bool,
+    listen_binds: Vec<(String, u16)>,
+    http_protocol: &str,
+    https_config: Option<HttpsConfig>,
+) -> Result<(String, broadcast::Sender<()>), WebServerError> {
+    let mut web_server_handles = Vec::new();
+    let mut domain_url = String::new();
+    let (web_server_stop_sender, web_server_stop_receiver) = broadcast::channel::<()>(1);
+    for (bind, port) in listen_binds {
+        let tcp_listener = create_listener(bind.to_string(), port, reuse_port)?;
+        // 在 serve 之前获取实际端口
+        let actual_addr = tcp_listener.local_addr()?;
+        let tokio_listener = tokio::net::TcpListener::from_std(tcp_listener)
+            .map_err(|e| WebServerError::Socket(format!("转换为tokio listener失败: {}", e)))?;
+
+        // 启动服务
+        let mut web_server_stop_receiver = web_server_stop_receiver.resubscribe();
+        if let Some(https_config) = https_config.clone()
+            && https_config.enabled
+        {
+            let handle = build_https(
+                router.clone(),
+                tokio_listener,
+                web_server_stop_receiver,
+                https_config,
+            )?;
+            web_server_handles.push(handle);
+        } else {
+            let server =
+                axum::serve(tokio_listener, router.clone()).with_graceful_shutdown(async move {
+                    let _ = web_server_stop_receiver.recv().await;
+                    println!("停止Axum Web服务");
+                });
+            let handle = tokio::spawn(async move {
+                if let Err(e) = server.await {
+                    error!("Axum Web服务运行异常: {}", e);
+                }
+            });
+            web_server_handles.push(handle);
+        }
+
+        let ip = if bind == "0.0.0.0" {
+            "127.0.0.1"
+        } else if bind == r"[::]" {
+            r"[::1]"
+        } else {
+            &bind
+        };
+        domain_url = format!("{http_protocol}://{ip}:{port}");
+
+        info!("监听 <{actual_addr}> 成功✅  -> 🌐 {domain_url}");
+    }
+    set_web_server_handles(web_server_handles)?;
+    Ok((domain_url, web_server_stop_sender))
+}
+
 #[log_call]
 pub async fn start_web_server(
     web_server_config: WebServerConfig,
@@ -301,38 +357,21 @@ pub async fn start_web_server(
     }
 
     // 判断HTTP协议
-    let http_protocol = if let Some(https_config) = https_config
+    let http_protocol = if let Some(https_config) = https_config.clone()
         && https_config.enabled
     {
-        let HttpsConfig {
-            cert_path,
-            key_path,
-            redirect_http_to_https,
-            redirect_port,
-            ..
-        } = https_config;
-
-        // 加载证书和私钥
-        let cert_file = &mut BufReader::new(File::open(cert_path.unwrap())?);
-        let key_file = &mut BufReader::new(File::open(key_path.unwrap())?);
-        let certs = certs(cert_file).map(|c| c.unwrap()).collect();
-        let mut keys: Vec<_> = pkcs8_private_keys(key_file).map(|k| k.unwrap()).collect();
-        let config = ServerConfig::builder()
-            .with_no_client_auth()
-            .with_single_cert(
-                certs,
-                rustls::pki_types::PrivateKeyDer::Pkcs8(keys.remove(0)),
-            )
-            .unwrap();
-        let acceptor = TlsAcceptor::from(Arc::new(config));
-
         "https"
     } else {
         "http"
     };
 
-    let (domain_url, web_server_stop_sender) =
-        bind(router, reuse_port, listen_binds, http_protocol)?;
+    let (domain_url, web_server_stop_sender) = bind(
+        router,
+        reuse_port,
+        listen_binds,
+        http_protocol,
+        https_config,
+    )?;
 
     // 如果是随机端口或复用端口，则可以在前面先启动新服务器，后面这里再停止旧服务器
     if is_random_port || reuse_port {
@@ -356,46 +395,4 @@ pub async fn start_web_server(
     }
 
     Ok(web_server_stop_sender)
-}
-
-fn bind(
-    router: Router,
-    reuse_port: bool,
-    listen_binds: Vec<(String, u16)>,
-    http_protocol: &str,
-) -> Result<(String, broadcast::Sender<()>), WebServerError> {
-    let mut web_server_handles = Vec::new();
-    let mut domain_url = String::new();
-    let (web_server_stop_sender, web_server_stop_receiver) = broadcast::channel::<()>(1);
-    for (bind, port) in listen_binds {
-        let tcp_listener = create_listener(bind.to_string(), port, reuse_port)?;
-        // 在 serve 之前获取实际端口
-        let actual_addr = tcp_listener.local_addr()?;
-
-        let tokio_listener = tokio::net::TcpListener::from_std(tcp_listener)
-            .map_err(|e| WebServerError::Socket(format!("转换为tokio listener失败: {}", e)))?;
-
-        // 启动服务
-        let mut receiver = web_server_stop_receiver.resubscribe();
-        let server =
-            axum::serve(tokio_listener, router.clone()).with_graceful_shutdown(async move {
-                let _ = receiver.recv().await;
-                println!("停止Axum Web服务");
-            });
-        let handle = tokio::spawn(async move { server.await });
-        web_server_handles.push(handle);
-
-        let ip = if bind == "0.0.0.0" {
-            "127.0.0.1"
-        } else if bind == r"[::]" {
-            r"[::1]"
-        } else {
-            &bind
-        };
-        domain_url = format!("{http_protocol}://{ip}:{port}");
-
-        info!("监听 <{actual_addr}> 成功✅  -> 🌐 {domain_url}");
-    }
-    set_web_server_handles(web_server_handles)?;
-    Ok((domain_url, web_server_stop_sender))
 }

@@ -14,13 +14,12 @@ readme = "README.md"
 [features]
 api-client = ["dep:reqwest"]
 app = ["dep:anyhow", "dep:config", "dep:validator", "dep:wheel-rs", "dep:idworker"]
-web = ["app", "dep:axum", "dep:tower-http", "dep:actix-web", "dep:actix-cors", "dep:actix-service", "dep:actix-http", "dep:socket2", "dep:rustls", "dep:reqwest"]
+web = ["app", "dep:axum", "dep:tower", "dep:tower-http", "dep:tokio-rustls", "dep:hyper", "dep:hyper-util", "dep:rustls-pemfile", "dep:actix-web", "dep:actix-cors", "dep:actix-service", "dep:actix-http", "dep:socket2", "dep:reqwest"]
 db = ["app", "dep:sea-orm", "dep:regex", "dep:once_cell"]
 macros = ["robotech-macros"]
 
 [dependencies]
 log = { workspace = true }
-tracing = { workspace = true }
 tracing-log = { workspace = true }
 tracing-core = { workspace = true }
 tracing-appender = { workspace = true }
@@ -38,12 +37,16 @@ anyhow = { workspace = true, optional = true }
 config = { workspace = true, optional = true }
 regex = { workspace = true, optional = true }
 axum = { workspace = true, optional = true }                                            # Web框架
+tower = { workspace = true, optional = true }
 tower-http = { workspace = true, features = ["cors", "trace", "fs"], optional = true }  # axum常用中间件集合 (CORS, 日志, 静态文件服务, 追踪等)
+rustls-pemfile = { workspace = true, optional = true }
+tokio-rustls = { workspace = true, features = ["aws-lc-rs"], optional = true }
+hyper = { workspace = true, optional = true }
+hyper-util = { workspace = true, optional = true }
 actix-web = { workspace = true, features = ["rustls-0_23"], optional = true }
 actix-cors = { workspace = true, optional = true }
 actix-service = { workspace = true, optional = true }
 actix-http = { workspace = true, optional = true }
-rustls = { workspace = true, optional = true }
 socket2 = { workspace = true, optional = true }
 sea-orm = { workspace = true, optional = true }
 once_cell = { workspace = true, optional = true }
