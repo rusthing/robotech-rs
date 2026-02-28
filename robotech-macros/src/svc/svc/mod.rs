@@ -131,67 +131,67 @@ pub(crate) fn svc_macro(args: SvcArgs, input: ItemStruct) -> TokenStream {
         });
     }
 
-    // 生成modify方法
-    if args.modify {
-        generated_methods.push(quote! {
-            /// # 修改记录
-            ///
-            /// 根据提供的ModifyTo对象更新数据库中的相应记录
-            ///
-            /// ## 参数
-            /// * `modify_to` - 包含要修改记录信息的传输对象，必须包含有效的ID
-            /// * `db` - 数据库连接，如果未提供则使用全局数据库连接
-            ///
-            /// ## 返回值
-            /// * `Ok(Ro<Vo>)` - 修改成功，返回封装了更新后Vo的Ro对象
-            /// * `Err(SvcError)` - 修改失败，可能因为记录不存在、违反唯一约束或其他数据库错误
-            #[db_unwrap(transaction_required)]
-            pub async fn modify<C>(
-                modify_dto: #modify_dto_name,
-                db: Option<&C>,
-            ) -> Result<Ro<#vo_name>, SvcError>
-            where
-                C: ConnectionTrait,
-            {
-                let id = modify_dto.id.unwrap();
-                let active_model: ActiveModel = modify_dto.into();
-                #dao_name::update(active_model, db).await?;
-                Ok(Self::get_by_id(id, Some(db))
-                    .await?
-                    .message("修改成功".to_string()))
-            }
-        });
-    }
-
-    // 生成save方法
-    if args.save {
-        generated_methods.push(quote! {
-            /// # 保存记录
-            ///
-            /// 根据提供的SaveTo对象保存记录到数据库中。如果提供了ID，则更新现有记录；如果没有提供ID，则创建新记录
-            ///
-            /// ## 参数
-            /// * `save_to` - 包含要保存记录信息的传输对象
-            /// * `db` - 数据库连接，如果未提供则使用全局数据库连接
-            ///
-            /// ## 返回值
-            /// * `Ok(Ro<Vo>)` - 保存成功，返回封装了Vo的Ro对象
-            /// * `Err(SvcError)` - 保存失败，可能因为违反唯一约束、记录不存在或其他数据库错误
-            pub async fn save<C>(
-                save_dto: #save_dto_name,
-                db: Option<&C>,
-            ) -> Result<Ro<#vo_name>, SvcError>
-            where
-                C: ConnectionTrait,
-            {
-                if save_dto.id.clone().is_some() {
-                    Self::modify(save_dto.into(), db).await
-                } else {
-                    Self::add(save_dto.into(), db).await
-                }
-            }
-        });
-    }
+    // // 生成modify方法
+    // if args.modify {
+    //     generated_methods.push(quote! {
+    //         /// # 修改记录
+    //         ///
+    //         /// 根据提供的ModifyTo对象更新数据库中的相应记录
+    //         ///
+    //         /// ## 参数
+    //         /// * `modify_to` - 包含要修改记录信息的传输对象，必须包含有效的ID
+    //         /// * `db` - 数据库连接，如果未提供则使用全局数据库连接
+    //         ///
+    //         /// ## 返回值
+    //         /// * `Ok(Ro<Vo>)` - 修改成功，返回封装了更新后Vo的Ro对象
+    //         /// * `Err(SvcError)` - 修改失败，可能因为记录不存在、违反唯一约束或其他数据库错误
+    //         #[db_unwrap(transaction_required)]
+    //         pub async fn modify<C>(
+    //             modify_dto: #modify_dto_name,
+    //             db: Option<&C>,
+    //         ) -> Result<Ro<#vo_name>, SvcError>
+    //         where
+    //             C: ConnectionTrait,
+    //         {
+    //             let id = modify_dto.id?;
+    //             let active_model: ActiveModel = modify_dto.into();
+    //             #dao_name::update(active_model, db).await?;
+    //             Ok(Self::get_by_id(id, Some(db))
+    //                 .await?
+    //                 .message("修改成功".to_string()))
+    //         }
+    //     });
+    // }
+    //
+    // // 生成save方法
+    // if args.save {
+    //     generated_methods.push(quote! {
+    //         /// # 保存记录
+    //         ///
+    //         /// 根据提供的SaveTo对象保存记录到数据库中。如果提供了ID，则更新现有记录；如果没有提供ID，则创建新记录
+    //         ///
+    //         /// ## 参数
+    //         /// * `save_to` - 包含要保存记录信息的传输对象
+    //         /// * `db` - 数据库连接，如果未提供则使用全局数据库连接
+    //         ///
+    //         /// ## 返回值
+    //         /// * `Ok(Ro<Vo>)` - 保存成功，返回封装了Vo的Ro对象
+    //         /// * `Err(SvcError)` - 保存失败，可能因为违反唯一约束、记录不存在或其他数据库错误
+    //         pub async fn save<C>(
+    //             save_dto: #save_dto_name,
+    //             db: Option<&C>,
+    //         ) -> Result<Ro<#vo_name>, SvcError>
+    //         where
+    //             C: ConnectionTrait,
+    //         {
+    //             if save_dto.id.clone().is_some() {
+    //                 Self::modify(save_dto.into(), db).await
+    //             } else {
+    //                 Self::add(save_dto.into(), db).await
+    //             }
+    //         }
+    //     });
+    // }
 
     // 生成del方法
     if args.del {

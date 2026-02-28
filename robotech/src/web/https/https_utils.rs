@@ -54,7 +54,6 @@ pub fn build_https(
     let key = private_key(key_file)
         .map_err(|e| WebServerError::ParseHttpsKey(e.to_string()))?
         .ok_or_else(|| WebServerError::ParseHttpsKey("No private key found".to_string()))?;
-    // let mut keys: Vec<_> = pkcs8_private_keys(key_file).map(|k| k.unwrap()).collect();
     let mut config = ServerConfig::builder()
         .with_no_client_auth()
         .with_single_cert(cert_chain, key)

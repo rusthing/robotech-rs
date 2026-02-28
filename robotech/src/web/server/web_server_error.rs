@@ -18,16 +18,18 @@ pub enum WebServerError {
     ParseHttpsKey(String),
     #[error("Start web server timeout: {0}")]
     StartWebServerTimeout(String),
-    #[error("Fail to terminate old web server: {0}")]
-    TerminateOldWebServer(#[from] ProcessError),
+    #[error("Fail to stop service: {0}")]
+    StopService(String),
+    #[error("Fail to terminate old app: {0}")]
+    TerminateOldApp(#[from] ProcessError),
     #[error("Socket error: {0}")]
     Socket(String),
     #[error("Web server runtime error: {0}")]
     Runtime(#[from] io::Error),
-    #[error("Fail to set web server handles")]
-    SetWebServerHandles(),
-    #[error("Fail to get web server handles")]
-    GetWebServerHandles(),
+    #[error("Fail to set web server handles: {0}")]
+    SetWebServiceHandles(String),
+    #[error("Fail to take web server handles: {0}")]
+    TakeWebServiceHandles(String),
     #[error("Fail to build reqwest client: {0}")]
     BuildReqwestClient(String),
 }

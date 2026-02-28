@@ -52,15 +52,15 @@ pub struct WebServerConfig {
 
     #[serde(
         with = "duration_serde",
-        default = "terminate_old_wait_timeout_default"
+        default = "terminate_old_app_wait_timeout_default"
     )]
-    pub terminate_old_wait_timeout: Duration,
+    pub terminate_old_app_wait_timeout: Duration,
 
     #[serde(
         with = "duration_serde",
-        default = "terminate_old_retry_interval_default"
+        default = "terminate_old_app_retry_interval_default"
     )]
-    pub terminate_old_retry_interval: Duration,
+    pub terminate_old_app_retry_interval: Duration,
 }
 
 impl Default for WebServerConfig {
@@ -76,8 +76,8 @@ impl Default for WebServerConfig {
             support_health_check: support_health_check_default(),
             start_wait_timeout: start_wait_timeout_default(),
             start_retry_interval: start_retry_interval_default(),
-            terminate_old_wait_timeout: terminate_old_wait_timeout_default(),
-            terminate_old_retry_interval: terminate_old_retry_interval_default(),
+            terminate_old_app_wait_timeout: terminate_old_app_wait_timeout_default(),
+            terminate_old_app_retry_interval: terminate_old_app_retry_interval_default(),
         }
     }
 }
@@ -107,9 +107,9 @@ fn start_wait_timeout_default() -> Duration {
 fn start_retry_interval_default() -> Duration {
     Duration::from_millis(500)
 }
-fn terminate_old_wait_timeout_default() -> Duration {
+fn terminate_old_app_wait_timeout_default() -> Duration {
     Duration::from_secs(15)
 }
-fn terminate_old_retry_interval_default() -> Duration {
+fn terminate_old_app_retry_interval_default() -> Duration {
     Duration::from_millis(500)
 }

@@ -12,23 +12,21 @@ use tokio::time::timeout;
 use tower_http::trace::TraceLayer;
 use wheel_rs::process::terminate_process;
 
-static WEB_SERVER_HANDLES: RwLock<Option<Vec<JoinHandle<()>>>> = RwLock::new(None);
+static WEB_SERVICE_HANDLES: RwLock<Option<Vec<JoinHandle<()>>>> = RwLock::new(None);
 
-fn set_web_server_handles(value: Vec<JoinHandle<()>>) -> Result<(), WebServerError> {
-    let mut write_lock = WEB_SERVER_HANDLES
+fn set_web_service_handles(value: Vec<JoinHandle<()>>) -> Result<(), WebServerError> {
+    let mut write_lock = WEB_SERVICE_HANDLES
         .write()
-        .map_err(|_| WebServerError::SetWebServerHandles())?;
+        .map_err(|e| WebServerError::SetWebServiceHandles(e.to_string()))?;
     *write_lock = Some(value);
     Ok(())
 }
 
-pub fn take_web_server_handles() -> Result<Vec<JoinHandle<()>>, WebServerError> {
-    let mut write_lock = WEB_SERVER_HANDLES
+pub fn take_web_service_handles() -> Result<Option<Vec<JoinHandle<()>>>, WebServerError> {
+    let mut write_lock = WEB_SERVICE_HANDLES
         .write()
-        .map_err(|_| WebServerError::GetWebServerHandles())?;
-    write_lock
-        .take()
-        .ok_or(WebServerError::GetWebServerHandles())
+        .map_err(|e| WebServerError::TakeWebServiceHandles(e.to_string()))?;
+    Ok(write_lock.take())
 }
 
 /// # 健康检查端点
@@ -155,6 +153,37 @@ async fn wait_for_web_server_ready(
     .map_err(|_| WebServerError::StartWebServerTimeout(health_check_url.to_string()))?
 }
 
+pub async fn stop_web_service(
+    terminate_old_app_sender: broadcast::Sender<()>,
+) -> Result<(), WebServerError> {
+    terminate_old_app_sender
+        .send(())
+        .map_err(|e| WebServerError::StopService(e.to_string()))?;
+    if let Some(web_server_handles) = take_web_service_handles()? {
+        for web_server_handle in web_server_handles {
+            let _ = web_server_handle
+                .await
+                .map_err(|e| WebServerError::StopService(e.to_string()))?;
+        }
+    }
+    Ok(())
+}
+
+pub async fn stop_old_web_service(
+    terminate_old_app_sender: broadcast::Sender<()>,
+    old_handles: Vec<JoinHandle<()>>,
+) -> Result<(), WebServerError> {
+    terminate_old_app_sender
+        .send(())
+        .map_err(|e| WebServerError::StopService(e.to_string()))?;
+    for web_service_handle in old_handles {
+        let _ = web_service_handle
+            .await
+            .map_err(|e| WebServerError::StopService(e.to_string()))?;
+    }
+    Ok(())
+}
+
 /// # 停止旧的Web服务器
 ///
 /// 向指定PID的旧Web服务器进程发送停止信号
@@ -171,15 +200,13 @@ async fn wait_for_web_server_ready(
 /// use crate::web::server::stop_old_web_server;
 /// stop_old_web_server(12345).await?;
 /// ```
-async fn terminate_old_web_server(
-    old_pid: Option<i32>,
+async fn terminate_old_app(
+    old_pid: i32,
     wait_timeout: Duration,
     retry_interval: Duration,
 ) -> Result<(), WebServerError> {
-    if let Some(old_pid) = old_pid {
-        debug!("停止运行旧的Web服务器...");
-        terminate_process(old_pid, wait_timeout, retry_interval).await?;
-    }
+    debug!("停止运行旧的Web服务器...");
+    terminate_process(old_pid, wait_timeout, retry_interval).await?;
     Ok(())
 }
 
@@ -242,16 +269,17 @@ fn get_listen_binds(
     Ok((is_random_port, listen_binds))
 }
 
-fn bind(
+#[log_call]
+fn bind_and_start(
     router: Router,
     reuse_port: bool,
     listen_binds: Vec<(String, u16)>,
     http_protocol: &str,
     https_config: Option<HttpsConfig>,
-) -> Result<(String, broadcast::Sender<()>), WebServerError> {
-    let mut web_server_handles = Vec::new();
+    terminate_old_app_receiver: broadcast::Receiver<()>,
+) -> Result<(String, Vec<JoinHandle<()>>), WebServerError> {
+    let mut web_service_handles = Vec::new();
     let mut domain_url = String::new();
-    let (web_server_stop_sender, web_server_stop_receiver) = broadcast::channel::<()>(1);
     for (bind, port) in listen_binds {
         let tcp_listener = create_listener(bind.to_string(), port, reuse_port)?;
         // 在 serve 之前获取实际端口
@@ -260,29 +288,29 @@ fn bind(
             .map_err(|e| WebServerError::Socket(format!("转换为tokio listener失败: {}", e)))?;
 
         // 启动服务
-        let mut web_server_stop_receiver = web_server_stop_receiver.resubscribe();
+        let mut terminate_old_app_receiver = terminate_old_app_receiver.resubscribe();
         if let Some(https_config) = https_config.clone()
             && https_config.enabled
         {
             let handle = build_https(
                 router.clone(),
                 tokio_listener,
-                web_server_stop_receiver,
+                terminate_old_app_receiver,
                 https_config,
             )?;
-            web_server_handles.push(handle);
+            web_service_handles.push(handle);
         } else {
             let server =
                 axum::serve(tokio_listener, router.clone()).with_graceful_shutdown(async move {
-                    let _ = web_server_stop_receiver.recv().await;
-                    println!("停止Axum Web服务");
+                    let _ = terminate_old_app_receiver.recv().await;
+                    info!("停止Axum Web服务");
                 });
             let handle = tokio::spawn(async move {
                 if let Err(e) = server.await {
                     error!("Axum Web服务运行异常: {}", e);
                 }
             });
-            web_server_handles.push(handle);
+            web_service_handles.push(handle);
         }
 
         let ip = if bind == "0.0.0.0" {
@@ -296,8 +324,7 @@ fn bind(
 
         info!("监听 <{actual_addr}> 成功✅  -> 🌐 {domain_url}");
     }
-    set_web_server_handles(web_server_handles)?;
-    Ok((domain_url, web_server_stop_sender))
+    Ok((domain_url, web_service_handles))
 }
 
 #[log_call]
@@ -306,7 +333,9 @@ pub async fn start_web_server(
     mut router: Router,
     port_of_args: Option<u16>,
     old_pid: Option<i32>,
-) -> Result<broadcast::Sender<()>, WebServerError> {
+    terminate_old_app_sender: broadcast::Sender<()>,
+    terminate_old_app_receiver: broadcast::Receiver<()>,
+) -> Result<(), WebServerError> {
     let WebServerConfig {
         bind: binds,
         port: port_option,
@@ -318,8 +347,8 @@ pub async fn start_web_server(
         support_health_check,
         start_wait_timeout,
         start_retry_interval,
-        terminate_old_wait_timeout,
-        terminate_old_retry_interval,
+        terminate_old_app_wait_timeout,
+        terminate_old_app_retry_interval,
     } = web_server_config;
 
     let (is_random_port, listen_binds) =
@@ -330,17 +359,27 @@ pub async fn start_web_server(
         ))?;
     }
 
+    let mut old_web_service_handles = take_web_service_handles()?;
+
     if is_random_port {
         // 如果是随机端口，则不会开启复用端口(无意义)
         reuse_port = false;
     } else if !reuse_port {
-        // 如果不是随机端口，且不是复用端口，则先停止旧服务器，然后才能启动新服务器
-        terminate_old_web_server(
-            old_pid,
-            terminate_old_wait_timeout,
-            terminate_old_retry_interval,
-        )
-        .await?;
+        // 如果不是随机端口，且不是复用端口，则先停止旧服务或应用，然后才能启动新的服务
+        if let Some(old_pid) = old_pid {
+            // 停止旧应用
+            terminate_old_app(
+                old_pid,
+                terminate_old_app_wait_timeout,
+                terminate_old_app_retry_interval,
+            )
+            .await?;
+        } else {
+            // 停止旧服务
+            if let Some(web_service_handles) = old_web_service_handles.take() {
+                stop_old_web_service(terminate_old_app_sender.clone(), web_service_handles).await?;
+            }
+        }
     }
 
     // 判断是否支持健康检查
@@ -365,34 +404,52 @@ pub async fn start_web_server(
         "http"
     };
 
-    let (domain_url, web_server_stop_sender) = bind(
+    // 绑定地址及端口，并启动服务
+    let (domain_url, web_service_handles) = bind_and_start(
         router,
         reuse_port,
         listen_binds,
         http_protocol,
         https_config,
+        terminate_old_app_receiver,
     )?;
 
-    // 如果是随机端口或复用端口，则可以在前面先启动新服务器，后面这里再停止旧服务器
-    if is_random_port || reuse_port {
-        // 如果支持健康检查，则等待新服务器启动成功
-        if support_health_check {
-            let heath_check_url = format!("{domain_url}/health");
-            wait_for_web_server_ready(
-                heath_check_url.as_str(),
-                start_wait_timeout,
-                start_retry_interval,
-            )
-            .await?;
-        }
-
-        terminate_old_web_server(
-            old_pid,
-            terminate_old_wait_timeout,
-            terminate_old_retry_interval,
+    // 如果支持健康检查，且没有旧服务，则等待新服务器启动成功
+    if support_health_check && old_web_service_handles.is_none() {
+        let heath_check_url = format!("{domain_url}/health");
+        wait_for_web_server_ready(
+            heath_check_url.as_str(),
+            start_wait_timeout,
+            start_retry_interval,
         )
         .await?;
     }
 
-    Ok(web_server_stop_sender)
+    // 如果是随机端口或复用端口，则可以在前面先启动新的服务，后面这里再停止旧的服务或应用
+    if is_random_port || reuse_port {
+        if let Some(old_pid) = old_pid {
+            // 停止旧应用
+            terminate_old_app(
+                old_pid,
+                terminate_old_app_wait_timeout,
+                terminate_old_app_retry_interval,
+            )
+            .await?;
+        } else {
+            // 停止旧服务
+            if let Some(web_service_handles) = old_web_service_handles.take() {
+                tokio::spawn({
+                    let terminate_old_app_sender = terminate_old_app_sender.clone();
+                    async move {
+                        tokio::time::sleep(Duration::from_secs(5)).await;
+                        stop_old_web_service(terminate_old_app_sender, web_service_handles).await
+                    }
+                });
+            }
+        }
+    }
+
+    set_web_service_handles(web_service_handles)?;
+
+    Ok(())
 }
