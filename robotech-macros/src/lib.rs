@@ -1,11 +1,13 @@
 mod cfg;
 mod dao;
+mod dto;
 mod log;
 mod svc;
 mod web;
 
 use crate::cfg::{watch_cfg_file_macro, WatchCfgFileArgs};
 use crate::dao::{dao_macro, DaoArgs};
+use crate::dto::{add_dto_macro, modify_dto_macro, save_dto_macro};
 use crate::log::{log_call_macro, LogCallArgs};
 use crate::svc::{db_unwrap_macro, svc_macro, DbUnwrapArgs, SvcArgs};
 use crate::web::{ctrl_macro, CtrlArgs};
@@ -42,11 +44,29 @@ pub fn watch_cfg_file(args: TokenStream) -> TokenStream {
 ///
 /// 支持的日志级别: trace, debug (默认), info, warn, error
 #[proc_macro_attribute]
-pub fn log_call(attr: TokenStream, item: TokenStream) -> TokenStream {
+pub fn log_call(args: TokenStream, input: TokenStream) -> TokenStream {
     // 解析属性参数
-    let args = parse_macro_input!(attr as LogCallArgs);
-    let input = parse_macro_input!(item as ItemFn);
+    let args = parse_macro_input!(args as LogCallArgs);
+    let input = parse_macro_input!(input as ItemFn);
     log_call_macro(args, input).into()
+}
+
+#[proc_macro_attribute]
+pub fn add_dto(_args: TokenStream, input: TokenStream) -> TokenStream {
+    let input = parse_macro_input!(input as ItemStruct);
+    add_dto_macro(input).into()
+}
+
+#[proc_macro_attribute]
+pub fn modify_dto(_args: TokenStream, input: TokenStream) -> TokenStream {
+    let input = parse_macro_input!(input as ItemStruct);
+    modify_dto_macro(input).into()
+}
+
+#[proc_macro_attribute]
+pub fn save_dto(_args: TokenStream, input: TokenStream) -> TokenStream {
+    let input = parse_macro_input!(input as ItemStruct);
+    save_dto_macro(input).into()
 }
 
 /// 属性宏：为DAO结构体生成标准的CRUD方法
@@ -73,9 +93,9 @@ pub fn log_call(attr: TokenStream, item: TokenStream) -> TokenStream {
 /// - get_by_id: 生成根据ID查询方法
 /// - all: 生成所有方法
 #[proc_macro_attribute]
-pub fn dao(attr: TokenStream, item: TokenStream) -> TokenStream {
-    let args = parse_macro_input!(attr as DaoArgs);
-    let input = parse_macro_input!(item as ItemStruct);
+pub fn dao(args: TokenStream, input: TokenStream) -> TokenStream {
+    let args = parse_macro_input!(args as DaoArgs);
+    let input = parse_macro_input!(input as ItemStruct);
     dao_macro(args, input).into()
 }
 
@@ -99,22 +119,22 @@ pub fn dao(attr: TokenStream, item: TokenStream) -> TokenStream {
 /// ```
 /// 注意：用户代码中应该包含完整的返回逻辑
 #[proc_macro_attribute]
-pub fn db_unwrap(attr: TokenStream, item: TokenStream) -> TokenStream {
-    let args = parse_macro_input!(attr as DbUnwrapArgs);
-    let input = parse_macro_input!(item as ItemFn);
+pub fn db_unwrap(args: TokenStream, input: TokenStream) -> TokenStream {
+    let args = parse_macro_input!(args as DbUnwrapArgs);
+    let input = parse_macro_input!(input as ItemFn);
     db_unwrap_macro(args, input).into()
 }
 
 #[proc_macro_attribute]
-pub fn svc(attr: TokenStream, item: TokenStream) -> TokenStream {
-    let args = parse_macro_input!(attr as SvcArgs);
-    let input = parse_macro_input!(item as ItemStruct);
+pub fn svc(args: TokenStream, input: TokenStream) -> TokenStream {
+    let args = parse_macro_input!(args as SvcArgs);
+    let input = parse_macro_input!(input as ItemStruct);
     svc_macro(args, input).into()
 }
 
 #[proc_macro_attribute]
-pub fn ctrl(attr: TokenStream, item: TokenStream) -> TokenStream {
-    let args = parse_macro_input!(attr as CtrlArgs);
-    let input = parse_macro_input!(item as ItemStruct);
+pub fn ctrl(args: TokenStream, input: TokenStream) -> TokenStream {
+    let args = parse_macro_input!(args as CtrlArgs);
+    let input = parse_macro_input!(input as ItemStruct);
     ctrl_macro(args, input).into()
 }

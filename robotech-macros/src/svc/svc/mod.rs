@@ -75,7 +75,7 @@ pub(crate) fn svc_macro(args: SvcArgs, input: ItemStruct) -> TokenStream {
     // 解析结构体的名称，必须是Svc结尾，符合大驼峰命名规范
     let struct_name_str = struct_name.to_string();
     if !struct_name_str.ends_with("Svc") {
-        return syn::Error::new_spanned(struct_name, "Service struct name must end with 'Svc'")
+        return syn::Error::new_spanned(struct_name, "Struct name must end with 'Svc'")
             .to_compile_error()
             .into();
     }
@@ -83,7 +83,7 @@ pub(crate) fn svc_macro(args: SvcArgs, input: ItemStruct) -> TokenStream {
     if struct_name_split.is_err() {
         return syn::Error::new_spanned(
             struct_name,
-            "Service struct name must be a valid upper camel case",
+            "Struct name must be a valid upper camel case",
         )
         .to_compile_error()
         .into();

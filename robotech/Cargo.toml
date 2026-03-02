@@ -28,7 +28,7 @@ notify = { workspace = true }
 notify-debouncer-mini = { workspace = true }
 thiserror = { workspace = true }
 chrono = { workspace = true }
-serde = { workspace = true }
+serde = { workspace = true, features = ["derive"] }
 serde_json = { workspace = true }
 tokio = { workspace = true, features = ["macros"] }
 nix = { workspace = true }
