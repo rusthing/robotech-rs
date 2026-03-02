@@ -1,3 +1,4 @@
+use crate::env::{AppEnv, EnvError, APP_ENV};
 use crate::web::{HttpsConfig, WebServerError};
 use axum::Router;
 use hyper::service::service_fn;
@@ -7,6 +8,7 @@ use log::{debug, error};
 use rustls_pemfile::{certs, private_key};
 use std::fs::File;
 use std::io::BufReader;
+use std::path::PathBuf;
 use std::sync::{Arc, OnceLock};
 use tokio::net::TcpListener;
 use tokio::sync::broadcast::Receiver;
@@ -24,6 +26,7 @@ pub fn build_https(
     https_config: HttpsConfig,
 ) -> Result<JoinHandle<()>, WebServerError> {
     let HttpsConfig { cert, key, .. } = https_config;
+    let AppEnv { app_dir, .. } = APP_ENV.get().ok_or(EnvError::GetAppEnv())?;
 
     CRYPTO_PROVIDER_INITIALIZED.get_or_init(|| {
         aws_lc_rs::default_provider()
@@ -31,16 +34,26 @@ pub fn build_https(
             .expect("Failed to install rustls crypto provider");
     });
 
+    // 解析证书文件路径，如果是相对路径则基于程序目录
+    let mut cert_path =
+        cert.ok_or_else(|| WebServerError::Config("未配置https的cert".to_string()))?;
+    if cert_path.is_relative() {
+        cert_path = app_dir.join(cert_path);
+    }
+    let mut key_path = key.ok_or_else(|| WebServerError::Config("未配置https的key".to_string()))?;
+    if key_path.is_relative() {
+        key_path = app_dir.join(key_path);
+    }
     // 加载证书和私钥
     let cert_file = &mut BufReader::new(
-        File::open(cert.ok_or_else(|| WebServerError::Config("未配置https的cert".to_string()))?)
+        File::open(cert_path)
             .map_err(|e| WebServerError::Config(format!("不能打开cert文件-{}", e.to_string())))?,
     );
     let key_file = &mut BufReader::new(
-        File::open(key.ok_or_else(|| WebServerError::Config("未配置https的key".to_string()))?)
+        File::open(key_path)
             .map_err(|e| WebServerError::Config(format!("不能打开key文件-{}", e.to_string())))?,
     );
-    // 加载证书
+    // 加载证书链
     let cert_chain = certs(cert_file)
         .collect::<Result<Vec<_>, _>>()
         .map_err(|e| WebServerError::ParseHttpsCert(format!("读取证书链失败: {}", e)))?;

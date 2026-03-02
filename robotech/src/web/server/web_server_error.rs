@@ -1,9 +1,12 @@
+use crate::env::EnvError;
 use std::io;
 use thiserror::Error;
 use wheel_rs::process::ProcessError;
 
 #[derive(Error, Debug)]
 pub enum WebServerError {
+    #[error("{0}")]
+    GetEnv(#[from] EnvError),
     #[error("Fail to parse config: {0}")]
     Config(String),
     #[error("Fail to parse port: {0}")]
