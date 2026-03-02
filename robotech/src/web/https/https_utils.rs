@@ -20,7 +20,7 @@ static CRYPTO_PROVIDER_INITIALIZED: OnceLock<()> = OnceLock::new();
 pub fn build_https(
     router: Router,
     tokio_listener: TcpListener,
-    mut web_server_stop_receiver: Receiver<()>,
+    mut stop_web_service_receiver: Receiver<()>,
     https_config: HttpsConfig,
 ) -> Result<JoinHandle<()>, WebServerError> {
     let HttpsConfig { cert, key, .. } = https_config;
@@ -78,14 +78,14 @@ pub fn build_https(
                         }
                     }
                 }
-                _ = web_server_stop_receiver.recv() => {
+                _ = stop_web_service_receiver.recv() => {
                     debug!("Stopping accept loop.");
                     break;
                 }
             };
 
             let tls_acceptor = tls_acceptor.clone();
-            let mut web_server_stop_receiver = web_server_stop_receiver.resubscribe();
+            let mut stop_web_service_receiver = stop_web_service_receiver.resubscribe();
             tokio::spawn(async move {
                 // TLS 握手
                 match tls_acceptor.accept(tcp_stream).await {
@@ -107,7 +107,7 @@ pub fn build_https(
                                     error!("Connection error: {}", e);
                                 }
                             }
-                            _ = web_server_stop_receiver.recv() => {
+                            _ = stop_web_service_receiver.recv() => {
                                 conn.as_mut().graceful_shutdown();
                                 // 等连接真正关闭
                                 if let Err(e) = conn.as_mut().await {
