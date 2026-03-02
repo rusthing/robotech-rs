@@ -8,7 +8,6 @@ use log::{debug, error};
 use rustls_pemfile::{certs, private_key};
 use std::fs::File;
 use std::io::BufReader;
-use std::path::PathBuf;
 use std::sync::{Arc, OnceLock};
 use tokio::net::TcpListener;
 use tokio::sync::broadcast::Receiver;
