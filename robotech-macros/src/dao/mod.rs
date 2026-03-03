@@ -93,11 +93,11 @@ pub(super) fn dao_macro(args: DaoArgs, input: ItemStruct) -> TokenStream {
             {
                 // 当id为默认值(0)时生成ID
                 if active_model.id == ActiveValue::NotSet {
-                    active_model.id = ActiveValue::set(idworker::get_id_worker()?.next_id()? as i64);
+                    active_model.id = ActiveValue::set(idworker::get_id_worker()?.next_id()?);
                 }
                 // 当创建时间未设置时，设置创建时间和修改时间
                 if active_model.create_timestamp == ActiveValue::NotSet {
-                    let now = ActiveValue::set(wheel_rs::time_utils::get_current_timestamp()? as i64);
+                    let now = ActiveValue::set(wheel_rs::time_utils::get_current_timestamp()? as u64);
                     active_model.create_timestamp = now.clone();
                     active_model.update_timestamp = now;
                 }
@@ -133,7 +133,7 @@ pub(super) fn dao_macro(args: DaoArgs, input: ItemStruct) -> TokenStream {
             {
                 // 当修改时间未设置时，设置修改时间
                 if active_model.update_timestamp == ActiveValue::NotSet {
-                    let now = ActiveValue::set(wheel_rs::time_utils::get_current_timestamp()? as i64);
+                    let now = ActiveValue::set(wheel_rs::time_utils::get_current_timestamp()? as u64);
                     active_model.update_timestamp = now;
                 }
                 // 执行数据库更新操作
@@ -183,7 +183,7 @@ pub(super) fn dao_macro(args: DaoArgs, input: ItemStruct) -> TokenStream {
             ///
             /// ## 返回值
             /// 查询成功，如果记录存在，返回查询到的完整 Model 实例，如果不存在返回None; 查询失败则返回相应的错误信息
-            pub async fn get_by_id<C>(id: i64, db: &C) -> Result<Option<Model>, DaoError>
+            pub async fn get_by_id<C>(id: u64, db: &C) -> Result<Option<Model>, DaoError>
             where
                 C: ConnectionTrait,
             {

@@ -228,7 +228,7 @@ pub(crate) fn svc_macro(args: SvcArgs, input: ItemStruct) -> TokenStream {
                 );
                 #dao_name::delete(
                     ActiveModel {
-                        id: sea_orm::ActiveValue::Set(id as i64),
+                        id: sea_orm::ActiveValue::Set(id),
                         ..Default::default()
                     },
                     db,
@@ -258,7 +258,7 @@ pub(crate) fn svc_macro(args: SvcArgs, input: ItemStruct) -> TokenStream {
             where
                 C: ConnectionTrait,
             {
-                let one = #dao_name::get_by_id(id as i64, db).await?;
+                let one = #dao_name::get_by_id(id, db).await?;
                 Ok(Ro::success("查询成功".to_string()).extra(one.map(|value| #vo_name::from(value))))
             }
         });

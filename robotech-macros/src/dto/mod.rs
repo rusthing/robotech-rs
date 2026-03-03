@@ -48,12 +48,12 @@ pub fn add_dto_macro(input: ItemStruct) -> TokenStream {
             update_timestamp: Default::default(),
         )]
         #visibility struct #struct_name {
-            #[into(match ~ {Some(value)=>ActiveValue::Set(value as i64),None=>ActiveValue::NotSet})]
+            #[into(match ~ {Some(value)=>ActiveValue::Set(value),None=>ActiveValue::NotSet})]
             #[serde_as(as = "Option<String>")]
             pub id: Option<u64>,
             #fields
             #[serde(skip_deserializing)]
-            #[into(creator_id, ActiveValue::Set(~ as i64))]
+            #[into(creator_id, ActiveValue::Set(~))]
             pub current_user_id: u64,
         }
     };
@@ -109,12 +109,12 @@ pub fn modify_dto_macro(input: ItemStruct) -> TokenStream {
         )]
         #visibility struct #struct_name {
             #[validate(required(message = "缺少必要参数<id>"))]
-            #[into(match ~ {Some(value)=>ActiveValue::Set(value as i64),None=>ActiveValue::NotSet})]
+            #[into(match ~ {Some(value)=>ActiveValue::Set(value),None=>ActiveValue::NotSet})]
             #[serde_as(as = "Option<String>")]
             pub id: Option<u64>,
             #fields
             #[serde(skip_deserializing)]
-            #[into(updator_id, ActiveValue::Set(~ as i64))]
+            #[into(updator_id, ActiveValue::Set(~))]
             pub current_user_id: u64,
         }
     };
@@ -165,8 +165,8 @@ pub fn save_dto_macro(input: ItemStruct) -> TokenStream {
         #[derive(o2o::o2o, utoipa::ToSchema, Debug, serde::Deserialize)]
         #[serde(rename_all = "camelCase")]
         #[serde_as]
-        #[into(#add_dao_name)]
-        #[into(#modify_dao_name)]
+        #[owned_into(#add_dao_name)]
+        #[owned_into(#modify_dao_name)]
         #visibility struct #struct_name {
             #[serde_as(as = "Option<String>")]
             pub id: Option<u64>,
