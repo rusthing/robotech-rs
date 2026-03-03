@@ -2,7 +2,7 @@
 use crate::api_client::ApiClientError;
 use crate::app::AppError;
 use crate::dao::DaoError;
-use crate::db_conn::DbConnError;
+use crate::db::DbError;
 use crate::env::EnvError;
 use idworker::IdWorkerError;
 use std::time::SystemTimeError;
@@ -43,7 +43,7 @@ pub enum SvcError {
     Dao(#[from] DaoError),
     #[cfg(feature = "db")]
     #[error("数据库连接错误: {0}")]
-    DbConn(#[from] DbConnError),
+    DbConn(#[from] DbError),
     #[cfg(feature = "api-client")]
     #[error("API客户端错误, {0}")]
     ApiClient(#[from] ApiClientError),

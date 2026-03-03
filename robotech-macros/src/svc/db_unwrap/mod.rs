@@ -66,7 +66,7 @@ pub(crate) fn db_unwrap_macro(args: DbUnwrapArgs, input: ItemFn) -> TokenStream 
             if let Some(db) = db {
                 #user_block
             } else {
-                let db_conn = robotech::db_conn::get_db_conn()?;
+                let db_conn = robotech::db::get_db_conn()?;
                 let db = db_conn.as_ref();
                 if #transaction_required {
                     // 开启事务

@@ -1,5 +1,6 @@
 mod cfg;
 mod dao;
+mod db;
 mod dto;
 mod log;
 mod svc;
@@ -49,6 +50,11 @@ pub fn log_call(args: TokenStream, input: TokenStream) -> TokenStream {
     let args = parse_macro_input!(args as LogCallArgs);
     let input = parse_macro_input!(input as ItemFn);
     log_call_macro(args, input).into()
+}
+
+#[proc_macro]
+pub fn db_migrate(input: TokenStream) -> TokenStream {
+    db::db_migrate_macro(input)
 }
 
 #[proc_macro_attribute]

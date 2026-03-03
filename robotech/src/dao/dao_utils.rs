@@ -1,5 +1,5 @@
 use crate::dao::DaoError;
-use crate::db_conn::get_db_conn;
+use crate::db::get_db_conn;
 use sea_orm::{ConnectionTrait, DatabaseConnection, DatabaseTransaction, DbConn, TransactionTrait};
 use std::sync::Arc;
 

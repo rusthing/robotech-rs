@@ -2,7 +2,7 @@ use sea_orm::DbErr;
 use thiserror::Error;
 
 #[derive(Error, Debug)]
-pub enum DbConnError {
+pub enum DbError {
     #[error("Fail to get DB_CONN")]
     GetDbConn(),
     #[error("Fail to set DB_CONN")]
