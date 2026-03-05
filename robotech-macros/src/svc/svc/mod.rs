@@ -2,7 +2,7 @@ use proc_macro2::{Ident, TokenStream};
 use quote::{format_ident, quote};
 use syn::parse::{Parse, ParseStream};
 use syn::{ItemStruct, Token};
-use wheel_rs::str_utils::{split_camel_case, CamelFormat};
+use wheel_rs::str_utils::{CamelFormat, split_camel_case};
 
 /// SVC方法生成宏参数解析
 #[derive(Debug)]
@@ -94,6 +94,7 @@ pub(crate) fn svc_macro(args: SvcArgs, input: ItemStruct) -> TokenStream {
     let entity_name = struct_name_split.join("");
     let dao_name = format_ident!("{}Dao", entity_name);
     let vo_name = format_ident!("{}Vo", entity_name);
+    // let vo_name = format_ident!("Model");
     let add_dto_name = format_ident!("{}AddDto", entity_name);
     let modify_dto_name = format_ident!("{}ModifyDto", entity_name);
     let save_dto_name = format_ident!("{}SaveDto", entity_name);
@@ -118,7 +119,7 @@ pub(crate) fn svc_macro(args: SvcArgs, input: ItemStruct) -> TokenStream {
             pub async fn add<C>(
                 add_dto: #add_dto_name,
                 db: Option<&C>,
-            ) -> Result<Ro<#vo_name>, SvcError>
+            ) -> Result<Ro<Model>, SvcError>
             where
                 C: ConnectionTrait,
             {
@@ -149,7 +150,7 @@ pub(crate) fn svc_macro(args: SvcArgs, input: ItemStruct) -> TokenStream {
             pub async fn modify<C>(
                 modify_dto: #modify_dto_name,
                 db: Option<&C>,
-            ) -> Result<Ro<#vo_name>, SvcError>
+            ) -> Result<Ro<Model>, SvcError>
             where
                 C: ConnectionTrait,
             {
@@ -180,7 +181,7 @@ pub(crate) fn svc_macro(args: SvcArgs, input: ItemStruct) -> TokenStream {
             pub async fn save<C>(
                 save_dto: #save_dto_name,
                 db: Option<&C>,
-            ) -> Result<Ro<#vo_name>, SvcError>
+            ) -> Result<Ro<Model>, SvcError>
             where
                 C: ConnectionTrait,
             {
@@ -212,7 +213,7 @@ pub(crate) fn svc_macro(args: SvcArgs, input: ItemStruct) -> TokenStream {
                 id: u64,
                 current_user_id: u64,
                 db: Option<&C>,
-            ) -> Result<Ro<#vo_name>, SvcError>
+            ) -> Result<Ro<Model>, SvcError>
             where
                 C: ConnectionTrait,
             {
@@ -254,12 +255,13 @@ pub(crate) fn svc_macro(args: SvcArgs, input: ItemStruct) -> TokenStream {
             /// * `Ok(Ro<Vo>)` - 查询成功，如果记录存在，返回封装了Vo的Ro对象，如果不存在则返回对象的extra为None
             /// * `Err(SvcError)` - 查询失败，可能是数据库错误
             #[db_unwrap]
-            pub async fn get_by_id<C>(id: u64, db: Option<&C>) -> Result<Ro<#vo_name>, SvcError>
+            pub async fn get_by_id<C>(id: u64, db: Option<&C>) -> Result<Ro<Model>, SvcError>
             where
                 C: ConnectionTrait,
             {
                 let one = #dao_name::get_by_id(id, db).await?;
-                Ok(Ro::success("查询成功".to_string()).extra(one.map(|value| #vo_name::from(value))))
+                // Ok(Ro::success("查询成功".to_string()).extra(one.map(|value| #vo_name::from(value))))
+                Ok(Ro::success("查询成功".to_string()).extra(one))
             }
         });
     }

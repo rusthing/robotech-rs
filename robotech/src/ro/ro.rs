@@ -3,6 +3,7 @@
 use crate::ro::ro_result::RoResult;
 use chrono::Utc;
 use serde::{Deserialize, Serialize};
+use serde_with::skip_serializing_none;
 use std::fmt::Debug;
 use utoipa::ToSchema;
 
@@ -13,6 +14,7 @@ use utoipa::ToSchema;
 ///
 /// ## 泛型参数
 /// * `E` - 额外数据的类型，用于携带具体的业务数据
+#[skip_serializing_none]
 #[derive(ToSchema, Debug, Serialize, Deserialize)]
 pub struct Ro<E> {
     /// 响应结果枚举值，表示请求处理的结果状态
@@ -22,13 +24,13 @@ pub struct Ro<E> {
     /// 时间戳，记录响应生成的时间（毫秒）
     pub timestamp: u64,
     /// 额外数据，可选的响应数据内容
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    // #[serde(default, skip_serializing_if = "Option::is_none")]
     pub extra: Option<E>,
     /// 详细信息，可选的详细描述信息
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    // #[serde(default, skip_serializing_if = "Option::is_none")]
     pub detail: Option<String>,
     /// 编码，可选的业务编码
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    // #[serde(default, skip_serializing_if = "Option::is_none")]
     pub code: Option<String>,
 }
 
