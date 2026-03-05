@@ -2,9 +2,11 @@
 
 use crate::ro::ro_result::RoResult;
 use chrono::Utc;
+use derive_setters::Setters;
 use serde::{Deserialize, Serialize};
 use serde_with::skip_serializing_none;
 use std::fmt::Debug;
+use typed_builder::TypedBuilder;
 use utoipa::ToSchema;
 
 /// # 统一API响应结构体
@@ -15,45 +17,28 @@ use utoipa::ToSchema;
 /// ## 泛型参数
 /// * `E` - 额外数据的类型，用于携带具体的业务数据
 #[skip_serializing_none]
-#[derive(ToSchema, Debug, Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize, Setters, TypedBuilder, ToSchema)]
+#[builder]
 pub struct Ro<E> {
     /// 响应结果枚举值，表示请求处理的结果状态
     pub result: RoResult,
     /// 响应消息，对结果的简要描述
     pub message: String,
     /// 时间戳，记录响应生成的时间（毫秒）
+    #[builder(default = Utc::now().timestamp_millis() as u64)]
     pub timestamp: u64,
     /// 额外数据，可选的响应数据内容
-    // #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[builder(default = None)]
     pub extra: Option<E>,
     /// 详细信息，可选的详细描述信息
-    // #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[builder(default = None)]
     pub detail: Option<String>,
     /// 编码，可选的业务编码
-    // #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[builder(default = None)]
     pub code: Option<String>,
 }
 
 impl<E> Ro<E> {
-    /// # 创建一个新的Ro实例
-    ///
-    /// ## 参数
-    /// * `result` - 响应结果枚举值
-    /// * `message` - 响应消息
-    ///
-    /// ## 返回值
-    /// 返回一个新的Ro实例
-    pub fn new(result: RoResult, message: String) -> Self {
-        Ro {
-            result,
-            message,
-            timestamp: Utc::now().timestamp_millis() as u64,
-            extra: None,
-            detail: None,
-            code: None,
-        }
-    }
-
     /// # 判断结果是否为成功
     ///
     /// ## 返回值
@@ -78,7 +63,10 @@ impl<E> Ro<E> {
     /// ## 返回值
     /// 返回一个结果为Success的Ro实例
     pub fn success(message: String) -> Self {
-        Self::new(RoResult::Success, message)
+        Self::builder()
+            .result(RoResult::Success)
+            .message(message)
+            .build()
     }
 
     /// # 创建一个非法参数的响应对象
@@ -89,7 +77,10 @@ impl<E> Ro<E> {
     /// ## 返回值
     /// 返回一个结果为IllegalArgument的Ro实例
     pub fn illegal_argument(message: String) -> Self {
-        Self::new(RoResult::IllegalArgument, message)
+        Self::builder()
+            .result(RoResult::IllegalArgument)
+            .message(message)
+            .build()
     }
 
     /// # 创建一个警告的响应对象
@@ -100,7 +91,10 @@ impl<E> Ro<E> {
     /// ## 返回值
     /// 返回一个结果为Warn的Ro实例
     pub fn warn(message: String) -> Self {
-        Self::new(RoResult::Warn, message)
+        Self::builder()
+            .result(RoResult::Warn)
+            .message(message)
+            .build()
     }
 
     /// # 创建一个失败的响应对象
@@ -111,64 +105,9 @@ impl<E> Ro<E> {
     /// ## 返回值
     /// 返回一个结果为Fail的Ro实例
     pub fn fail(message: String) -> Self {
-        Self::new(RoResult::Fail, message)
-    }
-
-    /// # 设置响应消息
-    ///
-    /// ## 参数
-    /// * `message` - 新的消息内容
-    ///
-    /// ## 返回值
-    /// 返回更新消息后的本实例（支持链式调用）
-    pub fn message(mut self, message: String) -> Self {
-        self.message = message;
-        self
-    }
-
-    /// # 设置额外数据
-    ///
-    /// ## 参数
-    /// * `extra` - 可选的额外数据
-    ///
-    /// ## 返回值
-    /// 返回更新额外数据后的本实例（支持链式调用）
-    pub fn extra(mut self, extra: Option<E>) -> Self {
-        self.extra = extra;
-        self
-    }
-
-    /// # 设置详细信息
-    ///
-    /// ## 参数
-    /// * `detail` - 可选的详细信息
-    ///
-    /// ## 返回值
-    /// 返回更新详细信息后的本实例（支持链式调用）
-    pub fn detail(mut self, detail: Option<String>) -> Self {
-        self.detail = detail;
-        self
-    }
-
-    /// # 设置编码
-    ///
-    /// ## 参数
-    /// * `code` - 可选的编码
-    ///
-    /// ## 返回值
-    /// 返回更新编码后的本实例（支持链式调用）
-    pub fn code(mut self, code: Option<String>) -> Self {
-        self.code = code;
-        self
-    }
-
-    /// # 获取当前实例的额外数据
-    ///
-    /// ## 返回值
-    /// 返回包含额外数据的Option
-    ///
-    /// 注意：此方法会消费当前实例
-    pub fn get_extra(self) -> Option<E> {
-        self.extra
+        Self::builder()
+            .result(RoResult::Fail)
+            .message(message)
+            .build()
     }
 }

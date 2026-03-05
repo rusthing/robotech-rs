@@ -28,6 +28,8 @@ notify = { workspace = true }
 notify-debouncer-mini = { workspace = true }
 thiserror = { workspace = true }
 chrono = { workspace = true }
+derive_setters = { workspace = true }
+typed-builder = { workspace = true }
 serde = { workspace = true, features = ["derive"] }
 serde_json = { workspace = true }
 serde_with = { workspace = true }

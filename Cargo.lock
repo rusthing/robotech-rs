@@ -1117,6 +1117,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "derive_setters"
+version = "0.1.9"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "b7e6f6fa1f03c14ae082120b84b3c7fbd7b8588d924cf2d7c3daf9afd49df8b9"
+dependencies = [
+ "darling 0.21.3",
+ "proc-macro2",
+ "quote",
+ "syn 2.0.117",
+]
+
+[[package]]
 name = "digest"
 version = "0.10.7"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3047,6 +3059,7 @@ dependencies = [
  "axum",
  "chrono",
  "config",
+ "derive_setters",
  "hyper",
  "hyper-util",
  "idworker",
@@ -3074,6 +3087,7 @@ dependencies = [
  "tracing-core",
  "tracing-log",
  "tracing-subscriber",
+ "typed-builder",
  "utoipa",
  "validator",
  "wheel-rs",

@@ -219,7 +219,7 @@ pub(crate) fn svc_macro(args: SvcArgs, input: ItemStruct) -> TokenStream {
             {
                 let del_model = Self::get_by_id(id, Some(db))
                     .await?
-                    .get_extra()
+                    .extra
                     .ok_or(SvcError::NotFound(id.to_string()))?;
                 warn!(
                     "ID为<{}>的用户将删除{}中的记录: {:?}",
