@@ -228,7 +228,7 @@ pub(crate) fn svc_macro(args: SvcArgs, input: ItemStruct) -> TokenStream {
                 );
                 #dao_name::delete(
                     ActiveModel {
-                        id: sea_orm::ActiveValue::Set(id),
+                        id: sea_orm::ActiveValue::Set(id as i64),
                         ..Default::default()
                     },
                     db,

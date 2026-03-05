@@ -41,19 +41,19 @@ pub fn add_dto_macro(input: ItemStruct) -> TokenStream {
         #[derive(o2o::o2o, utoipa::ToSchema, Debug, serde::Deserialize, validator::Validate)]
         #[serde(rename_all = "camelCase")]
         #[serde_as]
-        #[into(ActiveModel)]
+        #[owned_into(ActiveModel)]
         #[ghosts(
             updator_id: Default::default(),
             create_timestamp: Default::default(),
             update_timestamp: Default::default(),
         )]
         #visibility struct #struct_name {
-            #[into(match ~ {Some(value)=>ActiveValue::Set(value),None=>ActiveValue::NotSet})]
+            #[into(match ~ {Some(value)=>ActiveValue::Set(value as i64),None=>ActiveValue::NotSet})]
             #[serde_as(as = "Option<String>")]
             pub id: Option<u64>,
             #fields
             #[serde(skip_deserializing)]
-            #[into(creator_id, ActiveValue::Set(~))]
+            #[into(creator_id, ActiveValue::Set(~ as i64))]
             pub current_user_id: u64,
         }
     };
@@ -101,7 +101,7 @@ pub fn modify_dto_macro(input: ItemStruct) -> TokenStream {
         #[derive(o2o::o2o, utoipa::ToSchema, Debug, serde::Deserialize, validator::Validate)]
         #[serde(rename_all = "camelCase")]
         #[serde_as]
-        #[into(ActiveModel)]
+        #[owned_into(ActiveModel)]
         #[ghosts(
             creator_id: Default::default(),
             create_timestamp: Default::default(),
@@ -109,12 +109,12 @@ pub fn modify_dto_macro(input: ItemStruct) -> TokenStream {
         )]
         #visibility struct #struct_name {
             #[validate(required(message = "缺少必要参数<id>"))]
-            #[into(match ~ {Some(value)=>ActiveValue::Set(value),None=>ActiveValue::NotSet})]
+            #[into(match ~ {Some(value)=>ActiveValue::Set(value as i64),None=>ActiveValue::NotSet})]
             #[serde_as(as = "Option<String>")]
             pub id: Option<u64>,
             #fields
             #[serde(skip_deserializing)]
-            #[into(updator_id, ActiveValue::Set(~))]
+            #[into(updator_id, ActiveValue::Set(~ as i64))]
             pub current_user_id: u64,
         }
     };

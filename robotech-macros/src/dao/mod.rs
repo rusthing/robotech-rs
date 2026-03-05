@@ -93,11 +93,11 @@ pub(super) fn dao_macro(args: DaoArgs, input: ItemStruct) -> TokenStream {
             {
                 // 当id为默认值(0)时生成ID
                 if active_model.id == ActiveValue::NotSet {
-                    active_model.id = ActiveValue::set(idworker::get_id_worker()?.next_id()?);
+                    active_model.id = ActiveValue::set(idworker::get_id_worker()?.next_id()? as i64);
                 }
                 // 当创建时间未设置时，设置创建时间和修改时间
                 if active_model.create_timestamp == ActiveValue::NotSet {
-                    let now = ActiveValue::set(wheel_rs::time_utils::get_current_timestamp()? as u64);
+                    let now = ActiveValue::set(wheel_rs::time_utils::get_current_timestamp()? as i64);
                     active_model.create_timestamp = now.clone();
                     active_model.update_timestamp = now;
                 }
@@ -133,7 +133,7 @@ pub(super) fn dao_macro(args: DaoArgs, input: ItemStruct) -> TokenStream {
             {
                 // 当修改时间未设置时，设置修改时间
                 if active_model.update_timestamp == ActiveValue::NotSet {
-                    let now = ActiveValue::set(wheel_rs::time_utils::get_current_timestamp()? as u64);
+                    let now = ActiveValue::set(wheel_rs::time_utils::get_current_timestamp()? as i64);
                     active_model.update_timestamp = now;
                 }
                 // 执行数据库更新操作
@@ -187,7 +187,7 @@ pub(super) fn dao_macro(args: DaoArgs, input: ItemStruct) -> TokenStream {
             where
                 C: ConnectionTrait,
             {
-                Entity::find_by_id(id)
+                Entity::find_by_id(id as i64)
                     .one(db)
                     .await
                     .map_err(|e| DaoError::parse_db_err(e, &UNIQUE_FIELDS))
