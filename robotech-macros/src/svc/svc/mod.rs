@@ -2,7 +2,7 @@ use proc_macro2::{Ident, TokenStream};
 use quote::{format_ident, quote};
 use syn::parse::{Parse, ParseStream};
 use syn::{ItemStruct, Token};
-use wheel_rs::str_utils::{CamelFormat, split_camel_case};
+use wheel_rs::str_utils::{split_camel_case, CamelFormat};
 
 /// SVC方法生成宏参数解析
 #[derive(Debug)]
@@ -90,10 +90,9 @@ pub(crate) fn svc_macro(args: SvcArgs, input: ItemStruct) -> TokenStream {
     }
     let mut struct_name_split = struct_name_split.unwrap();
     struct_name_split.pop();
-    let table_name = struct_name_split.join("_").to_lowercase();
     let entity_name = struct_name_split.join("");
     let dao_name = format_ident!("{}Dao", entity_name);
-    // let vo_name = format_ident!("{}Vo", entity_name);
+    let vo_name = format_ident!("{}Vo", entity_name);
     // let add_dto_name = format_ident!("{}AddDto", entity_name);
     // let modify_dto_name = format_ident!("{}ModifyDto", entity_name);
     // let save_dto_name = format_ident!("{}SaveDto", entity_name);
@@ -118,12 +117,12 @@ pub(crate) fn svc_macro(args: SvcArgs, input: ItemStruct) -> TokenStream {
             pub async fn add<C>(
                 add_dto: ActiveModel,
                 db: Option<&C>,
-            ) -> Result<Ro<Model>, SvcError>
+            ) -> Result<Ro<#vo_name>, SvcError>
             where
                 C: ConnectionTrait,
             {
                 // let active_model: ActiveModel = add_dto.into();
-                let one = #dao_name::insert(add_dto, db).await?;
+                let one = #vo_name::from(#dao_name::insert(add_dto, db).await?);
                 Ok(Self::get_by_id(one.id as u64, Some(db))
                     .await?
                     .message("添加成功".to_string()))
@@ -149,14 +148,14 @@ pub(crate) fn svc_macro(args: SvcArgs, input: ItemStruct) -> TokenStream {
             pub async fn modify<C>(
                 modify_dto: ActiveModel,
                 db: Option<&C>,
-            ) -> Result<Ro<Model>, SvcError>
+            ) -> Result<Ro<#vo_name>, SvcError>
             where
                 C: ConnectionTrait,
             {
                 // let id = modify_dto.id.unwrap();    // id经过校验，可以放心unwrap
                 // let active_model: ActiveModel = modify_dto.into();
-                let model = #dao_name::update(modify_dto, db).await?;
-                Ok(Self::get_by_id(model.id as u64, Some(db))
+                let one = #vo_name::from(#dao_name::update(modify_dto, db).await?);
+                Ok(Self::get_by_id(one.id, Some(db))
                     .await?
                     .message("修改成功".to_string()))
             }
@@ -180,14 +179,14 @@ pub(crate) fn svc_macro(args: SvcArgs, input: ItemStruct) -> TokenStream {
             pub async fn save<C>(
                 save_dto: ActiveModel,
                 db: Option<&C>,
-            ) -> Result<Ro<Model>, SvcError>
+            ) -> Result<Ro<#vo_name>, SvcError>
             where
                 C: ConnectionTrait,
             {
-                if sea_orm::ActiveValue::NotSet == save_dto.id {
-                    Self::modify(save_dto, db).await
-                } else {
+                if save_dto.id == sea_orm::ActiveValue::NotSet {
                     Self::add(save_dto, db).await
+                } else {
+                    Self::modify(save_dto, db).await
                 }
             }
         });
@@ -210,31 +209,27 @@ pub(crate) fn svc_macro(args: SvcArgs, input: ItemStruct) -> TokenStream {
             #[db_unwrap(transaction_required)]
             pub async fn del<C>(
                 id: u64,
-                current_user_id: u64,
                 db: Option<&C>,
-            ) -> Result<Ro<Model>, SvcError>
+            ) -> Result<Ro<#vo_name>, SvcError>
             where
                 C: ConnectionTrait,
             {
-                let del_model = Self::get_by_id(id, Some(db))
+                let one = Self::get_by_id(id, Some(db))
                     .await?
                     .extra
                     .ok_or(SvcError::NotFound(id.to_string()))?;
-                warn!(
-                    "ID为<{}>的用户将删除{}中的记录: {:?}",
-                    current_user_id,
-                    #table_name,
-                    del_model.clone()
-                );
-                #dao_name::delete(
+                let rows_affected = #dao_name::delete(
                     ActiveModel {
                         id: sea_orm::ActiveValue::Set(id as i64),
                         ..Default::default()
                     },
                     db,
                 )
-                .await?;
-                Ok(Ro::success("删除成功".to_string()).extra(Some(del_model)))
+                .await?.rows_affected;
+                if rows_affected == 0 {
+                    return Err(SvcError::NotFound(id.to_string()));
+                }
+                Ok(Ro::success("删除成功".to_string()).extra(Some(one)))
             }
         });
     }
@@ -254,12 +249,11 @@ pub(crate) fn svc_macro(args: SvcArgs, input: ItemStruct) -> TokenStream {
             /// * `Ok(Ro<Vo>)` - 查询成功，如果记录存在，返回封装了Vo的Ro对象，如果不存在则返回对象的extra为None
             /// * `Err(SvcError)` - 查询失败，可能是数据库错误
             #[db_unwrap]
-            pub async fn get_by_id<C>(id: u64, db: Option<&C>) -> Result<Ro<Model>, SvcError>
+            pub async fn get_by_id<C>(id: u64, db: Option<&C>) -> Result<Ro<#vo_name>, SvcError>
             where
                 C: ConnectionTrait,
             {
-                let one = #dao_name::get_by_id(id, db).await?;
-                // Ok(Ro::success("查询成功".to_string()).extra(one.map(|value| #vo_name::from(value))))
+                let one = #dao_name::get_by_id(id, db).await?.map(|v| #vo_name::from(v));
                 Ok(Ro::success("查询成功".to_string()).extra(one))
             }
         });
