@@ -124,12 +124,15 @@ pub fn vo_macro(input: DeriveInput) -> TokenStream {
         use serde::Serialize;
         use serde_with::{serde_as, skip_serializing_none};
         use utoipa::ToSchema;
+        use derive_setters::Setters;
+        use typed_builder::TypedBuilder;
 
         #[skip_serializing_none]            // 忽略空字段(好像必须放在#[derive(o2o, Serialize)]的上方才能起效)
-        #[derive(o2o, ToSchema, Debug, Serialize, Clone)]
+        #[derive(o2o, ToSchema, Debug, Serialize, Clone, Setters, TypedBuilder)]
         #[from_owned(Model)]
         #[serde(rename_all = "camelCase")]
         #[serde_as]
+        #[builder]
         #vis struct #struct_name #fields
     }
 }
