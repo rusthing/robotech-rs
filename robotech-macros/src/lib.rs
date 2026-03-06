@@ -4,6 +4,7 @@ mod db;
 mod dto;
 mod log;
 mod svc;
+mod vo;
 mod web;
 
 use crate::cfg::{watch_cfg_file_macro, WatchCfgFileArgs};
@@ -11,6 +12,7 @@ use crate::dao::{dao_macro, DaoArgs};
 use crate::dto::{add_dto_macro, modify_dto_macro, save_dto_macro};
 use crate::log::{log_call_macro, LogCallArgs};
 use crate::svc::{db_unwrap_macro, svc_macro, DbUnwrapArgs, SvcArgs};
+use crate::vo::vo_macro;
 use crate::web::{ctrl_macro, CtrlArgs};
 use proc_macro::TokenStream;
 use syn::{parse_macro_input, ItemFn, ItemStruct};
@@ -143,4 +145,54 @@ pub fn ctrl(args: TokenStream, input: TokenStream) -> TokenStream {
     let args = parse_macro_input!(args as CtrlArgs);
     let input = parse_macro_input!(input as ItemStruct);
     ctrl_macro(args, input).into()
+}
+
+/// 属性宏：为 VO 结构体自动生成标准属性
+///
+/// 此宏会自动为 VO 结构体添加以下属性和派生宏：
+/// - `#[skip_serializing_none]` - 跳过空字段序列化
+/// - `#[derive(o2o, ToSchema, Debug, Serialize, Clone)]` - 必要的派生宏
+/// - `#[from_owned(Model)]` - o2o 转换配置
+/// - `#[serde(rename_all = "camelCase")]` - 驼峰命名
+/// - `#[serde_as]` - serde_with 支持
+///
+/// 同时会自动为无符号整型字段添加：
+/// - `#[from(~ as u64)]` 或 `#[from(~.to_string())]` - 根据字段名自动判断
+/// - `#[serde_as(as = "String")]` - 避免 JS 精度丢失
+///
+/// # 使用示例
+/// ```
+/// #[vo]
+/// pub struct StudentVo {
+///     /// ID
+///     pub id: u64,
+///     /// 名称
+///     pub name: String,
+///     /// 备注
+///     pub remark: Option<String>,
+/// }
+/// ```
+///
+/// 上述代码会被展开为：
+/// ```
+/// #[skip_serializing_none]
+/// #[derive(o2o, ToSchema, Debug, Serialize, Clone)]
+/// #[from_owned(Model)]
+/// #[serde(rename_all = "camelCase")]
+/// #[serde_as]
+/// pub struct StudentVo {
+///     /// ID
+///     #[from(~ as u64)]
+///     #[serde_as(as = "String")]
+///     pub id: u64,
+///     /// 名称
+///     pub name: String,
+///     /// 备注
+///     pub remark: Option<String>,
+/// }
+/// ```
+#[proc_macro_attribute]
+pub fn vo(_args: TokenStream, input: TokenStream) -> TokenStream {
+    let input = parse_macro_input!(input as syn::DeriveInput);
+    vo_macro(input).into()
 }
