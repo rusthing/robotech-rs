@@ -28,13 +28,13 @@ pub struct Ro<E> {
     #[builder(default = Utc::now().timestamp_millis() as u64)]
     pub timestamp: u64,
     /// 额外数据，可选的响应数据内容
-    #[builder(default = None)]
+    #[builder(default, setter(strip_option))]
     pub extra: Option<E>,
     /// 详细信息，可选的详细描述信息
-    #[builder(default = None)]
+    #[builder(default, setter(strip_option))]
     pub detail: Option<String>,
     /// 编码，可选的业务编码
-    #[builder(default = None)]
+    #[builder(default, setter(strip_option))]
     pub code: Option<String>,
 }
 

@@ -38,7 +38,7 @@ pub fn add_dto_macro(input: ItemStruct) -> TokenStream {
     };
 
     let expanded = quote! {
-        #[derive(o2o::o2o, utoipa::ToSchema, Debug, serde::Deserialize, validator::Validate)]
+        #[derive(o2o::o2o, utoipa::ToSchema, Debug, serde::Deserialize, validator::Validate, Setters, TypedBuilder)]
         #[serde(rename_all = "camelCase")]
         #[serde_as]
         #[owned_into(ActiveModel)]
@@ -47,9 +47,11 @@ pub fn add_dto_macro(input: ItemStruct) -> TokenStream {
             create_timestamp: Default::default(),
             update_timestamp: Default::default(),
         )]
+        #[builder]
         #visibility struct #struct_name {
             #[into(match ~ {Some(v)=>ActiveValue::Set(v as i64),None=>ActiveValue::NotSet})]
             #[serde_as(as = "Option<String>")]
+            #[builder(default, setter(strip_option))]
             pub id: Option<u64>,
             #fields
             #[serde(skip_deserializing)]
@@ -98,7 +100,7 @@ pub fn modify_dto_macro(input: ItemStruct) -> TokenStream {
     };
 
     let expanded = quote! {
-        #[derive(o2o::o2o, utoipa::ToSchema, Debug, serde::Deserialize, validator::Validate)]
+        #[derive(o2o::o2o, utoipa::ToSchema, Debug, serde::Deserialize, validator::Validate, Setters, TypedBuilder)]
         #[serde(rename_all = "camelCase")]
         #[serde_as]
         #[owned_into(ActiveModel)]
@@ -107,10 +109,12 @@ pub fn modify_dto_macro(input: ItemStruct) -> TokenStream {
             create_timestamp: Default::default(),
             update_timestamp: Default::default(),
         )]
+        #[builder]
         #visibility struct #struct_name {
             #[validate(required(message = "缺少必要参数<id>"))]
             #[into(match ~ {Some(v)=>ActiveValue::Set(v as i64),None=>ActiveValue::NotSet})]
             #[serde_as(as = "Option<String>")]
+            #[builder(default, setter(strip_option))]
             pub id: Option<u64>,
             #fields
             #[serde(skip_deserializing)]
@@ -162,13 +166,15 @@ pub fn save_dto_macro(input: ItemStruct) -> TokenStream {
     };
 
     let expanded = quote! {
-        #[derive(o2o::o2o, utoipa::ToSchema, Debug, serde::Deserialize)]
+        #[derive(o2o::o2o, utoipa::ToSchema, Debug, serde::Deserialize, Setters, TypedBuilder)]
         #[serde(rename_all = "camelCase")]
         #[serde_as]
         #[owned_into(#add_dao_name)]
         #[owned_into(#modify_dao_name)]
+        #[builder]
         #visibility struct #struct_name {
             #[serde_as(as = "Option<String>")]
+            #[builder(default, setter(strip_option))]
             pub id: Option<u64>,
             #fields
             #[serde(skip_deserializing)]
