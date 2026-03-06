@@ -48,7 +48,7 @@ pub fn add_dto_macro(input: ItemStruct) -> TokenStream {
             update_timestamp: Default::default(),
         )]
         #visibility struct #struct_name {
-            #[into(match ~ {Some(value)=>ActiveValue::Set(value as i64),None=>ActiveValue::NotSet})]
+            #[into(match ~ {Some(v)=>ActiveValue::Set(v as i64),None=>ActiveValue::NotSet})]
             #[serde_as(as = "Option<String>")]
             pub id: Option<u64>,
             #fields
@@ -109,7 +109,7 @@ pub fn modify_dto_macro(input: ItemStruct) -> TokenStream {
         )]
         #visibility struct #struct_name {
             #[validate(required(message = "缺少必要参数<id>"))]
-            #[into(match ~ {Some(value)=>ActiveValue::Set(value as i64),None=>ActiveValue::NotSet})]
+            #[into(match ~ {Some(v)=>ActiveValue::Set(v as i64),None=>ActiveValue::NotSet})]
             #[serde_as(as = "Option<String>")]
             pub id: Option<u64>,
             #fields
