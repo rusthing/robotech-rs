@@ -11,9 +11,10 @@ fn has_attribute(attrs: &[Attribute], name: &str) -> bool {
 fn generate_field_attrs(field: &Field) -> TokenStream {
     let ty = &field.ty;
 
-    // 检查是否已经有 serde_as 或 from 属性
+    // 检查是否已经有 serde_as、from 或 builder 属性
     let has_serde_as = has_attribute(&field.attrs, "serde_as");
     let has_from = has_attribute(&field.attrs, "from");
+    let has_builder = has_attribute(&field.attrs, "builder");
 
     let mut attrs = TokenStream::new();
 
@@ -28,6 +29,13 @@ fn generate_field_attrs(field: &Field) -> TokenStream {
         // 添加 serde_as 属性
         if let Some(serde_as_attr) = generate_serde_as_attr(ty) {
             attrs.extend(serde_as_attr);
+        }
+    }
+
+    if !has_builder {
+        // 添加 builder 属性（仅针对 Option<T> 类型）
+        if let Some(builder_attr) = generate_builder_attr(field) {
+            attrs.extend(builder_attr);
         }
     }
 
@@ -58,14 +66,41 @@ fn generate_serde_as_attr(ty: &syn::Type) -> Option<TokenStream> {
         syn::Type::Path(type_path) => {
             let path_str = type_path.path.segments.last().unwrap().ident.to_string();
 
-            if path_str == "u64" {
-                quote! { #[serde_as(as = "String")] }
-            } else {
-                return None;
+            match path_str.as_str() {
+                "u64" => quote! { #[serde_as(as = "String")] },
+                _ => return None,
             }
         }
         _ => return None,
     })
+}
+
+/// 生成 builder 属性（仅针对 Option<T> 类型）
+fn generate_builder_attr(field: &Field) -> Option<TokenStream> {
+    let ty = &field.ty;
+
+    // 检查是否是 Option<T> 类型
+    if is_option_type(ty) {
+        return Some(quote! {
+            #[builder(default, setter(into))]
+        });
+    }
+
+    None
+}
+
+/// 检查类型是否是 Option<T>
+fn is_option_type(ty: &syn::Type) -> bool {
+    match ty {
+        syn::Type::Path(type_path) => {
+            if let Some(segment) = type_path.path.segments.last() {
+                segment.ident == "Option"
+            } else {
+                false
+            }
+        }
+        _ => false,
+    }
 }
 
 pub fn vo_macro(input: DeriveInput) -> TokenStream {
