@@ -93,11 +93,10 @@ pub(crate) fn svc_macro(args: SvcArgs, input: ItemStruct) -> TokenStream {
     let table_name = struct_name_split.join("_").to_lowercase();
     let entity_name = struct_name_split.join("");
     let dao_name = format_ident!("{}Dao", entity_name);
-    let vo_name = format_ident!("{}Vo", entity_name);
-    // let vo_name = format_ident!("Model");
-    let add_dto_name = format_ident!("{}AddDto", entity_name);
-    let modify_dto_name = format_ident!("{}ModifyDto", entity_name);
-    let save_dto_name = format_ident!("{}SaveDto", entity_name);
+    // let vo_name = format_ident!("{}Vo", entity_name);
+    // let add_dto_name = format_ident!("{}AddDto", entity_name);
+    // let modify_dto_name = format_ident!("{}ModifyDto", entity_name);
+    // let save_dto_name = format_ident!("{}SaveDto", entity_name);
 
     let mut generated_methods = Vec::new();
 
@@ -117,14 +116,14 @@ pub(crate) fn svc_macro(args: SvcArgs, input: ItemStruct) -> TokenStream {
             /// * `Err(SvcError)` - 添加失败，可能是因为违反唯一约束或其他数据库错误
             #[db_unwrap(transaction_required)]
             pub async fn add<C>(
-                add_dto: #add_dto_name,
+                add_dto: ActiveModel,
                 db: Option<&C>,
             ) -> Result<Ro<Model>, SvcError>
             where
                 C: ConnectionTrait,
             {
-                let active_model: ActiveModel = add_dto.into();
-                let one = #dao_name::insert(active_model, db).await?;
+                // let active_model: ActiveModel = add_dto.into();
+                let one = #dao_name::insert(add_dto, db).await?;
                 Ok(Self::get_by_id(one.id as u64, Some(db))
                     .await?
                     .message("添加成功".to_string()))
@@ -148,16 +147,16 @@ pub(crate) fn svc_macro(args: SvcArgs, input: ItemStruct) -> TokenStream {
             /// * `Err(SvcError)` - 修改失败，可能因为记录不存在、违反唯一约束或其他数据库错误
             #[db_unwrap(transaction_required)]
             pub async fn modify<C>(
-                modify_dto: #modify_dto_name,
+                modify_dto: ActiveModel,
                 db: Option<&C>,
             ) -> Result<Ro<Model>, SvcError>
             where
                 C: ConnectionTrait,
             {
-                let id = modify_dto.id.unwrap();    // id经过校验，可以放心unwrap
-                let active_model: ActiveModel = modify_dto.into();
-                #dao_name::update(active_model, db).await?;
-                Ok(Self::get_by_id(id, Some(db))
+                // let id = modify_dto.id.unwrap();    // id经过校验，可以放心unwrap
+                // let active_model: ActiveModel = modify_dto.into();
+                let model = #dao_name::update(modify_dto, db).await?;
+                Ok(Self::get_by_id(model.id as u64, Some(db))
                     .await?
                     .message("修改成功".to_string()))
             }
@@ -179,16 +178,16 @@ pub(crate) fn svc_macro(args: SvcArgs, input: ItemStruct) -> TokenStream {
             /// * `Ok(Ro<Vo>)` - 保存成功，返回封装了Vo的Ro对象
             /// * `Err(SvcError)` - 保存失败，可能因为违反唯一约束、记录不存在或其他数据库错误
             pub async fn save<C>(
-                save_dto: #save_dto_name,
+                save_dto: ActiveModel,
                 db: Option<&C>,
             ) -> Result<Ro<Model>, SvcError>
             where
                 C: ConnectionTrait,
             {
-                if save_dto.id.clone().is_some() {
-                    Self::modify(save_dto.into(), db).await
+                if sea_orm::ActiveValue::NotSet == save_dto.id {
+                    Self::modify(save_dto, db).await
                 } else {
-                    Self::add(save_dto.into(), db).await
+                    Self::add(save_dto, db).await
                 }
             }
         });

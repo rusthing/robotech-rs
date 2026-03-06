@@ -131,6 +131,9 @@ pub(super) fn dao_macro(args: DaoArgs, input: ItemStruct) -> TokenStream {
             where
                 C: ConnectionTrait,
             {
+                // 保护创建者信息不能被修改
+                active_model.creator_id = ActiveValue::NotSet;
+                active_model.create_timestamp = ActiveValue::NotSet;
                 // 当修改时间未设置时，设置修改时间
                 if active_model.update_timestamp == ActiveValue::NotSet {
                     let now = ActiveValue::set(wheel_rs::time_utils::get_current_timestamp()? as i64);

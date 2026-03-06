@@ -17,7 +17,7 @@ use utoipa::ToSchema;
 /// ## 泛型参数
 /// * `E` - 额外数据的类型，用于携带具体的业务数据
 #[skip_serializing_none]
-#[derive(Debug, Serialize, Deserialize, Setters, TypedBuilder, ToSchema)]
+#[derive(ToSchema, Debug, Serialize, Deserialize, Setters, TypedBuilder)]
 #[builder]
 pub struct Ro<E> {
     /// 响应结果枚举值，表示请求处理的结果状态
