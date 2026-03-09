@@ -12,7 +12,7 @@ fn generate_field_attrs(field: &Field) -> TokenStream {
     let ty = &field.ty;
 
     // 检查是否已经有 serde_as、from 或 builder 属性
-    let has_serde_as = has_attribute(&field.attrs, "serde_as");
+    let has_serde = has_attribute(&field.attrs, "serde");
     let has_from = has_attribute(&field.attrs, "from");
     let has_builder = has_attribute(&field.attrs, "builder");
 
@@ -25,9 +25,9 @@ fn generate_field_attrs(field: &Field) -> TokenStream {
         }
     }
 
-    if !has_serde_as {
-        // 添加 serde_as 属性
-        if let Some(serde_as_attr) = generate_serde_as_attr(ty) {
+    if !has_serde {
+        // 添加 serde 属性
+        if let Some(serde_as_attr) = generate_serde_attr(ty) {
             attrs.extend(serde_as_attr);
         }
     }
@@ -61,13 +61,20 @@ fn generate_from_attr(ty: &syn::Type) -> Option<TokenStream> {
 }
 
 /// 生成 serde_as 属性
-fn generate_serde_as_attr(ty: &syn::Type) -> Option<TokenStream> {
+fn generate_serde_attr(ty: &syn::Type) -> Option<TokenStream> {
     Some(match ty {
         syn::Type::Path(type_path) => {
             let path_str = type_path.path.segments.last().unwrap().ident.to_string();
 
             match path_str.as_str() {
-                "u64" => quote! { #[serde_as(as = "String")] },
+                "u64" => {
+                    // 检查是否是 Option<T> 类型
+                    if is_option_type(ty) {
+                        quote! { #[serde(with = "u64_option_serde")] }
+                    } else {
+                        quote! { #[serde(with = "u64_serde")] }
+                    }
+                }
                 _ => return None,
             }
         }
@@ -161,6 +168,7 @@ pub fn vo_macro(input: DeriveInput) -> TokenStream {
         use utoipa::ToSchema;
         use derive_setters::Setters;
         use typed_builder::TypedBuilder;
+        use wheel_rs::serde::{u64_serde, u64_option_serde};
 
         #[skip_serializing_none]            // 忽略空字段(好像必须放在#[derive(o2o, Serialize)]的上方才能起效)
         #[derive(o2o, ToSchema, Debug, Serialize, Clone, Setters, TypedBuilder)]

@@ -8,6 +8,7 @@ use serde_with::skip_serializing_none;
 use std::fmt::Debug;
 use typed_builder::TypedBuilder;
 use utoipa::ToSchema;
+use wheel_rs::serde::u64_serde;
 
 /// # 统一API响应结构体
 ///
@@ -26,6 +27,7 @@ pub struct Ro<E> {
     pub message: String,
     /// 时间戳，记录响应生成的时间（毫秒）
     #[builder(default = Utc::now().timestamp_millis() as u64)]
+    #[serde(with = "u64_serde")]
     pub timestamp: u64,
     /// 额外数据，可选的响应数据内容
     #[builder(default, setter(strip_option))]
