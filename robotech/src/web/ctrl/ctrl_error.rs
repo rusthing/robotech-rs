@@ -57,12 +57,8 @@ impl CtrlError {
                 warn!("{}", error);
                 Ro::warn("运行时错误".to_string()).detail(Some(error.to_string()))
             }
-            CtrlError::Validation(error) => {
-                Ro::illegal_argument(format!("参数校验错误: {}", error.code))
-            }
-            CtrlError::Validations(errors) => {
-                Ro::illegal_argument(format!("参数校验错误: {}", errors))
-            }
+            CtrlError::Validation(error) => Ro::illegal_argument(format!("参数校验错误 -> {}", error.to_string())),
+            CtrlError::Validations(errors) => Ro::illegal_argument(format!("参数校验错误 -> {}", errors)),
             CtrlError::Io(error) => {
                 Ro::fail("磁盘异常".to_string()).detail(Some(error.to_string()))
             }

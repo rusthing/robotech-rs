@@ -20,7 +20,6 @@ use validator;
 ///
 /// * 如果请求头中缺少必要的用户ID参数，返回`ValidationError`
 /// * 如果用户ID格式不正确，无法解析为u64类型，返回`ValidationError`
-#[deprecated]
 pub fn get_current_user_id(headers: &HeaderMap) -> Result<u64, validator::ValidationError> {
     headers
         .get(USER_ID_HEADER_NAME)
