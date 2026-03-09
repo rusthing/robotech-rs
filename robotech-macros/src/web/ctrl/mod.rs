@@ -96,7 +96,7 @@ pub(crate) fn ctrl_macro(args: CtrlArgs, input: ItemStruct) -> TokenStream {
     let get_by_id_path = format!("/{path}/{{id}}");
     let entity_name = struct_name_split.join("");
     let svc_name = format_ident!("{}Svc", entity_name);
-    // let vo_name = format_ident!("{}Vo", entity_name);
+    let vo_name = format_ident!("{}Vo", entity_name);
     let add_dto_name = format_ident!("{}AddDto", entity_name);
     let modify_dto_name = format_ident!("{}ModifyDto", entity_name);
     let save_dto_name = format_ident!("{}SaveDto", entity_name);
@@ -127,19 +127,17 @@ pub(crate) fn ctrl_macro(args: CtrlArgs, input: ItemStruct) -> TokenStream {
             #[utoipa::path(
                 post,
                 path = #crud_path,
-                responses((status = OK, body = Ro<Model>))
+                responses((status = OK, body = Ro<#vo_name>))
             )]
             #[log_call]
             pub async fn add(
-                Json(dto): Json<ActiveModel>,
                 headers: HeaderMap,
-            ) -> Result<Json<Ro<Model>>, CtrlError> {
-                // let mut dto = json_body.into_inner();
-                //
-                // dto.validate()?;
+                Json(mut dto): Json<#add_dto_name>,
+            ) -> Result<Json<Ro<#vo_name>>, CtrlError> {
+                dto.validate()?;
 
-                // 从header中解析当前用户ID，如果没有或解析失败则抛出ApiError
-                dto.creator_id = sea_orm::ActiveValue::Set(get_current_user_id(&headers)?);
+                // 从header中解析当前用户ID，如果没有或解析失败则抛出ValidationError
+                dto.current_user_id = get_current_user_id(&headers)?;
 
                 let result = #svc_name::add::<DatabaseTransaction>(dto, None).await?;
                 Ok(Json(result))
@@ -171,19 +169,17 @@ pub(crate) fn ctrl_macro(args: CtrlArgs, input: ItemStruct) -> TokenStream {
             #[utoipa::path(
                 put,
                 path = #crud_path,
-                responses((status = OK, body = Ro<Model>))
+                responses((status = OK, body = Ro<#vo_name>))
             )]
             #[log_call]
             pub async fn modify(
-                Json(dto): Json<ActiveModel>,
                 headers: HeaderMap,
-            ) -> Result<Json<Ro<Model>>, CtrlError> {
-                // let mut dto = json_body.into_inner();
-                //
-                // dto.validate()?;
+                Json(mut dto): Json<#modify_dto_name>,
+            ) -> Result<Json<Ro<#vo_name>>, CtrlError> {
+                dto.validate()?;
 
-                // 从header中解析当前用户ID，如果没有或解析失败则抛出ApiError
-                dto.updator_id = sea_orm::ActiveValue::Set(get_current_user_id(&headers)?);
+                // 从header中解析当前用户ID，如果没有或解析失败则抛出ValidationError
+                dto.current_user_id = get_current_user_id(&headers)?;
 
                 let result = #svc_name::modify::<DatabaseTransaction>(dto, None).await?;
                 Ok(Json(result))
@@ -215,21 +211,18 @@ pub(crate) fn ctrl_macro(args: CtrlArgs, input: ItemStruct) -> TokenStream {
             #[utoipa::path(
                 post,
                 path = #save_path,
-                responses((status = OK, body = Ro<Model>))
+                responses((status = OK, body = Ro<#vo_name>))
             )]
             #[log_call]
             pub async fn save(
-                Json(dto): Json<ActiveModel>,
                 headers: HeaderMap,
-            ) -> Result<HttpResponse, CtrlError> {
-                // let mut dto = json_body.into_inner();
-
-                // 从header中解析当前用户ID，如果没有或解析失败则抛出ApiError
-                dto.creator_id = sea_orm::ActiveValue::Set(get_current_user_id(&headers)?);
-                dto.updator_id = dto.creator_id.clone();
+                Json(mut dto): Json<#save_dto_name>,
+            ) -> Result<Json<Ro<#vo_name>>, CtrlError> {
+                // 从header中解析当前用户ID，如果没有或解析失败则抛出ValidationError
+                dto.current_user_id = get_current_user_id(&headers)?;
 
                 let result = #svc_name::save::<DatabaseTransaction>(dto, None).await?;
-                Ok(HttpResponse::Ok().json(result))
+                Ok(Json(result))
             }
         });
     }
@@ -254,16 +247,13 @@ pub(crate) fn ctrl_macro(args: CtrlArgs, input: ItemStruct) -> TokenStream {
                 params(
                     ("id" = u64, Path, description = "记录的唯一标识符")
                 ),
-                responses((status = OK, body = Ro<String>))
+                responses((status = OK, body = Ro<#vo_name>))
             )]
             #[log_call]
             pub async fn del(
                 Path(id): Path<u64>,
-                headers: HeaderMap,
-            ) -> Result<HttpResponse, CtrlError> {
-                // 从header中解析当前用户ID，如果没有或解析失败则抛出ApiError
-                let current_user_id = get_current_user_id(&headers)?;
-                let ro = #svc_name::del::<DatabaseTransaction>(id, current_user_id, None).await?;
+            ) -> Result<Json<Ro<#vo_name>>, CtrlError> {
+                let ro = #svc_name::del::<DatabaseTransaction>(id, None).await?;
                 Ok(Json(ro))
             }
         });
@@ -294,11 +284,11 @@ pub(crate) fn ctrl_macro(args: CtrlArgs, input: ItemStruct) -> TokenStream {
                     ("id" = u64, Path, description = "记录的唯一标识符")
                 ),
                 responses(
-                    (status = OK, body = Ro<Model>)
+                    (status = OK, body = Ro<#vo_name>)
                 )
             )]
             #[log_call]
-            pub async fn get_by_id(Path(id): Path<u64>) -> Result<Json<Ro<Model>>, CtrlError> {
+            pub async fn get_by_id(Path(id): Path<u64>) -> Result<Json<Ro<#vo_name>>, CtrlError> {
                 let ro = #svc_name::get_by_id::<DatabaseConnection>(id, None).await?;
                 Ok(Json(ro))
             }
