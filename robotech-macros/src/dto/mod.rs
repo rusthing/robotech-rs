@@ -171,7 +171,7 @@ pub fn save_dto_macro(input: ItemStruct) -> TokenStream {
         #[owned_into(#modify_dao_name)]
         #[builder]
         #visibility struct #struct_name {
-            #[serde_as(as = "Option<String>")]
+            #[serde(with = "u64_option_serde")]
             #[builder(default, setter(strip_option))]
             pub id: Option<u64>,
             #fields
