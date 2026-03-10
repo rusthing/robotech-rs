@@ -9,7 +9,7 @@ mod web;
 
 use crate::cfg::{watch_cfg_file_macro, WatchCfgFileArgs};
 use crate::dao::{dao_macro, DaoArgs};
-use crate::dto::{add_dto_macro, modify_dto_macro, save_dto_macro};
+use crate::dto::{add_dto_macro, crud_dto_macro, modify_dto_macro, save_dto_macro};
 use crate::log::{log_call_macro, LogCallArgs};
 use crate::svc::{db_unwrap_macro, svc_macro, DbUnwrapArgs, SvcArgs};
 use crate::vo::vo_macro;
@@ -75,6 +75,29 @@ pub fn modify_dto(_args: TokenStream, input: TokenStream) -> TokenStream {
 pub fn save_dto(_args: TokenStream, input: TokenStream) -> TokenStream {
     let input = parse_macro_input!(input as ItemStruct);
     save_dto_macro(input).into()
+}
+
+/// 属性宏：为XxxDto结构体自动生成XxxAddDto、XxxModifyDto、XxxSaveDto
+///
+/// # 使用示例
+/// ```
+/// #[crud_dto]
+/// pub struct OssBucketDto {
+///     /// 名称
+///     pub name: String,
+///     /// 备注
+///     pub remark: Option<String>,
+/// }
+/// ```
+///
+/// 上述代码会被展开为三个结构体：
+/// - OssBucketAddDto（带验证）
+/// - OssBucketModifyDto（不带验证）
+/// - OssBucketSaveDto（不带验证）
+#[proc_macro_attribute]
+pub fn crud_dto(_args: TokenStream, input: TokenStream) -> TokenStream {
+    let input = parse_macro_input!(input as ItemStruct);
+    crud_dto_macro(input).into()
 }
 
 /// 属性宏：为DAO结构体生成标准的CRUD方法
