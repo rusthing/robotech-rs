@@ -260,6 +260,12 @@ pub(crate) fn svc_macro(args: SvcArgs, input: ItemStruct) -> TokenStream {
     }
 
     let expanded = quote! {
+        use robotech::dao::begin_transaction;
+        use robotech::ro::Ro;
+        use robotech::svc::SvcError;
+        use robotech_macros::db_unwrap;
+        use sea_orm::ConnectionTrait;
+
         #input
 
         impl #struct_name {

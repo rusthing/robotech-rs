@@ -296,6 +296,16 @@ pub(crate) fn ctrl_macro(args: CtrlArgs, input: ItemStruct) -> TokenStream {
     }
 
     let expanded = quote! {
+        use axum::extract::Path;
+        use axum::http::HeaderMap;
+        use axum::response::Json;
+        use robotech::macros::log_call;
+        use robotech::ro::Ro;
+        use robotech::web::ctrl_utils::get_current_user_id;
+        use robotech::web::CtrlError;
+        use sea_orm::{DatabaseConnection, DatabaseTransaction};
+        use validator::Validate;
+
         #(#generated_methods)*
     };
 
