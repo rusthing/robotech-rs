@@ -36,9 +36,9 @@ use validator;
 pub enum CtrlError {
     #[error("{0}")]
     Runtime(#[from] anyhow::Error),
-    #[error("参数校验错误: {0}")]
+    #[error("参数校验错误 -> {0}")]
     Validation(#[from] validator::ValidationError),
-    #[error("参数校验错误: {0}")]
+    #[error("参数校验错误 -> {0}")]
     Validations(#[from] validator::ValidationErrors),
     #[error("IO错误: {0}")]
     Io(#[from] std::io::Error),
@@ -57,12 +57,22 @@ impl CtrlError {
                 warn!("{}", error);
                 Ro::warn("运行时错误".to_string()).detail(Some(error.to_string()))
             }
-            CtrlError::Validation(error) => Ro::illegal_argument(format!("参数校验错误 -> {}", error.to_string())),
-            CtrlError::Validations(errors) => Ro::illegal_argument(format!("参数校验错误:\n{}", errors)),
+            CtrlError::Validation(error) => {
+                Ro::illegal_argument(format!("参数校验错误 -> {}", error.to_string()))
+            }
+            CtrlError::Validations(errors) => {
+                Ro::illegal_argument(format!("参数校验错误 -> {}", errors))
+            }
             CtrlError::Io(error) => {
                 Ro::fail("磁盘异常".to_string()).detail(Some(error.to_string()))
             }
             CtrlError::Svc(error) => match error {
+                SvcError::Validation(error) => {
+                    Ro::illegal_argument(format!("参数校验错误 -> {}", error.to_string()))
+                }
+                SvcError::Validations(errors) => {
+                    Ro::illegal_argument(format!("参数校验错误 -> {}", errors))
+                }
                 SvcError::NotFound(err) => {
                     Ro::warn("找不到数据".to_string()).detail(Some(err.to_string()))
                 }

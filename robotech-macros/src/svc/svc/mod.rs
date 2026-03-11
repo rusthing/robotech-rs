@@ -121,6 +121,9 @@ pub(crate) fn svc_macro(args: SvcArgs, input: ItemStruct) -> TokenStream {
             where
                 C: ConnectionTrait,
             {
+                // 先校验dto
+                add_dto.validate()?;
+
                 let active_model: ActiveModel = add_dto.into();
                 let one = #vo_name::from(#dao_name::insert(active_model, db).await?);
                 Ok(Self::get_by_id(one.id as u64, Some(db))
@@ -152,6 +155,9 @@ pub(crate) fn svc_macro(args: SvcArgs, input: ItemStruct) -> TokenStream {
             where
                 C: ConnectionTrait,
             {
+                // 先校验dto
+                modify_dto.validate()?;
+
                 let id = modify_dto.id.unwrap();    // id经过校验，可以放心unwrap
                 let active_model: ActiveModel = modify_dto.into();
                 let one = #vo_name::from(#dao_name::update(active_model, db).await?);
@@ -265,6 +271,7 @@ pub(crate) fn svc_macro(args: SvcArgs, input: ItemStruct) -> TokenStream {
         use robotech::svc::SvcError;
         use robotech_macros::db_unwrap;
         use sea_orm::ConnectionTrait;
+        use validator::Validate;
 
         #input
 

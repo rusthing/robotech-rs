@@ -30,9 +30,9 @@ pub enum SvcError {
     IdWorker(#[from] IdWorkerError),
     #[error("APP错误: {0}")]
     App(#[from] AppError),
-    #[error("参数校验错误: {0}")]
+    #[error("参数校验错误 -> {0}")]
     Validation(#[from] validator::ValidationError),
-    #[error("参数校验错误: {0}")]
+    #[error("参数校验错误 -> {0}")]
     Validations(#[from] validator::ValidationErrors),
     #[error("找不到数据: {0}")]
     NotFound(String),

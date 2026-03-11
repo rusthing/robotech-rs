@@ -134,8 +134,6 @@ pub(crate) fn ctrl_macro(args: CtrlArgs, input: ItemStruct) -> TokenStream {
                 headers: HeaderMap,
                 Json(mut dto): Json<#add_dto_name>,
             ) -> Result<Json<Ro<#vo_name>>, CtrlError> {
-                dto.validate()?;
-
                 // 从header中解析当前用户ID，如果没有或解析失败则抛出ValidationError
                 dto.current_user_id = get_current_user_id(&headers)?;
 
@@ -176,8 +174,6 @@ pub(crate) fn ctrl_macro(args: CtrlArgs, input: ItemStruct) -> TokenStream {
                 headers: HeaderMap,
                 Json(mut dto): Json<#modify_dto_name>,
             ) -> Result<Json<Ro<#vo_name>>, CtrlError> {
-                dto.validate()?;
-
                 // 从header中解析当前用户ID，如果没有或解析失败则抛出ValidationError
                 dto.current_user_id = get_current_user_id(&headers)?;
 
