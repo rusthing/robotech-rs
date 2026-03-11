@@ -16,7 +16,7 @@ static REGEX_DUPLICATE_KEY_POSTGRES: Lazy<Regex> = Lazy::new(|| {
 /// # 正则匹配重复键错误-MySQL
 /// 格式: Duplicate entry '<字段值>' for key '<字段名>'
 static REGEX_DUPLICATE_KEY_MYSQL: Lazy<Regex> = Lazy::new(|| {
-    Regex::new(r#"Duplicate entry '(?P<value>[^']+)' for key '(?P<column>[^']*)'$"#)
+    Regex::new(r#"Duplicate entry '(?P<value>[^']+)' for key '(?P<column>[^']*)'"#)
         .expect("正则表达式错误")
 });
 
@@ -70,7 +70,7 @@ impl DaoError {
     /// 返回对应的SvcError服务层错误对象
     pub fn parse_db_err(
         db_err: DbErr,
-        unique_field_hashmap: &Lazy<HashMap<&'static str, &'static str>>,
+        unique_field_hashmap: &HashMap<&'static str, &'static str>,
     ) -> DaoError {
         let db_err_string = format!("{:?}", db_err);
 
@@ -106,14 +106,15 @@ impl DaoError {
     /// 返回一个包含字段名和冲突值的SvcError::DuplicateKey错误
     fn parse_duplicate_key(
         caps: Captures,
-        unique_field_hashmap: &Lazy<HashMap<&'static str, &'static str>>,
+        unique_field_hashmap: &HashMap<&'static str, &'static str>,
     ) -> DaoError {
         let column_name = caps["column"].to_string();
         let value = caps["value"].to_string();
-        let name = if let Some(name) = unique_field_hashmap.get(column_name.as_str()) {
+        let name = if let Some(name) = unique_field_hashmap.get(column_name.to_lowercase().as_str())
+        {
             name.to_string()
         } else {
-            return DaoError::from(anyhow!("获取unique字段列表错误: {column_name}".to_string()));
+            return DaoError::from(anyhow!(format!("获取unique字段列表错误: {column_name}")));
         };
 
         DaoError::DuplicateKey(name, value)
