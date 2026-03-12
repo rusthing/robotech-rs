@@ -107,7 +107,7 @@ pub(super) fn dao_macro(args: DaoArgs, input: ItemStruct) -> TokenStream {
                 active_model
                     .insert(db)
                     .await
-                    .map_err(|e| DaoError::parse_db_err(e, &UNIQUE_FIELDS))
+                    .map_err(|e| DaoError::parse_db_err(e, &UNIQUE_FIELDS, &FOREIGN_KEYS))
             }
         });
     }
@@ -143,7 +143,7 @@ pub(super) fn dao_macro(args: DaoArgs, input: ItemStruct) -> TokenStream {
                 active_model
                     .update(db)
                     .await
-                    .map_err(|e| DaoError::parse_db_err(e, &UNIQUE_FIELDS))
+                    .map_err(|e| DaoError::parse_db_err(e, &UNIQUE_FIELDS, &FOREIGN_KEYS))
             }
         });
     }
@@ -168,7 +168,7 @@ pub(super) fn dao_macro(args: DaoArgs, input: ItemStruct) -> TokenStream {
                 active_model
                     .delete(db)
                     .await
-                    .map_err(|e| DaoError::parse_db_err(e, &UNIQUE_FIELDS))
+                    .map_err(|e| DaoError::parse_db_err(e, &UNIQUE_FIELDS, &FOREIGN_KEYS))
             }
         });
     }
@@ -193,12 +193,17 @@ pub(super) fn dao_macro(args: DaoArgs, input: ItemStruct) -> TokenStream {
                 Entity::find_by_id(id as i64)
                     .one(db)
                     .await
-                    .map_err(|e| DaoError::parse_db_err(e, &UNIQUE_FIELDS))
+                    .map_err(|e| DaoError::parse_db_err(e, &UNIQUE_FIELDS, &FOREIGN_KEYS))
             }
         });
     }
 
     let expanded = quote! {
+        use robotech::dao::DaoError;
+        use sea_orm::{
+            ActiveModelTrait, ActiveValue, ConnectionTrait, EntityTrait,
+        };
+
         #input
 
         impl #struct_name {

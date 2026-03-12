@@ -3,9 +3,20 @@ use quote::{format_ident, quote};
 use syn::parse::{Parse, ParseStream};
 use syn::{FnArg, ItemFn, Pat, Token};
 
+#[derive(PartialEq)]
+enum RecordMode {
+    Enter,
+    Exit,
+    Both,
+}
+
 /// 宏参数解析结构
 pub(super) struct LogCallArgs {
+    /// 日志级别
     level: Ident,
+    /// 记录模式
+    /// 进入、退出、两者都记录
+    mode: RecordMode,
 }
 
 impl Parse for LogCallArgs {
@@ -14,21 +25,42 @@ impl Parse for LogCallArgs {
         if input.is_empty() {
             return Ok(LogCallArgs {
                 level: format_ident!("debug"),
+                mode: RecordMode::Both,
             });
         }
 
-        // 解析 level = xxx 的形式
+        // 解析 level = xxx, mode = yyy 的形式
         let _level_key: Ident = input.parse()?;
         let _: Token![=] = input.parse()?;
         let level: Ident = input.parse()?;
 
-        Ok(LogCallArgs { level })
+        // 尝试解析逗号和 mode 参数（可选）
+        let mode = if input.peek(Token![,]) {
+            let _: Token![,] = input.parse()?;
+            let mode_key: Ident = input.parse()?;
+            let _: Token![=] = input.parse()?;
+            let mode_ident: Ident = input.parse()?;
+            match mode_ident.to_string().to_lowercase().as_str() {
+                "enter" => RecordMode::Enter,
+                "exit" => RecordMode::Exit,
+                "both" => RecordMode::Both,
+                _ => {
+                    return Err(syn::Error::new_spanned(mode_key, "无效的 mode 参数"));
+                }
+            }
+        } else {
+            RecordMode::Both
+        };
+
+        Ok(LogCallArgs { level, mode })
     }
 }
 
 pub(super) fn log_call_macro(args: LogCallArgs, input: ItemFn) -> TokenStream {
-    // 如果没有指定 level，默认使用 debug
-    let LogCallArgs { level: log_level } = args;
+    let LogCallArgs {
+        level: log_level,
+        mode: record_mode,
+    } = args;
 
     let fn_name = &input.sig.ident;
     let fn_name_str = fn_name.to_string();
@@ -66,13 +98,27 @@ pub(super) fn log_call_macro(args: LogCallArgs, input: ItemFn) -> TokenStream {
             format!("({})", param_formats.join(", "))
         }
     );
+    let enter_log = if record_mode == RecordMode::Both || record_mode == RecordMode::Enter {
+        quote! {
+            log::#log_level!(#enter_log, #(#param_values),*);
+        }
+    } else {
+        quote! {}
+    };
+    let exit_log = if record_mode == RecordMode::Both || record_mode == RecordMode::Exit {
+        quote! {
+            log::#log_level!("退出方法 ↩️ {}(), 返回值: {:?}", #fn_name_str, result);
+        }
+    } else {
+        quote! {}
+    };
 
     // 构建新的函数体
     let expanded = quote! {
         #fn_vis #fn_sig {
-            log::#log_level!(#enter_log, #(#param_values),*);
+            #enter_log
             let result = #fn_block;
-            log::#log_level!("退出方法 ↩️ {}(), 返回值: {:?}", #fn_name_str, result);
+            #exit_log
             result
         }
     };

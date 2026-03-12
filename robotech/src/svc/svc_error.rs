@@ -39,7 +39,7 @@ pub enum SvcError {
     #[error("IO错误: {0}")]
     Io(#[from] std::io::Error),
     #[cfg(feature = "db")]
-    #[error("数据层错误: {0}")]
+    #[error("数据访问层错误: {0}")]
     Dao(#[from] DaoError),
     #[cfg(feature = "db")]
     #[error("数据库连接错误: {0}")]

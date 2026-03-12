@@ -1,7 +1,9 @@
+use crate::dao::{calc_key_of_foreign_key, ForeignKey};
 use anyhow::anyhow;
 use idworker::IdWorkerError;
 use once_cell::sync::Lazy;
 use regex::{Captures, Regex};
+use robotech_macros::log_call;
 use sea_orm::DbErr;
 use std::collections::HashMap;
 use std::time::SystemTimeError;
@@ -20,11 +22,29 @@ static REGEX_DUPLICATE_KEY_MYSQL: Lazy<Regex> = Lazy::new(|| {
         .expect("正则表达式错误")
 });
 
-/// # 正则匹配删除操作违反了约束条件错误-Postgres
-/// 格式: Duplicate entry '<字段值>' for key '<字段名>'
-static REGEX_DELETE_VIOLATE_CONSTRAINT_POSTGRES: Lazy<Regex> = Lazy::new(|| {
-    Regex::new(r#"update or delete on table \\"(?P<pk_table>[^"]+)\\" violates foreign key constraint \\"(?P<foreign_key>[^"]+)\\" on table \\"(?P<fk_table>[^"]+)\\""#).expect("正则表达式错误")
+/// # 正则匹配插入(或更新)操作违反了约束条件错误-Postgres
+/// 格式: insert or update on table "..." violates foreign key constraint "..."
+static REGEX_INSERT_VIOLATE_FK_POSTGRES: Lazy<Regex> = Lazy::new(|| {
+    Regex::new(r#"insert or update on table \\"(?P<fk_table>[A-Za-z_0-9]+)\\" violates foreign key constraint \\"fk_(?P<fk_column>[A-Za-z_0-9]+)__from__(?P<pk_table>[A-Za-z_0-9]+)"#).expect("正则表达式错误")
 });
+
+/// # 正则匹配插入(或更新)操作违反了约束条件错误-MySQL
+/// 格式:
+static REGEX_INSERT_VIOLATE_FK_MYSQL: Lazy<Regex> = Lazy::new(|| {
+    Regex::new(r#"Cannot add or update a child row: a foreign key constraint fails \(`[A-Za-z_0-9]+`\.`(?P<fk_table>[A-Za-z_0-9]+)`, CONSTRAINT `[A-Za-z_0-9]+` FOREIGN KEY \(`(?P<fk_column>[A-Za-z_0-9]+)`\) REFERENCES `(?P<pk_table>[A-Za-z_0-9]+)`"#).expect("正则表达式错误")
+});
+
+/// # 正则匹配删除(或更新)操作违反了约束条件错误-Postgres
+/// 格式: update or delete on table "..." violates foreign key constraint "..." on table "..."
+static REGEX_DELETE_VIOLATE_FK_POSTGRES: Lazy<Regex> = Lazy::new(|| {
+    Regex::new(r#"update or delete on table \\"(?P<fk_table>[A-Za-z_0-9]+)\\" violates foreign key constraint \\"(?P<fk_column>[A-Za-z_0-9]+)\\" on table \\"(?P<pk_table>[A-Za-z_0-9]+)\\""#).expect("正则表达式错误")
+});
+
+// /// # 正则匹配删除(或更新)操作违反了约束条件错误-MySQL
+// /// FIXME
+// static REGEX_DELETE_VIOLATE_FK_MYSQL: Lazy<Regex> = Lazy::new(|| {
+//     Regex::new(r#"Cannot delete or update a parent row: a foreign key constraint fails \\"(?P<fk_table>[^"]+)\\"\\.(?P<fk_column>[^"]+)\\"\\.(?P<pk_table>[^"]+)\\"\\.(?P<fk_column>[^"]+)\\"\\.(?P<fk)"#).expect("正则表达式错误")
+// });
 
 /// # 自定义服务层的错误枚举
 ///
@@ -49,8 +69,10 @@ pub enum DaoError {
     IdWorker(#[from] IdWorkerError),
     #[error("重复键错误: {0} {1}")]
     DuplicateKey(String, String),
-    #[error("删除操作违反了数据库约束条件: {0} {1} {2}")]
-    DeleteViolateConstraint(String, String, String),
+    #[error("插入(或更新)操作违反了数据库外键约束条件: {0}")]
+    InsertViolateFk(ForeignKey),
+    #[error("删除(或更新)操作违反了数据库外键约束条件: {0}")]
+    DeleteViolateFk(ForeignKey),
     #[error("数据库错误: {0}")]
     Db(#[from] DbErr),
 }
@@ -68,25 +90,28 @@ impl DaoError {
     ///
     /// ## 返回值
     /// 返回对应的SvcError服务层错误对象
+    #[log_call(level = warn, mode = enter)]
     pub fn parse_db_err(
         db_err: DbErr,
-        unique_field_hashmap: &HashMap<&'static str, &'static str>,
+        unique_fields: &HashMap<String, String>,
+        foreign_keys: &HashMap<String, ForeignKey>,
     ) -> DaoError {
         let db_err_string = format!("{:?}", db_err);
-
         if let Some(caps) = REGEX_DUPLICATE_KEY_POSTGRES.captures(&db_err_string) {
             // 正则匹配重复键错误-Postgres
-            return Self::parse_duplicate_key(caps, unique_field_hashmap);
+            return Self::parse_duplicate_key(caps, unique_fields);
         } else if let Some(caps) = REGEX_DUPLICATE_KEY_MYSQL.captures(&db_err_string) {
             // 正则匹配重复键错误-MySQL
-            return Self::parse_duplicate_key(caps, unique_field_hashmap);
-        } else if let Some(caps) = REGEX_DELETE_VIOLATE_CONSTRAINT_POSTGRES.captures(&db_err_string)
-        {
-            let pk_table = caps["pk_table"].to_string();
-            let foreign_key = caps["foreign_key"].to_string();
-            let fk_table = caps["fk_table"].to_string();
+            return Self::parse_duplicate_key(caps, unique_fields);
+        } else if let Some(caps) = REGEX_INSERT_VIOLATE_FK_POSTGRES.captures(&db_err_string) {
+            // 正则匹配插入操作违反了约束条件错误-Postgres
+            return Self::parse_insert_violate_fk(caps, foreign_keys);
+        } else if let Some(caps) = REGEX_INSERT_VIOLATE_FK_MYSQL.captures(&db_err_string) {
+            // 正则匹配插入操作违反了约束条件错误-MySQL
+            return Self::parse_insert_violate_fk(caps, foreign_keys);
+        } else if let Some(caps) = REGEX_DELETE_VIOLATE_FK_POSTGRES.captures(&db_err_string) {
             // 正则匹配删除操作违反了约束条件错误-Postgres
-            return DaoError::DeleteViolateConstraint(pk_table, foreign_key, fk_table);
+            return Self::parse_delete_violate_fk(caps, foreign_keys);
         }
 
         DaoError::from(db_err)
@@ -104,19 +129,51 @@ impl DaoError {
     ///
     /// ## 返回值
     /// 返回一个包含字段名和冲突值的SvcError::DuplicateKey错误
-    fn parse_duplicate_key(
-        caps: Captures,
-        unique_field_hashmap: &HashMap<&'static str, &'static str>,
-    ) -> DaoError {
+    fn parse_duplicate_key(caps: Captures, unique_fields: &HashMap<String, String>) -> DaoError {
         let column_name = caps["column"].to_string();
         let value = caps["value"].to_string();
-        let name = if let Some(name) = unique_field_hashmap.get(column_name.to_lowercase().as_str())
-        {
+        let name = if let Some(name) = unique_fields.get(column_name.to_lowercase().as_str()) {
             name.to_string()
         } else {
             return DaoError::from(anyhow!(format!("获取unique字段列表错误: {column_name}")));
         };
 
         DaoError::DuplicateKey(name, value)
+    }
+    fn parse_insert_violate_fk(
+        caps: Captures,
+        foreign_keys: &HashMap<String, ForeignKey>,
+    ) -> DaoError {
+        let fk_table = caps["fk_table"].to_string();
+        let fk_column = caps["fk_column"].to_string();
+        let pk_table = caps["pk_table"].to_string();
+
+        let key = calc_key_of_foreign_key(&fk_table, &fk_column, &pk_table);
+
+        let foreign_key = if let Some(foreign_key) = foreign_keys.get(&key) {
+            foreign_key
+        } else {
+            return DaoError::from(anyhow!(format!("获取foreign key列表错误: {key}")));
+        };
+
+        DaoError::InsertViolateFk(foreign_key.clone())
+    }
+    fn parse_delete_violate_fk(
+        caps: Captures,
+        foreign_keys: &HashMap<String, ForeignKey>,
+    ) -> DaoError {
+        let fk_table = caps["fk_table"].to_string();
+        let fk_column = caps["fk_column"].to_string();
+        let pk_table = caps["pk_table"].to_string();
+
+        let key = calc_key_of_foreign_key(&fk_table, &fk_column, &pk_table);
+
+        let foreign_key = if let Some(foreign_key) = foreign_keys.get(&key) {
+            foreign_key
+        } else {
+            return DaoError::from(anyhow!(format!("获取foreign key列表错误: {key}")));
+        };
+
+        DaoError::DeleteViolateFk(foreign_key.clone())
     }
 }

@@ -1,7 +1,7 @@
 use crate::dao::DaoError;
-use crate::ro::Ro;
 #[cfg(feature = "db")]
-use crate::ro::RO_CODE_WARNING_DELETE_VIOLATE_CONSTRAINT;
+use crate::ro::RO_CODE_WARNING_DELETE_VIOLATE_FK;
+use crate::ro::{Ro, RO_CODE_WARNING_INSERT_VIOLATE_FK};
 use crate::svc::SvcError;
 use axum::http::StatusCode;
 use axum::response::{IntoResponse, Response};
@@ -81,21 +81,25 @@ impl CtrlError {
                     DaoError::DuplicateKey(field_name, field_value) => {
                         Ro::warn(format!("{}<{}>已存在！", field_name, field_value))
                     }
-                    DaoError::DeleteViolateConstraint(pk_table, foreign_key, fk_table) => {
-                        Ro::warn("删除失败，有其它数据依赖于本数据".to_string())
-                            .code(Some(RO_CODE_WARNING_DELETE_VIOLATE_CONSTRAINT.to_string()))
-                            .detail(Some(format!(
-                                "{} <- {} <- {}>",
-                                pk_table, foreign_key, fk_table
-                            )))
-                    }
+                    DaoError::InsertViolateFk(foreign_key) => Ro::warn(format!(
+                        "不能插入(或更新){}，设置的{}并不存在",
+                        foreign_key.fk_table_comment, foreign_key.pk_table_comment
+                    ))
+                    .code(Some(RO_CODE_WARNING_INSERT_VIOLATE_FK.to_string()))
+                    .detail(Some(foreign_key.to_string())),
+                    DaoError::DeleteViolateFk(foreign_key) => Ro::warn(format!(
+                        "不能删除(或更新){}，存在关联其的{}",
+                        foreign_key.pk_table_comment, foreign_key.fk_table_comment
+                    ))
+                    .code(Some(RO_CODE_WARNING_DELETE_VIOLATE_FK.to_string()))
+                    .detail(Some(foreign_key.to_string())),
                     DaoError::Db(db_err) => match db_err {
                         DbErr::RecordNotUpdated => {
                             Ro::warn("未更新数据，请检查记录是否存在".to_string())
                         }
                         _ => Ro::fail("数据库错误".to_string()).detail(Some(db_err.to_string())),
                     },
-                    _ => Ro::fail("数据层错误".to_string()).detail(Some(error.to_string())),
+                    _ => Ro::fail("数据访问层错误".to_string()).detail(Some(error.to_string())),
                 },
                 _ => Ro::fail(error.to_string()),
             },
@@ -106,6 +110,7 @@ impl CtrlError {
 // 为错误类型实现 IntoResponse
 impl IntoResponse for CtrlError {
     fn into_response(self) -> Response {
+        warn!("控制器层捕获错误: {}", self);
         let status = match &self {
             CtrlError::Runtime(_) => StatusCode::INTERNAL_SERVER_ERROR,
             CtrlError::Validation(_) | CtrlError::Validations(_) => StatusCode::BAD_REQUEST,
@@ -114,9 +119,9 @@ impl IntoResponse for CtrlError {
                 SvcError::NotFound(_) => StatusCode::NOT_FOUND,
                 #[cfg(feature = "db")]
                 SvcError::Dao(error) => match error {
-                    DaoError::DuplicateKey(_, _) | DaoError::DeleteViolateConstraint(_, _, _) => {
-                        StatusCode::OK
-                    }
+                    DaoError::DuplicateKey(_, _)
+                    | DaoError::InsertViolateFk(_)
+                    | DaoError::DeleteViolateFk(_) => StatusCode::OK,
                     _ => StatusCode::INTERNAL_SERVER_ERROR,
                 },
                 _ => StatusCode::INTERNAL_SERVER_ERROR,
