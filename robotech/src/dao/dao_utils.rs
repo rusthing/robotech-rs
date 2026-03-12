@@ -52,3 +52,18 @@ pub async fn commit_transaction(db: DatabaseTransaction) -> Result<(), DaoError>
     db.commit().await?;
     Ok(())
 }
+
+/// # 定义唯一字段的 HashMap
+///
+/// 用于快速初始化唯一字段的 HashMap 静态变量
+#[macro_export] macro_rules! define_unique_fields {
+    ($table:expr, $(($fields:expr, $name:expr)),+ $(,)?) => {
+        static UNIQUE_FIELDS: Lazy<HashMap<&'static str, &'static str>> = Lazy::new(|| {
+            let mut unique_fields = HashMap::new();
+            $(
+                push_unique_field(&mut unique_fields, $table, $fields, $name);
+            )+
+            unique_fields
+        });
+    };
+}
