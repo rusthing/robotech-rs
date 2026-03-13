@@ -1,7 +1,6 @@
 mod dao_error;
 mod dao_utils;
-mod foreign_key;
+pub mod eo;
 
 pub use dao_error::*;
 pub use dao_utils::*;
-pub use foreign_key::*;

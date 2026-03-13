@@ -1,4 +1,5 @@
-use crate::dao::{calc_key_of_foreign_key, ForeignKey};
+use crate::dao::calc_key_of_foreign_key;
+use crate::dao::eo::ForeignKey;
 use anyhow::anyhow;
 use idworker::IdWorkerError;
 use once_cell::sync::Lazy;
@@ -29,7 +30,7 @@ static REGEX_INSERT_VIOLATE_FK_POSTGRES: Lazy<Regex> = Lazy::new(|| {
 });
 
 /// # 正则匹配插入(或更新)操作违反了约束条件错误-MySQL
-/// 格式:
+/// 格式: Cannot add or update a child row: a foreign key constraint fails (`db_name`.`table_name`, CONSTRAINT `fk_column_name` FOREIGN KEY (`column_name`) REFERENCES `ref_table_name`)
 static REGEX_INSERT_VIOLATE_FK_MYSQL: Lazy<Regex> = Lazy::new(|| {
     Regex::new(r#"Cannot add or update a child row: a foreign key constraint fails \(`[A-Za-z_0-9]+`\.`(?P<fk_table>[A-Za-z_0-9]+)`, CONSTRAINT `[A-Za-z_0-9]+` FOREIGN KEY \(`(?P<fk_column>[A-Za-z_0-9]+)`\) REFERENCES `(?P<pk_table>[A-Za-z_0-9]+)`"#).expect("正则表达式错误")
 });
@@ -40,11 +41,11 @@ static REGEX_DELETE_VIOLATE_FK_POSTGRES: Lazy<Regex> = Lazy::new(|| {
     Regex::new(r#"update or delete on table \\"(?P<fk_table>[A-Za-z_0-9]+)\\" violates foreign key constraint \\"(?P<fk_column>[A-Za-z_0-9]+)\\" on table \\"(?P<pk_table>[A-Za-z_0-9]+)\\""#).expect("正则表达式错误")
 });
 
-// /// # 正则匹配删除(或更新)操作违反了约束条件错误-MySQL
-// /// FIXME
-// static REGEX_DELETE_VIOLATE_FK_MYSQL: Lazy<Regex> = Lazy::new(|| {
-//     Regex::new(r#"Cannot delete or update a parent row: a foreign key constraint fails \\"(?P<fk_table>[^"]+)\\"\\.(?P<fk_column>[^"]+)\\"\\.(?P<pk_table>[^"]+)\\"\\.(?P<fk_column>[^"]+)\\"\\.(?P<fk)"#).expect("正则表达式错误")
-// });
+/// # 正则匹配删除(或更新)操作违反了约束条件错误-MySQL
+/// FIXME
+static REGEX_DELETE_VIOLATE_FK_MYSQL: Lazy<Regex> = Lazy::new(|| {
+    Regex::new(r#"Cannot delete or update a parent row: a foreign key constraint fails \(`[A-Za-z_0-9]+`\.`(?P<fk_table>[A-Za-z_0-9]+)`, CONSTRAINT `[A-Za-z_0-9]+` FOREIGN KEY \(`(?P<fk_column>[A-Za-z_0-9]+)`\) REFERENCES `(?P<pk_table>[A-Za-z_0-9]+)`"#).expect("正则表达式错误")
+});
 
 /// # 自定义服务层的错误枚举
 ///
@@ -111,6 +112,9 @@ impl DaoError {
             return Self::parse_insert_violate_fk(caps, foreign_keys);
         } else if let Some(caps) = REGEX_DELETE_VIOLATE_FK_POSTGRES.captures(&db_err_string) {
             // 正则匹配删除操作违反了约束条件错误-Postgres
+            return Self::parse_delete_violate_fk(caps, foreign_keys);
+        } else if let Some(caps) = REGEX_DELETE_VIOLATE_FK_MYSQL.captures(&db_err_string) {
+            // 正则匹配删除操作违反了约束条件错误-MySQL
             return Self::parse_delete_violate_fk(caps, foreign_keys);
         }
 

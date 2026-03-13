@@ -1,4 +1,5 @@
-use crate::dao::{DaoError, ForeignKey};
+use crate::dao::eo::ForeignKey;
+use crate::dao::DaoError;
 use crate::db::get_db_conn;
 use sea_orm::{ConnectionTrait, DatabaseConnection, DatabaseTransaction, DbConn, TransactionTrait};
 use std::collections::HashMap;
