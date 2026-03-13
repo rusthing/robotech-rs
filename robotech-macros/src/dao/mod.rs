@@ -191,7 +191,7 @@ pub fn define_foreign_keys_macro(args: DefineForeignKeysArgs) -> TokenStream {
             let pk_table = &key.pk_table;
             let pk_table_comment = &key.pk_table_comment;
             quote! {
-                push_feign_key(
+                push_foreign_key(
                     &mut hash_map,
                     #fk_table.to_string(),
                     #fk_table_comment.to_string(),
@@ -204,12 +204,20 @@ pub fn define_foreign_keys_macro(args: DefineForeignKeysArgs) -> TokenStream {
         .collect();
 
     let expanded = quote! {
-        use robotech::dao::{push_feign_key, eo::ForeignKey};
+        use robotech::dao::{push_foreign_key, eo::ForeignKey};
         static FOREIGN_KEYS: LazyLock<HashMap<String, ForeignKey>> = LazyLock::new(|| {
             let mut hash_map = HashMap::new();
             #(#key_inits)*
             hash_map
         });
+    };
+
+    TokenStream::from(expanded)
+}
+
+pub fn init_dao_macro() -> TokenStream {
+    let expanded = quote! {
+
     };
 
     TokenStream::from(expanded)
@@ -319,7 +327,7 @@ pub(super) fn dao_macro(args: DaoArgs, input: ItemStruct) -> TokenStream {
                 active_model
                     .insert(db)
                     .await
-                    .map_err(|e| DaoError::parse_db_err(e, &UNIQUE_FIELDS, &FOREIGN_KEYS))
+                    .map_err(|e| DaoError::parse_db_err(e, &FOREIGN_KEYS))
             }
         });
     }
@@ -355,7 +363,7 @@ pub(super) fn dao_macro(args: DaoArgs, input: ItemStruct) -> TokenStream {
                 active_model
                     .update(db)
                     .await
-                    .map_err(|e| DaoError::parse_db_err(e, &UNIQUE_FIELDS, &FOREIGN_KEYS))
+                    .map_err(|e| DaoError::parse_db_err(e, &FOREIGN_KEYS))
             }
         });
     }
@@ -380,7 +388,7 @@ pub(super) fn dao_macro(args: DaoArgs, input: ItemStruct) -> TokenStream {
                 active_model
                     .delete(db)
                     .await
-                    .map_err(|e| DaoError::parse_db_err(e, &UNIQUE_FIELDS, &FOREIGN_KEYS))
+                    .map_err(|e| DaoError::parse_db_err(e, &FOREIGN_KEYS))
             }
         });
     }
@@ -405,7 +413,7 @@ pub(super) fn dao_macro(args: DaoArgs, input: ItemStruct) -> TokenStream {
                 Entity::find_by_id(id as i64)
                     .one(db)
                     .await
-                    .map_err(|e| DaoError::parse_db_err(e, &UNIQUE_FIELDS, &FOREIGN_KEYS))
+                    .map_err(|e| DaoError::parse_db_err(e, &FOREIGN_KEYS))
             }
         });
     }

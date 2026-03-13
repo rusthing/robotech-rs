@@ -3,63 +3,8 @@ use crate::dao::DaoError;
 use crate::db::get_db_conn;
 use sea_orm::{ConnectionTrait, DatabaseConnection, DatabaseTransaction, DbConn, TransactionTrait};
 use std::collections::HashMap;
-use std::sync::Arc;
+use std::sync::{Arc, OnceLock};
 
-pub fn push_unique_field(
-    unique_fields: &mut HashMap<String, UniqueField>,
-    table: String,
-    column: String,
-    column_comment: String,
-) {
-    let columns: Vec<String> = column.split(',').map(|s| s.trim().to_string()).collect();
-    if columns.len() == 0 {
-        panic!("No fields provided for unique index")
-    }
-    let unique_field = UniqueField::builder()
-        .table(table)
-        .column(column)
-        .column_comment(column_comment)
-        .build();
-    if columns.len() == 1 {
-        // 添加postgre类的key
-        let key = format!("ak_{}_{}", unique_field.column, unique_field.table);
-        unique_fields.insert(key, unique_field.clone());
-        // 添加mysql9类的key
-        let key = format!("{}.ak_{}", unique_field.table, unique_field.column);
-        unique_fields.insert(key, unique_field);
-    } else {
-        // 添加postgre类的key
-        let key = format!("ak_{}_{}", columns.join("_and_"), unique_field.table);
-        unique_fields.insert(key, unique_field.clone());
-        // 添加mysql9类的key
-        let key = format!("{}.ak_{}", unique_field.table, columns.join("_and_"));
-        unique_fields.insert(key, unique_field);
-    }
-}
-
-pub fn calc_key_of_foreign_key(fk_table: &str, fk_column: &str, pk_table: &str) -> String {
-    format!("{fk_table}_{fk_column}_{pk_table}")
-}
-
-pub fn push_feign_key(
-    feign_keys: &mut HashMap<String, ForeignKey>,
-    fk_table: String,
-    fk_table_comment: String,
-    fk_column: String,
-    pk_table: String,
-    pk_table_comment: String,
-) {
-    feign_keys.insert(
-        calc_key_of_foreign_key(&fk_table, &fk_column, &pk_table),
-        ForeignKey::builder()
-            .fk_table_comment(fk_table_comment)
-            .fk_table(fk_table)
-            .fk_column(fk_column)
-            .pk_table_comment(pk_table_comment)
-            .pk_table(pk_table)
-            .build(),
-    );
-}
 
 pub fn unwrap_db<C>(db: Option<Arc<C>>) -> Result<Arc<C>, DaoError>
 where

@@ -61,3 +61,4 @@ idworker = { workspace = true, optional = true }
 wheel-rs = { workspace = true, optional = true }
 
 robotech-macros = { path = "../robotech-macros", optional = true }
+linkme = "0.3.35"
