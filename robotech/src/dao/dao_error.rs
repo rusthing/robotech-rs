@@ -5,7 +5,6 @@ use idworker::IdWorkerError;
 use regex::{Captures, Regex};
 use robotech_macros::log_call;
 use sea_orm::DbErr;
-use std::collections::HashMap;
 use std::sync::LazyLock;
 use std::time::SystemTimeError;
 
@@ -38,7 +37,7 @@ static REGEX_INSERT_VIOLATE_FK_MYSQL: LazyLock<Regex> = LazyLock::new(|| {
 /// # 正则匹配删除(或更新)操作违反了约束条件错误-Postgres
 /// 格式: update or delete on table "..." violates foreign key constraint "..." on table "..."
 static REGEX_DELETE_VIOLATE_FK_POSTGRES: LazyLock<Regex> = LazyLock::new(|| {
-    Regex::new(r#"update or delete on table \\"(?P<fk_table>[A-Za-z_0-9]+)\\" violates foreign key constraint \\"(?P<fk_column>[A-Za-z_0-9]+)\\" on table \\"(?P<pk_table>[A-Za-z_0-9]+)\\""#).expect("正则表达式错误")
+    Regex::new(r#"update or delete on table \\"(?P<pk_table>[A-Za-z_0-9]+)\\" violates foreign key constraint \\"fk_(?P<fk_column>[A-Za-z_0-9]+)__from__[A-Za-z_0-9]+\\" on table \\"(?P<fk_table>[A-Za-z_0-9]+)\\""#).expect("正则表达式错误")
 });
 
 /// # 正则匹配删除(或更新)操作违反了约束条件错误-MySQL
@@ -96,7 +95,7 @@ impl DaoError {
     /// ## 返回值
     /// 返回对应的SvcError服务层错误对象
     #[log_call(level = warn, mode = enter)]
-    pub fn parse_db_err(db_err: DbErr, foreign_keys: &HashMap<String, ForeignKey>) -> DaoError {
+    pub fn parse_db_err(db_err: DbErr) -> DaoError {
         let db_err_string = format!("{:?}", db_err);
         if let Some(caps) = REGEX_DUPLICATE_KEY_POSTGRES.captures(&db_err_string) {
             // 正则匹配重复键错误-Postgres
