@@ -6,8 +6,8 @@ use typed_builder::TypedBuilder;
 #[builder]
 pub struct ForeignKey {
     pub fk_table: String,
-    pub fk_column: String,
     pub fk_table_comment: String,
+    pub fk_column: String,
     pub pk_table: String,
     pub pk_table_comment: String,
 }

@@ -1,7 +1,217 @@
 use proc_macro2::{Ident, TokenStream};
 use quote::quote;
 use syn::parse::{Parse, ParseStream};
-use syn::{ItemStruct, Token};
+use syn::{ItemStruct, LitStr, Token};
+
+/// 唯一字段配置项
+#[derive(Debug)]
+struct UniqueFieldConfig {
+    fields: String,
+    name: String,
+}
+
+impl Parse for UniqueFieldConfig {
+    fn parse(input: ParseStream) -> syn::Result<Self> {
+        let fields_lit: LitStr = input.parse()?;
+        let _: Token![,] = input.parse()?;
+        let name_lit: LitStr = input.parse()?;
+
+        Ok(UniqueFieldConfig {
+            fields: fields_lit.value(),
+            name: name_lit.value(),
+        })
+    }
+}
+
+/// 定义唯一字段的过程宏参数
+#[derive(Debug)]
+pub(super) struct DefineUniqueFieldsArgs {
+    table: String,
+    fields: Vec<UniqueFieldConfig>,
+}
+
+impl Parse for DefineUniqueFieldsArgs {
+    fn parse(input: ParseStream) -> syn::Result<Self> {
+        let mut table = String::new();
+
+        // 尝试解析表名
+        if input.peek(LitStr) {
+            let table_lit: LitStr = input.parse()?;
+            table = table_lit.value();
+        }
+
+        let mut fields = Vec::new();
+
+        while input.peek(Token![,]) {
+            let _: Token![,] = input.parse()?;
+            if input.is_empty() {
+                break;
+            }
+
+            // 尝试解析元组 (fields, name)
+            let content;
+            syn::parenthesized!(content in input);
+            fields.push(content.parse()?);
+        }
+
+        Ok(DefineUniqueFieldsArgs { table, fields })
+    }
+}
+
+/// # 定义唯一字段的 HashMap
+///
+/// 用于快速初始化唯一字段的 HashMap 静态变量
+///
+/// ## 使用示例
+/// ```rust
+/// define_unique_fields!(
+/// "oss_bucket",
+/// ("name", "桶名称"),
+/// );
+/// ```
+pub fn define_unique_fields_macro(args: DefineUniqueFieldsArgs) -> TokenStream {
+    let table = &args.table;
+    let field_inits: Vec<TokenStream> = args.fields.iter().map(|field| {
+        let fields_str = &field.fields;
+        let name_str = &field.name;
+        quote! {
+            push_unique_field(&mut hash_map, #table.to_string(), #fields_str.to_string(), #name_str.to_string());
+        }
+    }).collect();
+
+    let expanded = quote! {
+        static UNIQUE_FIELDS: Lazy<HashMap<String, String>> = Lazy::new(|| {
+            let mut hash_map = HashMap::new();
+            #(#field_inits)*
+            hash_map
+        });
+    };
+
+    TokenStream::from(expanded)
+}
+
+/// 外键配置项
+#[derive(Debug)]
+struct ForeignKeyConfig {
+    fk_column: String,
+    pk_table: String,
+    pk_table_comment: String,
+}
+
+impl Parse for ForeignKeyConfig {
+    fn parse(input: ParseStream) -> syn::Result<Self> {
+        let fk_column_lit: LitStr = input.parse()?;
+        let _: Token![,] = input.parse()?;
+        let pk_table_lit: LitStr = input.parse()?;
+        let _: Token![,] = input.parse()?;
+        let pk_table_comment_lit: LitStr = input.parse()?;
+
+        Ok(ForeignKeyConfig {
+            fk_column: fk_column_lit.value(),
+            pk_table: pk_table_lit.value(),
+            pk_table_comment: pk_table_comment_lit.value(),
+        })
+    }
+}
+
+/// 定义外键的过程宏参数
+#[derive(Debug)]
+pub(super) struct DefineForeignKeysArgs {
+    fk_table: String,
+    fk_table_comment: String,
+    keys: Vec<ForeignKeyConfig>,
+}
+
+impl Parse for DefineForeignKeysArgs {
+    fn parse(input: ParseStream) -> syn::Result<Self> {
+        let mut fk_table = String::new();
+        let mut fk_table_comment = String::new();
+
+        // 尝试解析表名和注释
+        if input.peek(LitStr) {
+            let fk_table_lit: LitStr = input.parse()?;
+            fk_table = fk_table_lit.value();
+
+            // 尝试解析逗号
+            if input.peek(Token![,]) {
+                let _: Token![,] = input.parse()?;
+
+                // 尝试解析表注释
+                if input.peek(LitStr) {
+                    let fk_table_comment_lit: LitStr = input.parse()?;
+                    fk_table_comment = fk_table_comment_lit.value();
+                }
+            }
+        }
+
+        let mut keys = Vec::new();
+
+        while input.peek(Token![,]) {
+            let _: Token![,] = input.parse()?;
+            if input.is_empty() {
+                break;
+            }
+
+            // 尝试解析元组 (fk_column, pk_table, pk_table_comment)
+            let content;
+            syn::parenthesized!(content in input);
+            keys.push(content.parse()?);
+        }
+
+        Ok(DefineForeignKeysArgs {
+            fk_table,
+            fk_table_comment,
+            keys,
+        })
+    }
+}
+
+/// # 定义外键的 HashMap
+///
+/// 用于快速初始化外键的 HashMap 静态变量
+///
+/// ## 使用示例
+/// ```rust
+/// define_foreign_keys!(
+/// "oss_obj_ref", "对象引用",
+/// ("obj_id", "oss_obj", "对象"),
+/// ("bucket_id", "oss_bucket", "桶"),
+/// );
+/// ```
+pub fn define_foreign_keys_macro(args: DefineForeignKeysArgs) -> TokenStream {
+    let fk_table = &args.fk_table;
+    let fk_table_comment = &args.fk_table_comment;
+
+    let key_inits: Vec<TokenStream> = args
+        .keys
+        .iter()
+        .map(|key| {
+            let fk_column = &key.fk_column;
+            let pk_table = &key.pk_table;
+            let pk_table_comment = &key.pk_table_comment;
+            quote! {
+                push_feign_key(
+                    &mut hash_map,
+                    #fk_table.to_string(),
+                    #fk_table_comment.to_string(),
+                    #fk_column.to_string(),
+                    #pk_table.to_string(),
+                    #pk_table_comment.to_string(),
+                );
+            }
+        })
+        .collect();
+
+    let expanded = quote! {
+        static FOREIGN_KEYS: Lazy<HashMap<String, ForeignKey>> = Lazy::new(|| {
+            let mut hash_map = HashMap::new();
+            #(#key_inits)*
+            hash_map
+        });
+    };
+
+    TokenStream::from(expanded)
+}
 
 /// DAO方法生成宏参数解析
 #[derive(Debug)]

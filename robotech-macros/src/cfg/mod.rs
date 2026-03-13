@@ -21,11 +21,11 @@ impl Parse for WatchCfgFileArgs {
     }
 }
 
-pub(super) fn watch_cfg_file_macro(input: WatchCfgFileArgs) -> TokenStream {
+pub(super) fn watch_cfg_file_macro(args: WatchCfgFileArgs) -> TokenStream {
     let WatchCfgFileArgs {
         title,
         reload_block,
-    } = input;
+    } = args;
 
     let reload_block = &reload_block.stmts;
 

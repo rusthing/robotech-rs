@@ -1,9 +1,7 @@
-use proc_macro::TokenStream;
-use proc_macro2::Ident;
+use proc_macro2::{Ident, TokenStream};
 use quote::quote;
-use syn::parse_macro_input;
 
-struct MigrateArgs {
+pub(super) struct MigrateArgs {
     db_url: Ident,
 }
 
@@ -28,10 +26,8 @@ impl syn::parse::Parse for MigrateArgs {
 /// // 指定 migrations 目录前缀
 /// db_migrate!(migrate_db, "migrations");
 /// ```
-pub fn db_migrate_macro(input: TokenStream) -> TokenStream {
-    let input = parse_macro_input!(input as MigrateArgs);
-
-    let db_url = input.db_url;
+pub fn db_migrate_macro(args: MigrateArgs) -> TokenStream {
+    let db_url = args.db_url;
 
     let expanded = quote! {
         use log::debug;

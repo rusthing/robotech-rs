@@ -8,7 +8,11 @@ mod vo;
 mod web;
 
 use crate::cfg::{watch_cfg_file_macro, WatchCfgFileArgs};
-use crate::dao::{dao_macro, DaoArgs};
+use crate::dao::{
+    dao_macro, define_foreign_keys_macro, define_unique_fields_macro, DaoArgs, DefineForeignKeysArgs,
+    DefineUniqueFieldsArgs,
+};
+use crate::db::MigrateArgs;
 use crate::dto::{add_dto_macro, crud_dto_macro, modify_dto_macro, save_dto_macro};
 use crate::log::{log_call_macro, LogCallArgs};
 use crate::svc::{db_unwrap_macro, svc_macro, DbUnwrapArgs, SvcArgs};
@@ -55,8 +59,9 @@ pub fn log_call(args: TokenStream, input: TokenStream) -> TokenStream {
 }
 
 #[proc_macro]
-pub fn db_migrate(input: TokenStream) -> TokenStream {
-    db::db_migrate_macro(input)
+pub fn db_migrate(args: TokenStream) -> TokenStream {
+    let args = parse_macro_input!(args as MigrateArgs);
+    db::db_migrate_macro(args).into()
 }
 
 #[proc_macro_attribute]
@@ -98,6 +103,18 @@ pub fn save_dto(_args: TokenStream, input: TokenStream) -> TokenStream {
 pub fn crud_dto(_args: TokenStream, input: TokenStream) -> TokenStream {
     let input = parse_macro_input!(input as ItemStruct);
     crud_dto_macro(input).into()
+}
+
+#[proc_macro]
+pub fn define_unique_fields(args: TokenStream) -> TokenStream {
+    let args = parse_macro_input!(args as DefineUniqueFieldsArgs);
+    define_unique_fields_macro(args).into()
+}
+
+#[proc_macro]
+pub fn define_foreign_keys(args: TokenStream) -> TokenStream {
+    let args = parse_macro_input!(args as DefineForeignKeysArgs);
+    define_foreign_keys_macro(args).into()
 }
 
 /// 属性宏：为DAO结构体生成标准的CRUD方法
