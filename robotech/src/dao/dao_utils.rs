@@ -1,10 +1,13 @@
-use crate::dao::eo::{ForeignKey, UniqueField};
-use crate::dao::DaoError;
+use crate::dao::{init_foreign_keys, init_unique_fields, DaoError};
 use crate::db::get_db_conn;
 use sea_orm::{ConnectionTrait, DatabaseConnection, DatabaseTransaction, DbConn, TransactionTrait};
-use std::collections::HashMap;
-use std::sync::{Arc, OnceLock};
+use std::sync::Arc;
 
+pub fn init_dao() -> Result<(), DaoError> {
+    init_unique_fields()?;
+    init_foreign_keys()?;
+    Ok(())
+}
 
 pub fn unwrap_db<C>(db: Option<Arc<C>>) -> Result<Arc<C>, DaoError>
 where

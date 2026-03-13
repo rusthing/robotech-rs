@@ -1,4 +1,4 @@
-use proc_macro2::{Ident, TokenStream};
+use proc_macro2::{Ident, Span, TokenStream};
 use quote::quote;
 use syn::parse::{Parse, ParseStream};
 use syn::{ItemStruct, LitStr, Token};
@@ -71,22 +71,26 @@ impl Parse for DefineUniqueFieldsArgs {
 /// ```
 pub fn define_unique_fields_macro(args: DefineUniqueFieldsArgs) -> TokenStream {
     let table = &args.table;
+    let mut i = 0;
     let field_inits: Vec<TokenStream> = args.fields.iter().map(|field| {
         let fields_str = &field.fields;
         let name_str = &field.name;
+        i += 1;
+        let item_name= Ident::new(&format!("UNIQUE_FIELD_{}", i), Span::call_site());
         quote! {
-            push_unique_field(&mut hash_map, #table.to_string(), #fields_str.to_string(), #name_str.to_string());
+            #[distributed_slice(UNIQUE_FIELDS_SLICE)]
+            static #item_name: (&str, &str, &str) = (#table, #fields_str, #name_str);
         }
     }).collect();
 
     let expanded = quote! {
-        use robotech::dao::{push_unique_field, eo::UniqueField};
-        static UNIQUE_FIELDS: LazyLock<HashMap<String, UniqueField>> = LazyLock::new(|| {
-            let mut hash_map = HashMap::new();
-            #(#field_inits)*
-            hash_map
-        });
+        use linkme::distributed_slice;
+        use robotech::dao::UNIQUE_FIELDS_SLICE;
+        #(#field_inits)*
     };
+
+    // 调试：打印完整展开的代码
+    println!("Full expanded code:\n{expanded}");
 
     TokenStream::from(expanded)
 }
@@ -216,9 +220,7 @@ pub fn define_foreign_keys_macro(args: DefineForeignKeysArgs) -> TokenStream {
 }
 
 pub fn init_dao_macro() -> TokenStream {
-    let expanded = quote! {
-
-    };
+    let expanded = quote! {};
 
     TokenStream::from(expanded)
 }
