@@ -1,4 +1,4 @@
-use crate::dao::eo::ForeignKey;
+use crate::dao::eo::{ForeignKey, UniqueField};
 use crate::dao::DaoError;
 use crate::db::get_db_conn;
 use sea_orm::{ConnectionTrait, DatabaseConnection, DatabaseTransaction, DbConn, TransactionTrait};
@@ -6,28 +6,34 @@ use std::collections::HashMap;
 use std::sync::Arc;
 
 pub fn push_unique_field(
-    unique_fields: &mut HashMap<String, String>,
+    unique_fields: &mut HashMap<String, UniqueField>,
     table: String,
-    fields: String,
-    name: String,
+    column: String,
+    column_comment: String,
 ) {
-    let fields: Vec<String> = fields.split(',').map(|s| s.trim().to_string()).collect();
-    if fields.len() == 0 {
+    let columns: Vec<String> = column.split(',').map(|s| s.trim().to_string()).collect();
+    if columns.len() == 0 {
         panic!("No fields provided for unique index")
-    } else if fields.len() == 1 {
+    }
+    let unique_field = UniqueField::builder()
+        .table(table)
+        .column(column)
+        .column_comment(column_comment)
+        .build();
+    if columns.len() == 1 {
         // 添加postgre类的key
-        let field = fields.get(0).unwrap(); // 长度为1，肯定存在
-        unique_fields.insert(field.clone(), name.clone());
+        let key = format!("ak_{}_{}", unique_field.column, unique_field.table);
+        unique_fields.insert(key, unique_field.clone());
         // 添加mysql9类的key
-        let key = format!("{table}.ak_{field}");
-        unique_fields.insert(key, name);
+        let key = format!("{}.ak_{}", unique_field.table, unique_field.column);
+        unique_fields.insert(key, unique_field);
     } else {
         // 添加postgre类的key
-        let key = fields.join(", ");
-        unique_fields.insert(key, name.clone());
+        let key = format!("ak_{}_{}", columns.join("_and_"), unique_field.table);
+        unique_fields.insert(key, unique_field.clone());
         // 添加mysql9类的key
-        let key = format!("{table}.ak_{}", fields.join("_and_"));
-        unique_fields.insert(key, name);
+        let key = format!("{}.ak_{}", unique_field.table, columns.join("_and_"));
+        unique_fields.insert(key, unique_field);
     }
 }
 

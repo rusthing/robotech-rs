@@ -1,5 +1,5 @@
 use crate::dao::calc_key_of_foreign_key;
-use crate::dao::eo::ForeignKey;
+use crate::dao::eo::{ForeignKey, UniqueField};
 use anyhow::anyhow;
 use idworker::IdWorkerError;
 use once_cell::sync::Lazy;
@@ -12,14 +12,14 @@ use std::time::SystemTimeError;
 /// # 正则匹配重复键错误-Postgres
 /// 格式: duplicate key value violates unique constraint "...", detail: Some("Key (<字段名>)=(<字段值>) already exists."), ...
 static REGEX_DUPLICATE_KEY_POSTGRES: Lazy<Regex> = Lazy::new(|| {
-    Regex::new(r#"Key \((?P<column>[^)]+)\)=\((?P<value>[^)]*)\) already exists\."#)
+    Regex::new(r#"duplicate key value violates unique constraint \\"(?P<ak_name>[^']*)\\"", detail: Some\("Key \(([^)]+)\)=\((?P<value>[^)]*)\) already exists\."#)
         .expect("正则表达式错误")
 });
 
 /// # 正则匹配重复键错误-MySQL
 /// 格式: Duplicate entry '<字段值>' for key '<字段名>'
 static REGEX_DUPLICATE_KEY_MYSQL: Lazy<Regex> = Lazy::new(|| {
-    Regex::new(r#"Duplicate entry '(?P<value>[^']+)' for key '(?P<column>[^']*)'"#)
+    Regex::new(r#"Duplicate entry '(?P<value>[^']+)' for key '(?P<ak_name>[^']*)'"#)
         .expect("正则表达式错误")
 });
 
@@ -42,7 +42,7 @@ static REGEX_DELETE_VIOLATE_FK_POSTGRES: Lazy<Regex> = Lazy::new(|| {
 });
 
 /// # 正则匹配删除(或更新)操作违反了约束条件错误-MySQL
-/// FIXME
+/// 格式:
 static REGEX_DELETE_VIOLATE_FK_MYSQL: Lazy<Regex> = Lazy::new(|| {
     Regex::new(r#"Cannot delete or update a parent row: a foreign key constraint fails \(`[A-Za-z_0-9]+`\.`(?P<fk_table>[A-Za-z_0-9]+)`, CONSTRAINT `[A-Za-z_0-9]+` FOREIGN KEY \(`(?P<fk_column>[A-Za-z_0-9]+)`\) REFERENCES `(?P<pk_table>[A-Za-z_0-9]+)`"#).expect("正则表达式错误")
 });
@@ -68,8 +68,8 @@ pub enum DaoError {
     SystemTime(#[from] SystemTimeError),
     #[error("ID工作者错误: {0}")]
     IdWorker(#[from] IdWorkerError),
-    #[error("重复键错误: {0} {1}")]
-    DuplicateKey(String, String),
+    #[error("重复键错误: {0} -> {1}")]
+    DuplicateKey(UniqueField, String),
     #[error("插入(或更新)操作违反了数据库外键约束条件: {0}")]
     InsertViolateFk(ForeignKey),
     #[error("删除(或更新)操作违反了数据库外键约束条件: {0}")]
@@ -94,7 +94,7 @@ impl DaoError {
     #[log_call(level = warn, mode = enter)]
     pub fn parse_db_err(
         db_err: DbErr,
-        unique_fields: &HashMap<String, String>,
+        unique_fields: &HashMap<String, UniqueField>,
         foreign_keys: &HashMap<String, ForeignKey>,
     ) -> DaoError {
         let db_err_string = format!("{:?}", db_err);
@@ -133,17 +133,21 @@ impl DaoError {
     ///
     /// ## 返回值
     /// 返回一个包含字段名和冲突值的SvcError::DuplicateKey错误
-    fn parse_duplicate_key(caps: Captures, unique_fields: &HashMap<String, String>) -> DaoError {
-        let column_name = caps["column"].to_string();
+    fn parse_duplicate_key(
+        caps: Captures,
+        unique_fields: &HashMap<String, UniqueField>,
+    ) -> DaoError {
+        let ak_name = caps["ak_name"].to_lowercase().to_string();
         let value = caps["value"].to_string();
-        let name = if let Some(name) = unique_fields.get(column_name.to_lowercase().as_str()) {
-            name.to_string()
+        let unique_filed = if let Some(unique_filed) = unique_fields.get(ak_name.as_str()) {
+            unique_filed
         } else {
-            return DaoError::from(anyhow!(format!("获取unique字段列表错误: {column_name}")));
+            return DaoError::from(anyhow!(format!("获取unique字段列表错误: {ak_name}")));
         };
 
-        DaoError::DuplicateKey(name, value)
+        DaoError::DuplicateKey(unique_filed.clone(), value)
     }
+
     fn parse_insert_violate_fk(
         caps: Captures,
         foreign_keys: &HashMap<String, ForeignKey>,

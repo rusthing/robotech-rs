@@ -80,8 +80,8 @@ pub fn define_unique_fields_macro(args: DefineUniqueFieldsArgs) -> TokenStream {
     }).collect();
 
     let expanded = quote! {
-        use robotech::dao::push_unique_field;
-        static UNIQUE_FIELDS: Lazy<HashMap<String, String>> = Lazy::new(|| {
+        use robotech::dao::{push_unique_field, eo::UniqueField};
+        static UNIQUE_FIELDS: Lazy<HashMap<String, UniqueField>> = Lazy::new(|| {
             let mut hash_map = HashMap::new();
             #(#field_inits)*
             hash_map
