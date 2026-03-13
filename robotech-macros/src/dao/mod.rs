@@ -81,7 +81,6 @@ pub fn define_unique_fields_macro(args: DefineUniqueFieldsArgs) -> TokenStream {
 
     let expanded = quote! {
         use robotech::dao::{push_unique_field, eo::UniqueField};
-        use std::sync::LazyLock;
         static UNIQUE_FIELDS: LazyLock<HashMap<String, UniqueField>> = LazyLock::new(|| {
             let mut hash_map = HashMap::new();
             #(#field_inits)*
@@ -206,7 +205,6 @@ pub fn define_foreign_keys_macro(args: DefineForeignKeysArgs) -> TokenStream {
 
     let expanded = quote! {
         use robotech::dao::{push_feign_key, eo::ForeignKey};
-        use std::sync::LazyLock;
         static FOREIGN_KEYS: LazyLock<HashMap<String, ForeignKey>> = LazyLock::new(|| {
             let mut hash_map = HashMap::new();
             #(#key_inits)*
