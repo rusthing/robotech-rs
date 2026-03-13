@@ -2,48 +2,48 @@ use crate::dao::calc_key_of_foreign_key;
 use crate::dao::eo::{ForeignKey, UniqueField};
 use anyhow::anyhow;
 use idworker::IdWorkerError;
-use once_cell::sync::Lazy;
 use regex::{Captures, Regex};
 use robotech_macros::log_call;
 use sea_orm::DbErr;
 use std::collections::HashMap;
+use std::sync::LazyLock;
 use std::time::SystemTimeError;
 
 /// # 正则匹配重复键错误-Postgres
 /// 格式: duplicate key value violates unique constraint "...", detail: Some("Key (<字段名>)=(<字段值>) already exists."), ...
-static REGEX_DUPLICATE_KEY_POSTGRES: Lazy<Regex> = Lazy::new(|| {
+static REGEX_DUPLICATE_KEY_POSTGRES: LazyLock<Regex> = LazyLock::new(|| {
     Regex::new(r#"duplicate key value violates unique constraint \\"(?P<ak_name>[^']*)\\"", detail: Some\("Key \(([^)]+)\)=\((?P<value>[^)]*)\) already exists\."#)
         .expect("正则表达式错误")
 });
 
 /// # 正则匹配重复键错误-MySQL
 /// 格式: Duplicate entry '<字段值>' for key '<字段名>'
-static REGEX_DUPLICATE_KEY_MYSQL: Lazy<Regex> = Lazy::new(|| {
+static REGEX_DUPLICATE_KEY_MYSQL: LazyLock<Regex> = LazyLock::new(|| {
     Regex::new(r#"Duplicate entry '(?P<value>[^']+)' for key '(?P<ak_name>[^']*)'"#)
         .expect("正则表达式错误")
 });
 
 /// # 正则匹配插入(或更新)操作违反了约束条件错误-Postgres
 /// 格式: insert or update on table "..." violates foreign key constraint "..."
-static REGEX_INSERT_VIOLATE_FK_POSTGRES: Lazy<Regex> = Lazy::new(|| {
+static REGEX_INSERT_VIOLATE_FK_POSTGRES: LazyLock<Regex> = LazyLock::new(|| {
     Regex::new(r#"insert or update on table \\"(?P<fk_table>[A-Za-z_0-9]+)\\" violates foreign key constraint \\"fk_(?P<fk_column>[A-Za-z_0-9]+)__from__(?P<pk_table>[A-Za-z_0-9]+)"#).expect("正则表达式错误")
 });
 
 /// # 正则匹配插入(或更新)操作违反了约束条件错误-MySQL
 /// 格式: Cannot add or update a child row: a foreign key constraint fails (`db_name`.`table_name`, CONSTRAINT `fk_column_name` FOREIGN KEY (`column_name`) REFERENCES `ref_table_name`)
-static REGEX_INSERT_VIOLATE_FK_MYSQL: Lazy<Regex> = Lazy::new(|| {
+static REGEX_INSERT_VIOLATE_FK_MYSQL: LazyLock<Regex> = LazyLock::new(|| {
     Regex::new(r#"Cannot add or update a child row: a foreign key constraint fails \(`[A-Za-z_0-9]+`\.`(?P<fk_table>[A-Za-z_0-9]+)`, CONSTRAINT `[A-Za-z_0-9]+` FOREIGN KEY \(`(?P<fk_column>[A-Za-z_0-9]+)`\) REFERENCES `(?P<pk_table>[A-Za-z_0-9]+)`"#).expect("正则表达式错误")
 });
 
 /// # 正则匹配删除(或更新)操作违反了约束条件错误-Postgres
 /// 格式: update or delete on table "..." violates foreign key constraint "..." on table "..."
-static REGEX_DELETE_VIOLATE_FK_POSTGRES: Lazy<Regex> = Lazy::new(|| {
+static REGEX_DELETE_VIOLATE_FK_POSTGRES: LazyLock<Regex> = LazyLock::new(|| {
     Regex::new(r#"update or delete on table \\"(?P<fk_table>[A-Za-z_0-9]+)\\" violates foreign key constraint \\"(?P<fk_column>[A-Za-z_0-9]+)\\" on table \\"(?P<pk_table>[A-Za-z_0-9]+)\\""#).expect("正则表达式错误")
 });
 
 /// # 正则匹配删除(或更新)操作违反了约束条件错误-MySQL
 /// 格式:
-static REGEX_DELETE_VIOLATE_FK_MYSQL: Lazy<Regex> = Lazy::new(|| {
+static REGEX_DELETE_VIOLATE_FK_MYSQL: LazyLock<Regex> = LazyLock::new(|| {
     Regex::new(r#"Cannot delete or update a parent row: a foreign key constraint fails \(`[A-Za-z_0-9]+`\.`(?P<fk_table>[A-Za-z_0-9]+)`, CONSTRAINT `[A-Za-z_0-9]+` FOREIGN KEY \(`(?P<fk_column>[A-Za-z_0-9]+)`\) REFERENCES `(?P<pk_table>[A-Za-z_0-9]+)`"#).expect("正则表达式错误")
 });
 
