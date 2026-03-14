@@ -4,6 +4,7 @@ use crate::app::AppError;
 use crate::dao::DaoError;
 use crate::db::DbError;
 use crate::env::EnvError;
+use axum::extract::multipart::MultipartError;
 use idworker::IdWorkerError;
 use std::time::SystemTimeError;
 
@@ -38,6 +39,9 @@ pub enum SvcError {
     NotFound(String),
     #[error("IO错误: {0}")]
     Io(#[from] std::io::Error),
+    #[cfg(feature = "web")]
+    #[error("MultipartError错误: {0}")]
+    MultipartError(#[from] MultipartError),
     #[cfg(feature = "db")]
     #[error("数据访问层错误: {0}")]
     Dao(#[from] DaoError),

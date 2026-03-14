@@ -120,6 +120,9 @@ impl IntoResponse for CtrlError {
             CtrlError::Io(_) => StatusCode::INTERNAL_SERVER_ERROR,
             CtrlError::Svc(error) => match error {
                 SvcError::NotFound(_) => StatusCode::NOT_FOUND,
+                SvcError::Validation(_)
+                | SvcError::Validations(_)
+                | SvcError::MultipartError(_) => StatusCode::BAD_REQUEST,
                 #[cfg(feature = "db")]
                 SvcError::Dao(error) => match error {
                     DaoError::DuplicateKey(_, _)

@@ -48,18 +48,43 @@ fn generate_from_attr(ty: &syn::Type) -> Option<TokenStream> {
         syn::Type::Path(type_path) => {
             let path_str = type_path.path.segments.last().unwrap().ident.to_string();
 
-            match path_str.as_str() {
+            // 先检查是否是 Option<T> 类型
+            if is_option_type(ty) {
+                if let Some(inner_ty) = extract_option_inner_type(type_path) {
+                    return Some(match inner_ty.as_str() {
+                        "u8" => quote! { #[from(~.map(|v| v as u8))] },
+                        "u16" => quote! { #[from(~.map(|v| v as u16))] },
+                        "u32" => quote! { #[from(~.map(|v| v as u32))] },
+                        "u64" => quote! { #[from(~.map(|v| v as u64))] },
+                        _ => return None,
+                    });
+                }
+            }
+
+            // 再处理普通类型
+            Some(match path_str.as_str() {
                 "u8" => quote! { #[from(~ as u8)] },
                 "u16" => quote! { #[from(~ as u16)] },
                 "u32" => quote! { #[from(~ as u32)] },
                 "u64" => quote! { #[from(~ as u64)] },
                 _ => return None,
-            }
+            })?
         }
         _ => return None,
     })
 }
 
+/// 提取 Option 类型的内部类型
+fn extract_option_inner_type(type_path: &syn::TypePath) -> Option<String> {
+    if let syn::PathArguments::AngleBracketed(args) = &type_path.path.segments.last()?.arguments {
+        if let Some(syn::GenericArgument::Type(inner_ty)) = args.args.first() {
+            if let syn::Type::Path(inner_path) = inner_ty {
+                return Some(inner_path.path.segments.last()?.ident.to_string());
+            }
+        }
+    }
+    None
+}
 /// 生成 serde_as 属性
 fn generate_serde_attr(ty: &syn::Type) -> Option<TokenStream> {
     Some(match ty {
@@ -126,12 +151,14 @@ pub fn vo_macro(input: DeriveInput) -> TokenStream {
                         let field_ty = &field.ty;
                         let attrs = generate_field_attrs(field);
 
-                        // 保留原有的注释和其他属性（除了 from 和 serde_as）
+                        // 保留原有的注释和其他属性（除了 from/builder/serde）
                         let original_attrs: Vec<_> = field
                             .attrs
                             .iter()
                             .filter(|attr| {
-                                !attr.path().is_ident("from") && !attr.path().is_ident("serde_as")
+                                !attr.path().is_ident("from")
+                                    && !attr.path().is_ident("builder")
+                                    && !attr.path().is_ident("serde")
                             })
                             .collect();
 
@@ -161,7 +188,7 @@ pub fn vo_macro(input: DeriveInput) -> TokenStream {
     };
 
     // 生成完整的结构体定义，包含所有必要的属性和派生宏
-    quote! {
+    let expanded = quote! {
         use o2o::o2o;
         use serde::Serialize;
         use serde_with::{serde_as, skip_serializing_none};
@@ -177,5 +204,10 @@ pub fn vo_macro(input: DeriveInput) -> TokenStream {
         #[serde_as]
         #[builder]
         #vis struct #struct_name #fields
-    }
+    };
+
+    // 调试：打印完整展开的代码
+    // println!("Full expanded code:\n{expanded}");
+
+    TokenStream::from(expanded)
 }
