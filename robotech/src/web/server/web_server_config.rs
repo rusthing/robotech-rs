@@ -65,7 +65,7 @@ pub struct WebServerConfig {
 
 impl Default for WebServerConfig {
     fn default() -> Self {
-        WebServerConfig {
+        Self {
             bind: bind_default(),
             port: port_default(),
             listen: listen_default(),

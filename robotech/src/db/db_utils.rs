@@ -1,4 +1,4 @@
-use crate::db::{DbConfig, DbError};
+use crate::db::{DbConnConfig, DbError};
 use log::debug;
 use robotech_macros::log_call;
 use sea_orm::{ConnectOptions, Database, DbConn};
@@ -20,7 +20,7 @@ pub fn set_db_conn(value: DbConn) -> Result<(), DbError> {
     Ok(())
 }
 
-/// # 初始化数据库
+/// # 初始化数据库连接
 ///
 /// 该函数接收数据库配置信息，建立数据库连接，并将连接存储到全局静态变量 `DB_CONN` 中。
 /// 连接建立后，可以通过 `DB_CONN` 全局访问数据库连接。
@@ -34,20 +34,20 @@ pub fn set_db_conn(value: DbConn) -> Result<(), DbError> {
 /// * 如果数据库连接失败，程序将 panic
 /// * 如果无法设置全局数据库连接，程序将 panic
 #[log_call]
-pub async fn init_db(db_config: DbConfig) -> Result<(), DbError> {
+pub async fn init_db_conn(db_conn_config: DbConnConfig) -> Result<(), DbError> {
     debug!("init database...");
 
-    if db_config.url.is_empty() {
+    if db_conn_config.url.is_empty() {
         Err(DbError::Config(
             "db.url (database connection string) item has not been configured yet".to_string(),
         ))?;
     }
 
     // 获取数据库配置
-    let mut opt = ConnectOptions::new(db_config.url);
+    let mut opt = ConnectOptions::new(db_conn_config.url);
 
     // 设置sql日志按什么级别输出
-    opt.sqlx_logging_level(log::LevelFilter::Trace);
+    opt.sqlx_logging_level(db_conn_config.log_level);
 
     // 连接数据库
     let connection = Database::connect(opt).await.map_err(DbError::Connect)?;
