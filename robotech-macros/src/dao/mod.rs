@@ -3,7 +3,7 @@ use quote::quote;
 use syn::parse::{Parse, ParseStream};
 use syn::{ItemStruct, LitStr, Token};
 
-/// 唯一字段配置项
+/// 唯一键字段配置项
 #[derive(Debug)]
 struct UniqueFieldConfig {
     fields: String,
@@ -23,7 +23,7 @@ impl Parse for UniqueFieldConfig {
     }
 }
 
-/// 定义唯一字段的过程宏参数
+/// 定义唯一键字段的过程宏参数
 #[derive(Debug)]
 pub(super) struct DefineUniqueFieldsArgs {
     table: String,
@@ -58,9 +58,9 @@ impl Parse for DefineUniqueFieldsArgs {
     }
 }
 
-/// # 定义唯一字段的 HashMap
+/// # 定义唯一键字段的 HashMap
 ///
-/// 用于快速初始化唯一字段的 HashMap 静态变量
+/// 用于快速初始化唯一键字段的 HashMap 静态变量
 ///
 /// ## 使用示例
 /// ```rust
