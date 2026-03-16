@@ -3,6 +3,7 @@ use crate::dao::DaoError;
 use crate::ro::RO_CODE_WARNING_DELETE_VIOLATE_FK;
 use crate::ro::{Ro, RO_CODE_WARNING_DUPLICATE_KEY, RO_CODE_WARNING_INSERT_VIOLATE_FK};
 use crate::svc::SvcError;
+use axum::http::header::InvalidHeaderValue;
 use axum::http::StatusCode;
 use axum::response::{IntoResponse, Response};
 use axum::Json;
@@ -42,6 +43,8 @@ pub enum CtrlError {
     Validations(#[from] validator::ValidationErrors),
     #[error("IO错误: {0}")]
     Io(#[from] std::io::Error),
+    #[error("Header值错误: {0}")]
+    InvalidHeaderValue(#[from] InvalidHeaderValue),
     #[error("服务层错误, {0}")]
     Svc(#[from] SvcError),
 }
@@ -62,6 +65,9 @@ impl CtrlError {
             }
             CtrlError::Validations(errors) => {
                 Ro::illegal_argument(format!("参数校验错误 -> {}", errors))
+            }
+            CtrlError::InvalidHeaderValue(error) => {
+                Ro::illegal_argument("Header值错误".to_string()).detail(Some(error.to_string()))
             }
             CtrlError::Io(error) => {
                 Ro::fail("磁盘异常".to_string()).detail(Some(error.to_string()))
@@ -116,7 +122,9 @@ impl IntoResponse for CtrlError {
         warn!("控制器层捕获错误: {}", self);
         let status = match &self {
             CtrlError::Runtime(_) => StatusCode::INTERNAL_SERVER_ERROR,
-            CtrlError::Validation(_) | CtrlError::Validations(_) => StatusCode::BAD_REQUEST,
+            CtrlError::Validation(_)
+            | CtrlError::Validations(_)
+            | CtrlError::InvalidHeaderValue(_) => StatusCode::BAD_REQUEST,
             CtrlError::Io(_) => StatusCode::INTERNAL_SERVER_ERROR,
             CtrlError::Svc(error) => match error {
                 SvcError::NotFound(_) => StatusCode::NOT_FOUND,
