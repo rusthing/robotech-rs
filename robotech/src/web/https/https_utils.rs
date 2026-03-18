@@ -85,7 +85,7 @@ pub fn build_https(
                     match result {
                         Ok(accepted) => accepted,
                         Err(e) => {
-                            error!("Accept error: {}", e);
+                            error!("Accept error: {:#}", e);
                             continue;
                         }
                     }
@@ -116,14 +116,14 @@ pub fn build_https(
                         tokio::select! {
                             result = conn.as_mut() => {
                                 if let Err(e) = result {
-                                    error!("Connection error: {}", e);
+                                    error!("Connection error: {:#}", e);
                                 }
                             }
                             _ = stop_web_service_receiver.recv() => {
                                 conn.as_mut().graceful_shutdown();
                                 // 等连接真正关闭
                                 if let Err(e) = conn.as_mut().await {
-                                    error!("Connection error during shutdown from {}: {}", client_socket_addr, e);
+                                    error!("Connection error during shutdown from {}: {:#}", client_socket_addr, e);
                                 }
                             }
                         }

@@ -432,7 +432,7 @@ fn bind_and_start(
         // 在 serve 之前获取实际端口
         let actual_addr = tcp_listener.local_addr()?;
         let tokio_listener = tokio::net::TcpListener::from_std(tcp_listener)
-            .map_err(|e| WebServerError::Socket(format!("转换为tokio listener失败: {}", e)))?;
+            .map_err(|e| WebServerError::Socket(format!("转换为tokio listener失败: {:#}", e)))?;
 
         // 启动服务
         let mut stop_web_service_receiver = stop_web_service_receiver.resubscribe();
@@ -454,7 +454,7 @@ fn bind_and_start(
                 });
             let handle = tokio::spawn(async move {
                 if let Err(e) = server.await {
-                    error!("Axum Web服务运行异常: {}", e);
+                    error!("Axum Web服务运行异常: {:#}", e);
                 }
             });
             web_service_handles.push(handle);
