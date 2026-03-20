@@ -14,7 +14,7 @@ use tower_http::trace::TraceLayer;
 use wheel_rs::process::terminate_process;
 
 #[distributed_slice]
-pub static INIT_ROUTERS: [fn() -> Router];
+pub static INIT_ROUTERS_SLICE: [fn() -> Router];
 
 static WEB_SERVICE_HANDLES: RwLock<Option<Vec<JoinHandle<()>>>> = RwLock::new(None);
 static STOP_WEB_SERVICE_SENDER: RwLock<Option<broadcast::Sender<()>>> = RwLock::new(None);
@@ -116,7 +116,7 @@ pub async fn start_web_server(
 
     // 初始化路由
     let mut router = Router::new();
-    for init_router in INIT_ROUTERS.iter() {
+    for init_router in INIT_ROUTERS_SLICE.iter() {
         router = router.merge(init_router());
     }
 
