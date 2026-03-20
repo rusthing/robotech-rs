@@ -1,5 +1,6 @@
 use crate::web::{build_cors, build_https, HttpsConfig, WebServerConfig, WebServerError};
 use axum::{routing::get, Router};
+use linkme::distributed_slice;
 use log::{debug, error, info};
 use robotech_macros::log_call;
 use socket2::{Domain, Socket, Type};
@@ -11,6 +12,9 @@ use tokio::task::JoinHandle;
 use tokio::time::timeout;
 use tower_http::trace::TraceLayer;
 use wheel_rs::process::terminate_process;
+
+#[distributed_slice]
+pub static INIT_ROUTERS: [fn() -> Router];
 
 static WEB_SERVICE_HANDLES: RwLock<Option<Vec<JoinHandle<()>>>> = RwLock::new(None);
 static STOP_WEB_SERVICE_SENDER: RwLock<Option<broadcast::Sender<()>>> = RwLock::new(None);
@@ -59,7 +63,6 @@ pub async fn health() -> &'static str {
 #[log_call]
 pub async fn start_web_server(
     web_server_config: WebServerConfig,
-    mut router: Router,
     port_of_args: Option<u16>,
     old_pid: Option<i32>,
 ) -> Result<(), WebServerError> {
@@ -109,6 +112,12 @@ pub async fn start_web_server(
                     .await?;
             }
         }
+    }
+
+    // 初始化路由
+    let mut router = Router::new();
+    for init_router in INIT_ROUTERS.iter() {
+        router = router.merge(init_router());
     }
 
     // 判断是否支持健康检查
