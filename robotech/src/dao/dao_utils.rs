@@ -45,7 +45,7 @@ where
 }
 
 /// 多字段 OR 模糊查询
-pub fn like_any<T>(keyword: &str, cols: &Vec<T>) -> Condition
+pub fn like_any<T>(keyword: &str, cols: &[T]) -> Condition
 where
     T: ColumnTrait,
 {

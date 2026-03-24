@@ -1,7 +1,7 @@
 use proc_macro2::{Ident, Span, TokenStream};
 use quote::quote;
 use syn::parse::{Parse, ParseStream};
-use syn::{ItemStruct, LitStr, Token};
+use syn::{bracketed, Expr, ItemStruct, LitStr, Token};
 
 /// 唯一键字段配置项
 #[derive(Debug)]
@@ -222,7 +222,7 @@ pub fn define_foreign_keys_macro(args: DefineForeignKeysArgs) -> TokenStream {
 /// 定义模糊查询列的过程宏参数
 #[derive(Debug)]
 pub(super) struct DefineLikeColumnsArgs {
-    columns: Vec<syn::Expr>,
+    columns: Vec<Expr>,
 }
 
 impl Parse for DefineLikeColumnsArgs {
@@ -280,151 +280,134 @@ pub fn define_like_columns_macro(args: DefineLikeColumnsArgs) -> proc_macro::Tok
 /// DAO方法生成宏参数解析
 #[derive(Debug)]
 pub(super) struct DaoArgs {
-    exclude: bool,
-    insert: bool,
-    update: bool,
-    delete: bool,
-    get_by_id: bool,
-}
-
-impl Default for DaoArgs {
-    fn default() -> Self {
-        DaoArgs {
-            exclude: false,
-            insert: true,
-            update: true,
-            delete: true,
-            get_by_id: true,
-        }
-    }
+    like_columns: Vec<Expr>,
 }
 
 impl Parse for DaoArgs {
     fn parse(input: ParseStream) -> syn::Result<Self> {
-        if input.is_empty() {
-            return Ok(DaoArgs::default());
-        }
-        let mut result = DaoArgs {
-            exclude: false,
-            insert: false,
-            update: false,
-            delete: false,
-            get_by_id: false,
-        };
+        let mut like_columns = vec![];
+
+        // 解析可选的参数列表
+        // 支持格式：like_columns: [Column::Name, Column::Remark]
         while !input.is_empty() {
+            // 解析标识符（参数名）
             let ident: Ident = input.parse()?;
-            match ident.to_string().to_lowercase().as_str() {
-                "exclude" => {
-                    result = DaoArgs::default();
-                    result.exclude = true;
-                    let _: Token![:] = input.parse()?;
-                    continue;
-                }
-                "insert" => result.insert = !result.exclude,
-                "update" => result.update = !result.exclude,
-                "delete" => result.delete = !result.exclude,
-                "get_by_id" => result.get_by_id = !result.exclude,
-                "all" => {
-                    return Ok(DaoArgs::default());
-                }
-                _ => return Err(syn::Error::new_spanned(ident, "Unknown method name")),
+
+            if ident == "like_columns" {
+                // 解析冒号
+                let _colon: Token![:] = input.parse()?;
+
+                // 解析方括号
+                let content;
+                bracketed!(content in input);
+
+                // 解析逗号分隔的列表达式列表
+                let parsed_columns = content.parse_terminated(Expr::parse, Token![,])?;
+                like_columns = parsed_columns.into_iter().collect();
+            } else {
+                let error_msg = format!("未知的参数：{}", ident);
+                return Err(syn::Error::new_spanned(&ident, error_msg));
             }
-            if let Err(_) = input.parse::<Token![,]>() {
-                return Ok(result);
+
+            // 如果还有更多参数，跳过逗号
+            if !input.is_empty() {
+                let _comma: Token![,] = input.parse()?;
             }
         }
 
-        Ok(result)
+        Ok(DaoArgs { like_columns })
     }
 }
 
 pub(super) fn dao_macro(args: DaoArgs, input: ItemStruct) -> TokenStream {
     let struct_name = &input.ident;
-    // let struct_vis = &input.vis;
-    // let struct_generics = &input.generics;
 
-    let mut generated_methods = Vec::new();
+    let mut generated_members = Vec::new();
+
+    // 生成 LIKE_COLUMNS
+    if !args.like_columns.is_empty() {
+        let like_columns = &args.like_columns;
+        generated_members.push(quote! {
+            /// # 模糊查询列
+            pub const LIKE_COLUMNS: &[Column] = &[#(#like_columns),*];
+        });
+    }
 
     // 生成insert方法
-    if args.insert {
-        generated_methods.push(quote! {
-            /// # 插入记录
-            ///
-            /// 此函数负责向数据库中插入一个新的记录。它会自动处理以下逻辑：
-            /// - 如果记录 ID 未设置（默认值），则生成一个新的唯一 ID
-            /// - 如果创建时间戳未设置，则设置当前时间为创建和更新时间
-            /// - 将修改者 ID 设置为创建者 ID（因为是新建记录）
-            ///
-            /// ## 参数
-            /// * `active_model` - 包含待插入数据的 ActiveModel 实例
-            /// * `db` - 数据库连接 trait 对象
-            ///
-            /// ## 返回值
-            /// 返回插入后的完整 Model 实例，如果插入失败则返回相应的错误信息
-            pub async fn insert<C>(mut active_model: ActiveModel, db: &C) -> Result<Model, DaoError>
-            where
-                C: ConnectionTrait,
-            {
-                // 当id为默认值(0)时生成ID
-                if active_model.id == ActiveValue::NotSet {
-                    active_model.id = ActiveValue::set(idworker::get_id_worker()?.next_id()? as i64);
-                }
-                // 当创建时间未设置时，设置创建时间和修改时间
-                if active_model.create_timestamp == ActiveValue::NotSet {
-                    let now = ActiveValue::set(wheel_rs::time_utils::get_current_timestamp()? as i64);
-                    active_model.create_timestamp = now.clone();
-                    active_model.update_timestamp = now;
-                }
-                // 添加时修改者就是创建者
-                active_model.updator_id = active_model.creator_id.clone();
-                // 执行数据库插入操作
-                active_model
-                    .insert(db)
-                    .await
-                    .map_err(|e| DaoError::parse_db_err(e))
+    generated_members.push(quote! {
+        /// # 插入记录
+        ///
+        /// 此函数负责向数据库中插入一个新的记录。它会自动处理以下逻辑：
+        /// - 如果记录 ID 未设置（默认值），则生成一个新的唯一 ID
+        /// - 如果创建时间戳未设置，则设置当前时间为创建和更新时间
+        /// - 将修改者 ID 设置为创建者 ID（因为是新建记录）
+        ///
+        /// ## 参数
+        /// * `active_model` - 包含待插入数据的 ActiveModel 实例
+        /// * `db` - 数据库连接 trait 对象
+        ///
+        /// ## 返回值
+        /// 返回插入后的完整 Model 实例，如果插入失败则返回相应的错误信息
+        pub async fn insert<C>(mut active_model: ActiveModel, db: &C) -> Result<Model, DaoError>
+        where
+            C: ConnectionTrait,
+        {
+            // 当id为默认值(0)时生成ID
+            if active_model.id == ActiveValue::NotSet {
+                active_model.id = ActiveValue::set(idworker::get_id_worker()?.next_id()? as i64);
             }
-        });
-    }
+            // 当创建时间未设置时，设置创建时间和修改时间
+            if active_model.create_timestamp == ActiveValue::NotSet {
+                let now = ActiveValue::set(wheel_rs::time_utils::get_current_timestamp()? as i64);
+                active_model.create_timestamp = now.clone();
+                active_model.update_timestamp = now;
+            }
+            // 添加时修改者就是创建者
+            active_model.updator_id = active_model.creator_id.clone();
+            // 执行数据库插入操作
+            active_model
+                .insert(db)
+                .await
+                .map_err(|e| DaoError::parse_db_err(e))
+        }
+    });
 
     // 生成update方法
-    if args.update {
-        generated_methods.push(quote! {
-            /// # 更新记录
-            ///
-            /// 此函数负责更新数据库中的现有记录。它会自动处理以下逻辑：
-            /// - 如果更新时间戳未设置，则设置当前时间为更新时间
-            /// - 更新完成后，重新查询并返回更新后的完整记录
-            ///
-            /// ## 参数
-            /// * `active_model` - 包含待更新数据的 ActiveModel 实例
-            /// * `db` - 数据库连接 trait 对象
-            ///
-            /// ## 返回值
-            /// 返回更新后的完整 Model 实例，如果更新失败则返回相应的错误信息
-            pub async fn update<C>(mut active_model: ActiveModel, db: &C) -> Result<Model, DaoError>
-            where
-                C: ConnectionTrait,
-            {
-                // 保护创建者信息不能被修改
-                active_model.creator_id = ActiveValue::NotSet;
-                active_model.create_timestamp = ActiveValue::NotSet;
-                // 当修改时间未设置时，设置修改时间
-                if active_model.update_timestamp == ActiveValue::NotSet {
-                    let now = ActiveValue::set(wheel_rs::time_utils::get_current_timestamp()? as i64);
-                    active_model.update_timestamp = now;
-                }
-                // 执行数据库更新操作
-                active_model
-                    .update(db)
-                    .await
-                    .map_err(|e| DaoError::parse_db_err(e))
+    generated_members.push(quote! {
+        /// # 更新记录
+        ///
+        /// 此函数负责更新数据库中的现有记录。它会自动处理以下逻辑：
+        /// - 如果更新时间戳未设置，则设置当前时间为更新时间
+        /// - 更新完成后，重新查询并返回更新后的完整记录
+        ///
+        /// ## 参数
+        /// * `active_model` - 包含待更新数据的 ActiveModel 实例
+        /// * `db` - 数据库连接 trait 对象
+        ///
+        /// ## 返回值
+        /// 返回更新后的完整 Model 实例，如果更新失败则返回相应的错误信息
+        pub async fn update<C>(mut active_model: ActiveModel, db: &C) -> Result<Model, DaoError>
+        where
+            C: ConnectionTrait,
+        {
+            // 保护创建者信息不能被修改
+            active_model.creator_id = ActiveValue::NotSet;
+            active_model.create_timestamp = ActiveValue::NotSet;
+            // 当修改时间未设置时，设置修改时间
+            if active_model.update_timestamp == ActiveValue::NotSet {
+                let now = ActiveValue::set(wheel_rs::time_utils::get_current_timestamp()? as i64);
+                active_model.update_timestamp = now;
             }
-        });
-    }
+            // 执行数据库更新操作
+            active_model
+                .update(db)
+                .await
+                .map_err(|e| DaoError::parse_db_err(e))
+        }
+    });
 
     // 生成delete方法
-    if args.delete {
-        generated_methods.push(quote! {
+    generated_members.push(quote! {
             /// # 删除记录
             ///
             /// 此函数负责根据关键字段删除相应的记录
@@ -445,32 +428,29 @@ pub(super) fn dao_macro(args: DaoArgs, input: ItemStruct) -> TokenStream {
                     .map_err(|e| DaoError::parse_db_err(e))
             }
         });
-    }
 
     // 生成get_by_id方法
-    if args.get_by_id {
-        generated_methods.push(quote! {
-            /// # 根据ID查询相应记录
-            ///
-            /// 此函数负责根据提供的ID从数据库中查询对应的记录
-            ///
-            /// ## 参数
-            /// * `id` - 要查询的记录的ID
-            /// * `db` - 数据库连接 trait 对象
-            ///
-            /// ## 返回值
-            /// 查询成功，如果记录存在，返回查询到的完整 Model 实例，如果不存在返回None; 查询失败则返回相应的错误信息
-            pub async fn get_by_id<C>(id: u64, db: &C) -> Result<Option<Model>, DaoError>
-            where
-                C: ConnectionTrait,
-            {
-                Entity::find_by_id(id as i64)
-                    .one(db)
-                    .await
-                    .map_err(|e| DaoError::parse_db_err(e))
-            }
-        });
-    }
+    generated_members.push(quote! {
+        /// # 根据ID查询相应记录
+        ///
+        /// 此函数负责根据提供的ID从数据库中查询对应的记录
+        ///
+        /// ## 参数
+        /// * `id` - 要查询的记录的ID
+        /// * `db` - 数据库连接 trait 对象
+        ///
+        /// ## 返回值
+        /// 查询成功，如果记录存在，返回查询到的完整 Model 实例，如果不存在返回None; 查询失败则返回相应的错误信息
+        pub async fn get_by_id<C>(id: u64, db: &C) -> Result<Option<Model>, DaoError>
+        where
+            C: ConnectionTrait,
+        {
+            Entity::find_by_id(id as i64)
+                .one(db)
+                .await
+                .map_err(|e| DaoError::parse_db_err(e))
+        }
+    });
 
     let expanded = quote! {
         use robotech::dao::DaoError;
@@ -481,7 +461,7 @@ pub(super) fn dao_macro(args: DaoArgs, input: ItemStruct) -> TokenStream {
         #input
 
         impl #struct_name {
-            #(#generated_methods)*
+            #(#generated_members)*
         }
     };
 
