@@ -84,12 +84,12 @@ impl CtrlError {
                 }
                 #[cfg(feature = "db")]
                 SvcError::Dao(error) => match error {
-                    DaoError::DuplicateKey(unique_field, field_value) => Ro::warn(format!(
+                    DaoError::DuplicateKey(unique_key, value) => Ro::warn(format!(
                         "{}<{}>已存在！",
-                        unique_field.column_comment, field_value
+                        unique_key.key_remark, value
                     ))
                     .code(Some(RO_CODE_WARNING_DUPLICATE_KEY.to_string()))
-                    .detail(Some(format!("{unique_field} -> value: {field_value}"))),
+                    .detail(Some(format!("{unique_key} -> value: {value}"))),
                     DaoError::InsertViolateFk(foreign_key) => Ro::warn(format!(
                         "不能插入(或更新){}，设置的{}并不存在",
                         foreign_key.fk_table_comment, foreign_key.pk_table_comment

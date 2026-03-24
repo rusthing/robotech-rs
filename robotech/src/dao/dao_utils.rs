@@ -1,4 +1,4 @@
-use crate::dao::{init_foreign_keys, init_unique_fields, DaoError};
+use crate::dao::{init_foreign_keys, init_unique_keys, DaoError};
 use crate::db::get_db_conn;
 use sea_orm::sea_query::{Expr, Func, SimpleExpr};
 use sea_orm::{
@@ -8,7 +8,7 @@ use sea_orm::{
 use std::sync::Arc;
 
 pub fn init_dao() -> Result<(), DaoError> {
-    init_unique_fields()?;
+    init_unique_keys()?;
     init_foreign_keys()?;
     Ok(())
 }

@@ -1,309 +1,108 @@
 use proc_macro2::{Ident, Span, TokenStream};
 use quote::quote;
 use syn::parse::{Parse, ParseStream};
-use syn::{bracketed, Expr, ItemStruct, LitStr, Token};
+use syn::{bracketed, parenthesized, Expr, ItemStruct, Lit, LitStr, Token};
+use wheel_rs::str_utils::{split_camel_case, CamelFormat};
 
 /// 唯一键字段配置项
 #[derive(Debug)]
-struct UniqueFieldConfig {
-    fields: String,
+struct UniqueKeyArgs {
+    /// 唯一键的名称
+    /// 如果是组合键，则用逗号分隔
     name: String,
+    /// 唯一键的注释
+    remark: String,
 }
 
-impl Parse for UniqueFieldConfig {
+impl Parse for UniqueKeyArgs {
     fn parse(input: ParseStream) -> syn::Result<Self> {
-        let fields_lit: LitStr = input.parse()?;
-        let _: Token![,] = input.parse()?;
-        let name_lit: LitStr = input.parse()?;
+        // 解开圆括号
+        let content;
+        parenthesized!(content in input);
 
-        Ok(UniqueFieldConfig {
-            fields: fields_lit.value(),
-            name: name_lit.value(),
+        let field_name: LitStr = content.parse()?;
+        let _: Token![,] = content.parse()?;
+        let field_remark: LitStr = content.parse()?;
+
+        Ok(UniqueKeyArgs {
+            name: field_name.value(),
+            remark: field_remark.value(),
         })
     }
-}
-
-/// 定义唯一键字段的过程宏参数
-#[derive(Debug)]
-pub(super) struct DefineUniqueFieldsArgs {
-    table: String,
-    fields: Vec<UniqueFieldConfig>,
-}
-
-impl Parse for DefineUniqueFieldsArgs {
-    fn parse(input: ParseStream) -> syn::Result<Self> {
-        let mut table = String::new();
-
-        // 尝试解析表名
-        if input.peek(LitStr) {
-            let table_lit: LitStr = input.parse()?;
-            table = table_lit.value();
-        }
-
-        let mut fields = Vec::new();
-
-        while input.peek(Token![,]) {
-            let _: Token![,] = input.parse()?;
-            if input.is_empty() {
-                break;
-            }
-
-            // 尝试解析元组 (fields, name)
-            let content;
-            syn::parenthesized!(content in input);
-            fields.push(content.parse()?);
-        }
-
-        Ok(DefineUniqueFieldsArgs { table, fields })
-    }
-}
-
-/// # 定义唯一键字段的 HashMap
-///
-/// 用于快速初始化唯一键字段的 HashMap 静态变量
-///
-/// ## 使用示例
-/// ```rust
-/// define_unique_fields!(
-/// "oss_bucket",
-/// ("name", "桶名称"),
-/// );
-/// ```
-pub fn define_unique_fields_macro(args: DefineUniqueFieldsArgs) -> TokenStream {
-    let table = &args.table;
-    let mut i = 0;
-    let field_inits: Vec<TokenStream> = args
-        .fields
-        .iter()
-        .map(|field| {
-            let fields_str = &field.fields;
-            let name_str = &field.name;
-            i += 1;
-            let item_name = Ident::new(&format!("UNIQUE_FIELD_{}", i), Span::call_site());
-            quote! {
-                #[distributed_slice(UNIQUE_FIELDS_SLICE)]
-                static #item_name: (&str, &str, &str) = (#table, #fields_str, #name_str);
-            }
-        })
-        .collect();
-
-    let expanded = quote! {
-        use robotech::dao::UNIQUE_FIELDS_SLICE;
-        #(#field_inits)*
-    };
-
-    // 调试：打印完整展开的代码
-    // println!("Full expanded code:\n{expanded}");
-
-    TokenStream::from(expanded)
 }
 
 /// 外键配置项
 #[derive(Debug)]
-struct ForeignKeyConfig {
+struct ForeignKeyArgs {
+    /// 外键字段
     fk_column: String,
+    /// 主键表
     pk_table: String,
-    pk_table_comment: String,
+    /// 主键表注释
+    pk_table_remark: String,
 }
 
-impl Parse for ForeignKeyConfig {
+impl Parse for ForeignKeyArgs {
     fn parse(input: ParseStream) -> syn::Result<Self> {
-        let fk_column_lit: LitStr = input.parse()?;
-        let _: Token![,] = input.parse()?;
-        let pk_table_lit: LitStr = input.parse()?;
-        let _: Token![,] = input.parse()?;
-        let pk_table_comment_lit: LitStr = input.parse()?;
+        // 解开圆括号
+        let content;
+        parenthesized!(content in input);
 
-        Ok(ForeignKeyConfig {
-            fk_column: fk_column_lit.value(),
-            pk_table: pk_table_lit.value(),
-            pk_table_comment: pk_table_comment_lit.value(),
+        let fk_column: LitStr = content.parse()?;
+        let _: Token![,] = content.parse()?;
+        let pk_table: LitStr = content.parse()?;
+        let _: Token![,] = content.parse()?;
+        let pk_table_remark: LitStr = content.parse()?;
+
+        Ok(ForeignKeyArgs {
+            fk_column: fk_column.value(),
+            pk_table: pk_table.value(),
+            pk_table_remark: pk_table_remark.value(),
         })
     }
-}
-
-/// 定义外键的过程宏参数
-#[derive(Debug)]
-pub(super) struct DefineForeignKeysArgs {
-    fk_table: String,
-    fk_table_comment: String,
-    keys: Vec<ForeignKeyConfig>,
-}
-
-impl Parse for DefineForeignKeysArgs {
-    fn parse(input: ParseStream) -> syn::Result<Self> {
-        let mut fk_table = String::new();
-        let mut fk_table_comment = String::new();
-
-        // 尝试解析表名和注释
-        if input.peek(LitStr) {
-            let fk_table_lit: LitStr = input.parse()?;
-            fk_table = fk_table_lit.value();
-
-            // 尝试解析逗号
-            if input.peek(Token![,]) {
-                let _: Token![,] = input.parse()?;
-
-                // 尝试解析表注释
-                if input.peek(LitStr) {
-                    let fk_table_comment_lit: LitStr = input.parse()?;
-                    fk_table_comment = fk_table_comment_lit.value();
-                }
-            }
-        }
-
-        let mut keys = Vec::new();
-
-        while input.peek(Token![,]) {
-            let _: Token![,] = input.parse()?;
-            if input.is_empty() {
-                break;
-            }
-
-            // 尝试解析元组 (fk_column, pk_table, pk_table_comment)
-            let content;
-            syn::parenthesized!(content in input);
-            keys.push(content.parse()?);
-        }
-
-        Ok(DefineForeignKeysArgs {
-            fk_table,
-            fk_table_comment,
-            keys,
-        })
-    }
-}
-
-/// # 定义外键的 HashMap
-///
-/// 用于快速初始化外键的 HashMap 静态变量
-///
-/// ## 使用示例
-/// ```rust
-/// define_foreign_keys!(
-/// "oss_obj_ref", "对象引用",
-/// ("obj_id", "oss_obj", "对象"),
-/// ("bucket_id", "oss_bucket", "桶"),
-/// );
-/// ```
-pub fn define_foreign_keys_macro(args: DefineForeignKeysArgs) -> TokenStream {
-    let fk_table = &args.fk_table;
-    let fk_table_comment = &args.fk_table_comment;
-    let mut i = 0;
-
-    let field_inits: Vec<TokenStream> = args
-        .keys
-        .iter()
-        .map(|key| {
-            let fk_column = &key.fk_column;
-            let pk_table = &key.pk_table;
-            let pk_table_comment = &key.pk_table_comment;
-            i += 1;
-            let item_name = Ident::new(&format!("FOREIGN_KEY_{}", i), Span::call_site());
-            quote! {
-                #[distributed_slice(FOREIGN_KEYS_SLICE)]
-                static #item_name: (&str, &str, &str, &str, &str) =
-                    (#fk_table, #fk_table_comment, #fk_column, #pk_table, #pk_table_comment);
-            }
-        })
-        .collect();
-
-    let expanded = quote! {
-        use robotech::dao::FOREIGN_KEYS_SLICE;
-        #(#field_inits)*
-    };
-
-    // 调试：打印完整展开的代码
-    // println!("Full expanded code:\n{expanded}");
-
-    TokenStream::from(expanded)
-}
-
-/// 定义模糊查询列的过程宏参数
-#[derive(Debug)]
-pub(super) struct DefineLikeColumnsArgs {
-    columns: Vec<Expr>,
-}
-
-impl Parse for DefineLikeColumnsArgs {
-    fn parse(input: ParseStream) -> syn::Result<Self> {
-        let mut columns = Vec::new();
-
-        // 解析第一个表达式
-        if !input.is_empty() {
-            columns.push(input.parse()?);
-        }
-
-        // 继续解析后续的表达式 (通过逗号分隔)
-        while input.peek(Token![,]) {
-            let _: Token![,] = input.parse()?;
-            if input.is_empty() {
-                break;
-            }
-            columns.push(input.parse()?);
-        }
-
-        Ok(DefineLikeColumnsArgs { columns })
-    }
-}
-
-/// # 定义模糊查询列的 Vec
-///
-/// 用于快速初始化 LIKE_COLUMNS 静态变量
-///
-/// ## 使用示例
-/// ```rust
-/// define_like_columns!(
-///     Column::Name,
-///     Column::DownloadUrl,
-///     Column::PreviewUrl,
-/// );
-/// ```
-pub fn define_like_columns_macro(args: DefineLikeColumnsArgs) -> proc_macro::TokenStream {
-    let column_exprs = args.columns.iter().map(|col| {
-        quote! {
-            #col
-        }
-    });
-
-    let expanded = quote! {
-        static LIKE_COLUMNS: LazyLock<Vec<Column>> =
-            LazyLock::new(|| vec![#(#column_exprs),*]);
-    };
-
-    // 调试：打印完整展开的代码
-    // println!("Full expanded code:\n{expanded}");
-
-    proc_macro::TokenStream::from(expanded)
 }
 
 /// DAO方法生成宏参数解析
 #[derive(Debug)]
 pub(super) struct DaoArgs {
+    unique_keys: Vec<UniqueKeyArgs>,
+    foreign_keys: Vec<ForeignKeyArgs>,
     like_columns: Vec<Expr>,
 }
 
 impl Parse for DaoArgs {
     fn parse(input: ParseStream) -> syn::Result<Self> {
+        let mut unique_keys = vec![];
+        let mut foreign_keys = vec![];
         let mut like_columns = vec![];
 
         // 解析可选的参数列表
-        // 支持格式：like_columns: [Column::Name, Column::Remark]
         while !input.is_empty() {
             // 解析标识符（参数名）
             let ident: Ident = input.parse()?;
+            // 解析冒号
+            let _colon: Token![:] = input.parse()?;
 
-            if ident == "like_columns" {
-                // 解析冒号
-                let _colon: Token![:] = input.parse()?;
-
-                // 解析方括号
+            if ident == "unique_keys" {
+                // 解开方括号
                 let content;
                 bracketed!(content in input);
-
-                // 解析逗号分隔的列表达式列表
-                let parsed_columns = content.parse_terminated(Expr::parse, Token![,])?;
-                like_columns = parsed_columns.into_iter().collect();
+                let unique_keys_args = content.parse_terminated(UniqueKeyArgs::parse, Token![,])?;
+                unique_keys = unique_keys_args.into_iter().collect();
+            } else if ident == "foreign_keys" {
+                // 解开方括号
+                let content;
+                bracketed!(content in input);
+                let foreign_keys_args =
+                    content.parse_terminated(ForeignKeyArgs::parse, Token![,])?;
+                foreign_keys = foreign_keys_args.into_iter().collect();
+            } else if ident == "like_columns" {
+                // 解开方括号
+                let content;
+                bracketed!(content in input);
+                // 解析逗号分隔的列表
+                let parsed_args = content.parse_terminated(Expr::parse, Token![,])?;
+                like_columns = parsed_args.into_iter().collect();
             } else {
                 let error_msg = format!("未知的参数：{}", ident);
                 return Err(syn::Error::new_spanned(&ident, error_msg));
@@ -315,21 +114,141 @@ impl Parse for DaoArgs {
             }
         }
 
-        Ok(DaoArgs { like_columns })
+        Ok(DaoArgs {
+            unique_keys,
+            foreign_keys,
+            like_columns,
+        })
     }
 }
 
 pub(super) fn dao_macro(args: DaoArgs, input: ItemStruct) -> TokenStream {
     let struct_name = &input.ident;
 
+    // 提取文档注释
+    let struct_remark = input
+        .attrs
+        .iter()
+        .filter_map(|attr| {
+            if attr.path().is_ident("doc") {
+                if let syn::Meta::NameValue(meta) = &attr.meta {
+                    if let Expr::Lit(expr_lit) = &meta.value {
+                        if let Lit::Str(lit_str) = &expr_lit.lit {
+                            return Some(lit_str.value());
+                        }
+                    }
+                }
+            }
+            None
+        })
+        .collect::<Vec<String>>();
+
+    // 解析结构体的名称，必须是Dao结尾，符合大驼峰命名规范
+    let struct_name_str = struct_name.to_string();
+    if !struct_name_str.ends_with("Dao") {
+        return syn::Error::new_spanned(struct_name, "Struct name must end with 'Dao'")
+            .to_compile_error()
+            .into();
+    }
+    let struct_name_split = split_camel_case(&struct_name_str, CamelFormat::Upper);
+    if struct_name_split.is_err() {
+        return syn::Error::new_spanned(
+            struct_name,
+            "Struct name must be a valid upper camel case",
+        )
+        .to_compile_error()
+        .into();
+    }
+    let mut struct_name_split = struct_name_split.unwrap();
+    struct_name_split.pop();
+    let table_name = struct_name_split.join("_").to_lowercase();
+    let DaoArgs {
+        unique_keys,
+        foreign_keys,
+        like_columns,
+    } = args;
+
+    // 生成 use 导入
+    let generated_use = if !unique_keys.is_empty() || !foreign_keys.is_empty() {
+        quote! {
+            use linkme::distributed_slice;
+        }
+    } else {
+        quote! {}
+    };
+
+    // 生成 UNIQUE_KEYS
+    let generated_unique_keys = if unique_keys.is_empty() {
+        quote! {}
+    } else {
+        let mut i = 0;
+        let field_inits: Vec<TokenStream> = unique_keys
+            .iter()
+            .map(|field| {
+                let fields_str = &field.name;
+                let name_str = &field.remark;
+                i += 1;
+                let item_name = Ident::new(&format!("UNIQUE_FIELD_{}", i), Span::call_site());
+                quote! {
+                    #[distributed_slice(UNIQUE_KEYS_SLICE)]
+                    static #item_name: (&str, &str, &str) = (#table_name, #fields_str, #name_str);
+                }
+            })
+            .collect();
+
+        quote! {
+            use robotech::dao::UNIQUE_KEYS_SLICE;
+            #(#field_inits)*
+        }
+    };
+
+    // 生成 FOREIGN_KEYS
+    let generated_foreign_keys = if foreign_keys.is_empty() {
+        quote! {}
+    } else {
+        let fk_table = table_name;
+        let table_remark = if struct_remark.is_empty() {
+            // 检查是否有文档注释，没有则报错
+            return syn::Error::new_spanned(
+                &struct_name,
+                "结构体必须添加文档注释，例如：/// 表描述信息",
+            )
+            .to_compile_error();
+        } else {
+            struct_remark[0].clone()
+        };
+        let fk_table_remark = table_remark;
+        let mut i = 0;
+        let field_inits: Vec<TokenStream> = foreign_keys
+            .iter()
+            .map(|key| {
+                let fk_column = &key.fk_column;
+                let pk_table = &key.pk_table;
+                let pk_table_comment = &key.pk_table_remark;
+                i += 1;
+                let item_name = Ident::new(&format!("FOREIGN_KEY_{}", i), Span::call_site());
+                quote! {
+                    #[distributed_slice(FOREIGN_KEYS_SLICE)]
+                    static #item_name: (&str, &str, &str, &str, &str) =
+                        (#fk_table, #fk_table_remark, #fk_column, #pk_table, #pk_table_comment);
+                }
+            })
+            .collect();
+
+        quote! {
+            use robotech::dao::FOREIGN_KEYS_SLICE;
+            #(#field_inits)*
+        }
+    };
+
+    // 生成成员变量
     let mut generated_members = Vec::new();
 
     // 生成 LIKE_COLUMNS
-    if !args.like_columns.is_empty() {
-        let like_columns = &args.like_columns;
+    if !like_columns.is_empty() {
         generated_members.push(quote! {
             /// # 模糊查询列
-            pub const LIKE_COLUMNS: &[Column] = &[#(#like_columns),*];
+            pub const LIKE_COLUMNS: & [Column] = &[ # ( # like_columns), * ];
         });
     }
 
@@ -457,6 +376,11 @@ pub(super) fn dao_macro(args: DaoArgs, input: ItemStruct) -> TokenStream {
         use sea_orm::{
             ActiveModelTrait, ActiveValue, ConnectionTrait, EntityTrait,
         };
+        #generated_use
+
+        #generated_unique_keys
+
+        #generated_foreign_keys
 
         #input
 
@@ -466,7 +390,7 @@ pub(super) fn dao_macro(args: DaoArgs, input: ItemStruct) -> TokenStream {
     };
 
     // 调试：打印完整展开的代码
-    // println!("Full expanded code:\n{expanded}");
+    println!("Full expanded code:\n{expanded}");
 
     TokenStream::from(expanded)
 }

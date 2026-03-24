@@ -8,10 +8,7 @@ mod vo;
 mod web;
 
 use crate::cfg::{watch_cfg_file_macro, WatchCfgFileArgs};
-use crate::dao::{
-    dao_macro, define_foreign_keys_macro, define_like_columns_macro, define_unique_fields_macro, DaoArgs,
-    DefineForeignKeysArgs, DefineLikeColumnsArgs, DefineUniqueFieldsArgs,
-};
+use crate::dao::{dao_macro, DaoArgs};
 use crate::db::MigrateArgs;
 use crate::dto::{add_dto_macro, crud_dto_macro, modify_dto_macro, save_dto_macro};
 use crate::log::{log_call_macro, LogCallArgs};
@@ -103,24 +100,6 @@ pub fn save_dto(_args: TokenStream, input: TokenStream) -> TokenStream {
 pub fn crud_dto(_args: TokenStream, input: TokenStream) -> TokenStream {
     let input = parse_macro_input!(input as ItemStruct);
     crud_dto_macro(input).into()
-}
-
-#[proc_macro]
-pub fn define_unique_fields(args: TokenStream) -> TokenStream {
-    let args = parse_macro_input!(args as DefineUniqueFieldsArgs);
-    define_unique_fields_macro(args).into()
-}
-
-#[proc_macro]
-pub fn define_foreign_keys(args: TokenStream) -> TokenStream {
-    let args = parse_macro_input!(args as DefineForeignKeysArgs);
-    define_foreign_keys_macro(args).into()
-}
-
-#[proc_macro]
-pub fn define_like_columns(args: TokenStream) -> TokenStream {
-    let args = parse_macro_input!(args as DefineLikeColumnsArgs);
-    define_like_columns_macro(args).into()
 }
 
 /// 属性宏：为DAO结构体生成标准的CRUD方法

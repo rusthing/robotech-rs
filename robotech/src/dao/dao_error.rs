@@ -1,5 +1,5 @@
-use crate::dao::eo::{ForeignKey, UniqueField};
-use crate::dao::{calc_key_of_foreign_key, get_from_foreign_keys, get_from_unique_fields};
+use crate::dao::eo::{ForeignKey, UniqueKey};
+use crate::dao::{calc_key_of_foreign_key, get_from_foreign_keys, get_from_unique_keys};
 use anyhow::anyhow;
 use idworker::IdWorkerError;
 use regex::{Captures, Regex};
@@ -68,7 +68,7 @@ pub enum DaoError {
     #[error("ID工作者错误: {0}")]
     IdWorker(#[from] IdWorkerError),
     #[error("重复键错误: {0} -> {1}")]
-    DuplicateKey(UniqueField, String),
+    DuplicateKey(UniqueKey, String),
     #[error("插入(或更新)操作违反了数据库外键约束条件: {0}")]
     InsertViolateFk(ForeignKey),
     #[error("删除(或更新)操作违反了数据库外键约束条件: {0}")]
@@ -90,7 +90,7 @@ impl DaoError {
     ///
     /// ## 参数
     /// * `db_err` - 数据库错误对象
-    /// * `unique_field_hashmap` - 用于映射数据库列名到业务字段名的哈希表
+    /// * `unique_key_hashmap` - 用于映射数据库列名到业务字段名的哈希表
     ///
     /// ## 返回值
     /// 返回对应的SvcError服务层错误对象
@@ -128,14 +128,14 @@ impl DaoError {
     ///
     /// ## 参数
     /// * `caps` - 正则表达式匹配结果，包含column和value两个命名捕获组
-    /// * `unique_field_hashmap` - 数据库列名到业务字段名的映射表
+    /// * `unique_key_hashmap` - 数据库列名到业务字段名的映射表
     ///
     /// ## 返回值
     /// 返回一个包含字段名和冲突值的SvcError::DuplicateKey错误
     fn parse_duplicate_key(caps: Captures) -> DaoError {
         let ak_name = caps["ak_name"].to_lowercase().to_string();
         let value = caps["value"].to_string();
-        let unique_filed = match get_from_unique_fields(&ak_name) {
+        let unique_filed = match get_from_unique_keys(&ak_name) {
             Ok(Some(unique_filed)) => unique_filed,
             Ok(None) => {
                 return DaoError::from(anyhow!(format!("获取unique字段列表错误: {ak_name}不存在")));

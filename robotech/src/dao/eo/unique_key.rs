@@ -4,18 +4,18 @@ use typed_builder::TypedBuilder;
 
 #[derive(Debug, Clone, TypedBuilder)]
 #[builder]
-pub struct UniqueField {
+pub struct UniqueKey {
     pub table: String,
-    pub column: String,
-    pub column_comment: String,
+    pub key_name: String,
+    pub key_remark: String,
 }
 
-impl Display for UniqueField {
+impl Display for UniqueKey {
     fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
         write!(
             f,
-            "table: {}, column: {} comment: {}",
-            self.table, self.column, self.column_comment
+            "table: {}, key name: {}, key remark: {}",
+            self.table, self.key_name, self.key_remark
         )
     }
 }
