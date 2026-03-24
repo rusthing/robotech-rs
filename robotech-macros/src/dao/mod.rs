@@ -219,6 +219,64 @@ pub fn define_foreign_keys_macro(args: DefineForeignKeysArgs) -> TokenStream {
     TokenStream::from(expanded)
 }
 
+/// 定义模糊查询列的过程宏参数
+#[derive(Debug)]
+pub(super) struct DefineLikeColumnsArgs {
+    columns: Vec<syn::Expr>,
+}
+
+impl Parse for DefineLikeColumnsArgs {
+    fn parse(input: ParseStream) -> syn::Result<Self> {
+        let mut columns = Vec::new();
+
+        // 解析第一个表达式
+        if !input.is_empty() {
+            columns.push(input.parse()?);
+        }
+
+        // 继续解析后续的表达式 (通过逗号分隔)
+        while input.peek(Token![,]) {
+            let _: Token![,] = input.parse()?;
+            if input.is_empty() {
+                break;
+            }
+            columns.push(input.parse()?);
+        }
+
+        Ok(DefineLikeColumnsArgs { columns })
+    }
+}
+
+/// # 定义模糊查询列的 Vec
+///
+/// 用于快速初始化 LIKE_COLUMNS 静态变量
+///
+/// ## 使用示例
+/// ```rust
+/// define_like_columns!(
+///     Column::Name,
+///     Column::DownloadUrl,
+///     Column::PreviewUrl,
+/// );
+/// ```
+pub fn define_like_columns_macro(args: DefineLikeColumnsArgs) -> proc_macro::TokenStream {
+    let column_exprs = args.columns.iter().map(|col| {
+        quote! {
+            #col
+        }
+    });
+
+    let expanded = quote! {
+        static LIKE_COLUMNS: LazyLock<Vec<Column>> =
+            LazyLock::new(|| vec![#(#column_exprs),*]);
+    };
+
+    // 调试：打印完整展开的代码
+    // println!("Full expanded code:\n{expanded}");
+
+    proc_macro::TokenStream::from(expanded)
+}
+
 /// DAO方法生成宏参数解析
 #[derive(Debug)]
 pub(super) struct DaoArgs {
