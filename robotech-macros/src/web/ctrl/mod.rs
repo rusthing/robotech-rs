@@ -135,7 +135,7 @@ pub(crate) fn ctrl_macro(args: CtrlArgs, input: ItemStruct) -> TokenStream {
                 Json(mut dto): Json<#add_dto_name>,
             ) -> Result<Json<Ro<#vo_name>>, CtrlError> {
                 // 从header中解析当前用户ID，如果没有或解析失败则抛出ValidationError
-                dto.current_user_id = get_current_user_id(&headers)?;
+                dto._current_user_id = get_current_user_id(&headers)?;
 
                 let result = #svc_name::add::<DatabaseTransaction>(dto, None).await?;
                 Ok(Json(result))
@@ -175,7 +175,7 @@ pub(crate) fn ctrl_macro(args: CtrlArgs, input: ItemStruct) -> TokenStream {
                 Json(mut dto): Json<#modify_dto_name>,
             ) -> Result<Json<Ro<#vo_name>>, CtrlError> {
                 // 从header中解析当前用户ID，如果没有或解析失败则抛出ValidationError
-                dto.current_user_id = get_current_user_id(&headers)?;
+                dto._current_user_id = get_current_user_id(&headers)?;
 
                 let result = #svc_name::modify::<DatabaseTransaction>(dto, None).await?;
                 Ok(Json(result))
@@ -215,7 +215,7 @@ pub(crate) fn ctrl_macro(args: CtrlArgs, input: ItemStruct) -> TokenStream {
                 Json(mut dto): Json<#save_dto_name>,
             ) -> Result<Json<Ro<#vo_name>>, CtrlError> {
                 // 从header中解析当前用户ID，如果没有或解析失败则抛出ValidationError
-                dto.current_user_id = get_current_user_id(&headers)?;
+                dto._current_user_id = get_current_user_id(&headers)?;
 
                 let result = #svc_name::save::<DatabaseTransaction>(dto, None).await?;
                 Ok(Json(result))

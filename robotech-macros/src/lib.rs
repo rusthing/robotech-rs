@@ -10,7 +10,7 @@ mod web;
 use crate::cfg::{watch_cfg_file_macro, WatchCfgFileArgs};
 use crate::dao::{dao_macro, DaoArgs};
 use crate::db::MigrateArgs;
-use crate::dto::{add_dto_macro, crud_dto_macro, modify_dto_macro, save_dto_macro};
+use crate::dto::crud_dto_macro;
 use crate::log::{log_call_macro, LogCallArgs};
 use crate::svc::{db_unwrap_macro, svc_macro, DbUnwrapArgs, SvcArgs};
 use crate::vo::vo_macro;
@@ -59,24 +59,6 @@ pub fn log_call(args: TokenStream, input: TokenStream) -> TokenStream {
 pub fn db_migrate(args: TokenStream) -> TokenStream {
     let args = parse_macro_input!(args as MigrateArgs);
     db::db_migrate_macro(args).into()
-}
-
-#[proc_macro_attribute]
-pub fn add_dto(_args: TokenStream, input: TokenStream) -> TokenStream {
-    let input = parse_macro_input!(input as ItemStruct);
-    add_dto_macro(input).into()
-}
-
-#[proc_macro_attribute]
-pub fn modify_dto(_args: TokenStream, input: TokenStream) -> TokenStream {
-    let input = parse_macro_input!(input as ItemStruct);
-    modify_dto_macro(input).into()
-}
-
-#[proc_macro_attribute]
-pub fn save_dto(_args: TokenStream, input: TokenStream) -> TokenStream {
-    let input = parse_macro_input!(input as ItemStruct);
-    save_dto_macro(input).into()
 }
 
 /// 属性宏：为XxxDto结构体自动生成XxxAddDto、XxxModifyDto、XxxSaveDto
