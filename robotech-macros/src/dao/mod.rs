@@ -65,9 +65,14 @@ impl Parse for ForeignKeyArgs {
 /// DAO方法生成宏参数解析
 #[derive(Debug)]
 pub(super) struct DaoArgs {
+    /// 唯一键
     unique_keys: Vec<UniqueKeyArgs>,
+    /// 外键
     foreign_keys: Vec<ForeignKeyArgs>,
+    /// 模糊匹配字段
     like_columns: Vec<Expr>,
+    /// 关联表
+    related_tables: Vec<Expr>,
 }
 
 impl Parse for DaoArgs {
@@ -75,6 +80,7 @@ impl Parse for DaoArgs {
         let mut unique_keys = vec![];
         let mut foreign_keys = vec![];
         let mut like_columns = vec![];
+        let mut related_tables = vec![];
 
         // 解析可选的参数列表
         while !input.is_empty() {
@@ -103,6 +109,13 @@ impl Parse for DaoArgs {
                 // 解析逗号分隔的列表
                 let parsed_args = content.parse_terminated(Expr::parse, Token![,])?;
                 like_columns = parsed_args.into_iter().collect();
+            } else if ident == "related_table" {
+                // 解开方括号
+                let content;
+                bracketed!(content in input);
+                // 解析逗号分隔的列表
+                let parsed_args = content.parse_terminated(Expr::parse, Token![,])?;
+                related_tables = parsed_args.into_iter().collect();
             } else {
                 let error_msg = format!("未知的参数：{}", ident);
                 return Err(syn::Error::new_spanned(&ident, error_msg));
@@ -118,13 +131,20 @@ impl Parse for DaoArgs {
             unique_keys,
             foreign_keys,
             like_columns,
+            related_tables,
         })
     }
 }
 
 pub(super) fn dao_macro(args: DaoArgs, input: ItemStruct) -> TokenStream {
-    let struct_name = &input.ident;
+    let DaoArgs {
+        unique_keys,
+        foreign_keys,
+        like_columns,
+        related_tables,
+    } = args;
 
+    let struct_name = &input.ident;
     // 提取文档注释
     let struct_remark = input
         .attrs
@@ -142,7 +162,6 @@ pub(super) fn dao_macro(args: DaoArgs, input: ItemStruct) -> TokenStream {
             None
         })
         .collect::<Vec<String>>();
-
     // 解析结构体的名称，必须是Dao结尾，符合大驼峰命名规范
     let struct_name_str = struct_name.to_string();
     if !struct_name_str.ends_with("Dao") {
@@ -162,11 +181,6 @@ pub(super) fn dao_macro(args: DaoArgs, input: ItemStruct) -> TokenStream {
     let mut struct_name_split = struct_name_split.unwrap();
     struct_name_split.pop();
     let table_name = struct_name_split.join("_").to_lowercase();
-    let DaoArgs {
-        unique_keys,
-        foreign_keys,
-        like_columns,
-    } = args;
 
     // 生成 use 导入
     let generated_use = if !unique_keys.is_empty() || !foreign_keys.is_empty() {
@@ -248,8 +262,15 @@ pub(super) fn dao_macro(args: DaoArgs, input: ItemStruct) -> TokenStream {
     if !like_columns.is_empty() {
         generated_members.push(quote! {
             /// # 模糊查询列
-            pub const LIKE_COLUMNS: & [Column] = &[ # ( # like_columns), * ];
+            pub const LIKE_COLUMNS: &[Column] = &[#(#like_columns),*];
         });
+    }
+    // 生成 RELATED_TABLES
+    if !related_tables.is_empty() {
+        generated_members.push(quote! {
+            /// # 关联表
+            pub const RELATED_TABLES: &[&str] = &[#(#related_tables),*];
+        })
     }
 
     // 生成insert方法
@@ -370,6 +391,104 @@ pub(super) fn dao_macro(args: DaoArgs, input: ItemStruct) -> TokenStream {
                 .map_err(|e| DaoError::parse_db_err(e))
         }
     });
+
+    // 生成also_related相关方法
+    if !related_tables.is_empty() {
+        // 从 related_tables 中提取表名
+        let mut table_names = Vec::new();
+        for expr in &related_tables {
+            // 处理字符串字面量情况："oss_bucket"
+            if let Expr::Lit(expr_lit) = expr {
+                if let Lit::Str(lit_str) = &expr_lit.lit {
+                    table_names.push(lit_str.value());
+                }
+            }
+        }
+
+        // // 生成 use 导入语句
+        // let table_modules: Vec<Ident> = table_names
+        //     .iter()
+        //     .map(|name| Ident::new(name, Span::call_site()))
+        //     .collect();
+
+        // // 生成 Model 类型
+        // let model_types: Vec<TokenStream> = table_names
+        //     .iter()
+        //     .map(|table_name| {
+        //         let module_ident = syn::Ident::new(table_name, Span::call_site());
+        //         quote! { #module_ident::Model }
+        //     })
+        //     .collect();
+
+        // 生成 Entity 引用
+        let entity_refs: Vec<TokenStream> = table_names
+            .iter()
+            .map(|table_name| {
+                let module_ident = Ident::new(table_name, Span::call_site());
+                quote! { #module_ident::Entity }
+            })
+            .collect();
+
+        // 生成 find_also_related 链式调用
+        let find_also_related_calls = entity_refs.iter().map(|entity_ref| {
+            quote! { .find_also_related(#entity_ref) }
+        });
+
+        // 使用实际表名作为模式匹配变量名（避免连字符等特殊字符）
+        let pattern_vars: Vec<Ident> = table_names
+            .iter()
+            .map(|table_name| {
+                // 将表名转换为合法的变量名（替换连字符等特殊字符）
+                let var_name = table_name.replace('-', "_");
+                Ident::new(&var_name, Span::call_site())
+            })
+            .collect();
+
+        let result_tuple_elements: Vec<TokenStream> = std::iter::once(quote! { Model })
+            .chain(pattern_vars.iter().map(|var| {
+                quote! { #var::Model }
+            }))
+            .collect();
+
+        let unwrap_calls: Vec<TokenStream> = pattern_vars
+            .iter()
+            .map(|var| {
+                quote! { #var.unwrap() }
+            })
+            .collect();
+
+        generated_members.push(quote! {
+            /// # 根据 ID 查询记录 (附带获取关联表的信息)
+            ///
+            /// 此函数通过给定的 ID 查询单条记录，并同时获取关联的存储桶和对象信息
+            ///
+            /// ## 参数
+            /// * `id` - 要查询的记录的唯一标识符
+            /// * `db` - 数据库连接 trait 对象
+            ///
+            /// ## 返回值
+            /// 返回一个包含主记录和关联记录的元组的 Option，如果查询失败则返回相应的错误信息
+            /// 如果未找到匹配记录，则返回 None
+            pub async fn get_by_id_also_related<C>(
+                id: u64,
+                db: &C,
+            ) -> Result<Option<(#(#result_tuple_elements),*)>, DaoError>
+            where
+                C: ConnectionTrait,
+            {
+                Entity::find_by_id(id as i64)
+                    #(#find_also_related_calls)*
+                    .one(db)
+                    .await
+                    .map(|model_option| {
+                        model_option.map(|(model, #(#pattern_vars),*)| {
+                            (model, #(#unwrap_calls),*)
+                        })
+                    })
+                    .map_err(|e| DaoError::parse_db_err(e))
+            }
+        })
+    }
 
     let expanded = quote! {
         use robotech::dao::DaoError;
