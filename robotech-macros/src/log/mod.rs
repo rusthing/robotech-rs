@@ -1,4 +1,4 @@
-use proc_macro2::{Ident, TokenStream};
+use proc_macro2::{Ident, Span, TokenStream};
 use quote::{format_ident, quote};
 use syn::parse::{Parse, ParseStream};
 use syn::{FnArg, ItemFn, Pat, Token};
@@ -21,7 +21,6 @@ pub(super) struct LogCallArgs {
 
 impl Parse for LogCallArgs {
     fn parse(input: ParseStream) -> syn::Result<Self> {
-        // 如果输入为空，返回 None
         if input.is_empty() {
             return Ok(LogCallArgs {
                 level: format_ident!("debug"),
@@ -29,12 +28,10 @@ impl Parse for LogCallArgs {
             });
         }
 
-        // 解析 level = xxx, mode = yyy 的形式
         let _level_key: Ident = input.parse()?;
         let _: Token![=] = input.parse()?;
         let level: Ident = input.parse()?;
 
-        // 尝试解析逗号和 mode 参数（可选）
         let mode = if input.peek(Token![,]) {
             let _: Token![,] = input.parse()?;
             let mode_key: Ident = input.parse()?;
@@ -56,6 +53,15 @@ impl Parse for LogCallArgs {
     }
 }
 
+/// 判断类型字符串是否为 axum 的 extractor 包装器（Path<T> / Json<T> / Query<T>）
+/// 类型名后必须紧跟 '<'，避免误匹配 PathBuf 等类型
+fn is_axum_wrapper(type_str: &str) -> bool {
+    let normalized = type_str.replace(' ', "");
+    normalized.contains("Path<")
+        || normalized.contains("Json<")
+        || normalized.contains("Query<")
+}
+
 pub(super) fn log_call_macro(args: LogCallArgs, input: ItemFn) -> TokenStream {
     let LogCallArgs {
         level: log_level,
@@ -68,19 +74,54 @@ pub(super) fn log_call_macro(args: LogCallArgs, input: ItemFn) -> TokenStream {
     let fn_vis = &input.vis;
     let fn_sig = &input.sig;
 
-    // 收集参数信息
     let mut param_formats = Vec::new();
     let mut param_values = Vec::new();
 
     for arg in &input.sig.inputs {
         match arg {
             FnArg::Typed(pat_type) => {
+                let ty = &pat_type.ty;
+                let type_str = quote!(#ty).to_string();
+                let is_wrapper = is_axum_wrapper(&type_str);
+
                 if let Pat::Ident(pat_ident) = &*pat_type.pat {
+                    // 普通写法：path: Path<T>  或  val: MyType
                     let param_name = &pat_ident.ident;
                     let param_name_str = param_name.to_string();
-
                     param_formats.push(format!("{} = {{:?}}", param_name_str));
-                    param_values.push(quote! { #param_name });
+                    if is_wrapper {
+                        // path: Path<T> → path.0 取出内部值
+                        param_values.push(quote! { #param_name.0 });
+                    } else {
+                        param_values.push(quote! { #param_name });
+                    }
+                } else if let Pat::TupleStruct(pat_ts) = &*pat_type.pat {
+                    // 解构写法：Path(id): Path<u64>  /  Json(mut dto): Json<Dto>
+                    // 注意：内部可能带 mut（如 Json(mut dto)），必须剥离 mut 只取 Ident
+                    // 否则 quote! { #inner } 会生成 `mut dto`，在表达式位置非法
+                    if pat_ts.elems.len() == 1 {
+                        if let Pat::Ident(inner) = &pat_ts.elems[0] {
+                            let inner_name = inner.ident.to_string();
+                            param_formats.push(format!("{} = {{:?}}", inner_name));
+                            // 剥离 mut：只使用纯 Ident，不携带 mutability
+                            let bare_ident = Ident::new(&inner_name, Span::call_site());
+                            param_values.push(quote! { #bare_ident });
+                        }
+                    }
+                } else if let Pat::Tuple(pat_tuple) = &*pat_type.pat {
+                    // 单元素元组解构：(id,): Path<u64>（较少见）
+                    if pat_tuple.elems.len() == 1 {
+                        if let Pat::Ident(pat_ident) = &pat_tuple.elems[0] {
+                            let inner_name = pat_ident.ident.to_string();
+                            param_formats.push(format!("{} = {{:?}}", inner_name));
+                            let bare_ident = Ident::new(&inner_name, Span::call_site());
+                            if is_wrapper {
+                                param_values.push(quote! { #bare_ident.0 });
+                            } else {
+                                param_values.push(quote! { #bare_ident });
+                            }
+                        }
+                    }
                 }
             }
             FnArg::Receiver(_) => {
@@ -113,7 +154,6 @@ pub(super) fn log_call_macro(args: LogCallArgs, input: ItemFn) -> TokenStream {
         quote! {}
     };
 
-    // 构建新的函数体
     let expanded = quote! {
         #fn_vis #fn_sig {
             #enter_log
