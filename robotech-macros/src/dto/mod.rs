@@ -1,6 +1,7 @@
 use proc_macro2::TokenStream;
 use quote::{format_ident, quote};
 use syn::{Attribute, Field, Fields, ItemStruct};
+use wheel_rs::str_utils::{snake_to_pascal, split_camel_case, CamelFormat};
 
 /// crud_dto宏：自动生成XxxAddDto、XxxModifyDto、XxxSaveDto
 pub fn crud_dto_macro(input: ItemStruct) -> TokenStream {
@@ -13,6 +14,18 @@ pub fn crud_dto_macro(input: ItemStruct) -> TokenStream {
             .to_compile_error()
             .into();
     }
+    let struct_name_split = split_camel_case(&struct_name_str, CamelFormat::Upper);
+    if struct_name_split.is_err() {
+        return syn::Error::new_spanned(
+            struct_name,
+            "Struct name must be a valid upper camel case",
+        )
+        .to_compile_error()
+        .into();
+    }
+    let mut struct_name_split = struct_name_split.unwrap();
+    struct_name_split.pop();
+    let module_name = format_ident!("{}", struct_name_split.join("_").to_lowercase());
 
     let entity_name = struct_name_str.strip_suffix("Dto").unwrap();
     let add_dto_name = format_ident!("{}AddDto", entity_name);
@@ -24,37 +37,43 @@ pub fn crud_dto_macro(input: ItemStruct) -> TokenStream {
     let fields = &input.fields;
 
     // 处理字段
-    let (add_fields, modify_fields, save_fields, query_fields) = match fields {
-        Fields::Named(named_fields) => {
-            let mut add_field_tokens = Vec::new();
-            let mut modify_field_tokens = Vec::new();
-            let mut save_field_tokens = Vec::new();
-            let mut query_field_tokens = Vec::new();
+    let (add_fields, modify_fields, save_fields, query_fields, query_field_to_condition) =
+        match fields {
+            Fields::Named(named_fields) => {
+                let mut add_field_tokens = Vec::new();
+                let mut modify_field_tokens = Vec::new();
+                let mut save_field_tokens = Vec::new();
+                let mut query_field_tokens = Vec::new();
+                let mut query_field_to_condition_tokens = Vec::new();
 
-            for field in &named_fields.named {
-                if field.ident.as_ref().unwrap() == "id" {
-                    continue;
+                for field in &named_fields.named {
+                    if field.ident.as_ref().unwrap() == "id" {
+                        continue;
+                    }
+                    add_field_tokens.push(process_field(field, "add"));
+                    modify_field_tokens.push(process_field(field, "modify"));
+                    save_field_tokens.push(process_field(field, "save"));
+                    query_field_tokens.push(process_field(field, "query"));
+                    query_field_to_condition_tokens
+                        .push(add_query_field_to_condition_tokens(field));
                 }
-                add_field_tokens.push(process_field(field, "add"));
-                modify_field_tokens.push(process_field(field, "modify"));
-                save_field_tokens.push(process_field(field, "save"));
-                query_field_tokens.push(process_field(field, "query"));
+                (
+                    quote! { #(#add_field_tokens)* },
+                    quote! { #(#modify_field_tokens)* },
+                    quote! { #(#save_field_tokens)* },
+                    quote! { #(#query_field_tokens)* },
+                    quote! { #(#query_field_to_condition_tokens)* },
+                )
             }
-            (
-                quote! { #(#add_field_tokens)* },
-                quote! { #(#modify_field_tokens)* },
-                quote! { #(#save_field_tokens)* },
-                quote! { #(#query_field_tokens)* },
-            )
-        }
-        _ => (quote! {}, quote! {}, quote! {}, quote! {}),
-    };
+            _ => (quote! {}, quote! {}, quote! {}, quote! {}, quote! {}),
+        };
 
     let expanded = quote! {
         use derive_setters::Setters;
-        use sea_orm::ActiveValue;
+        use sea_orm::{ActiveValue, ColumnTrait, Condition};
         use typed_builder::TypedBuilder;
         use wheel_rs::serde::{option_option_serde, u64_option_serde};
+        use crate::model::#module_name::{ActiveModel, Column};
 
         // AddDto
         #[derive(o2o::o2o, utoipa::ToSchema, Debug, Default, serde::Deserialize, validator::Validate, Setters, TypedBuilder)]
@@ -115,7 +134,7 @@ pub fn crud_dto_macro(input: ItemStruct) -> TokenStream {
         }
 
         // QueryDto
-        #[derive(utoipa::ToSchema, Debug, Default, serde::Deserialize, Setters, TypedBuilder)]
+        #[derive(utoipa::ToSchema, utoipa::IntoParams, Debug, Default, serde::Deserialize, Setters, TypedBuilder)]
         #[serde(default, rename_all = "camelCase")]
         #[builder]
         #vis struct #query_dto_name {
@@ -123,8 +142,26 @@ pub fn crud_dto_macro(input: ItemStruct) -> TokenStream {
             #[builder(default, setter(strip_option))]
             pub id: Option<u64>,
             #query_fields
+            #[builder(default, setter(strip_option))]
+            pub _keyword: Option<String>,
             #[serde(skip_deserializing)]
+            #[builder(default, setter(strip_option))]
             pub _current_user_id: Option<u64>,
+        }
+
+        impl #query_dto_name {
+            pub fn to_condition(&self) -> Condition {
+                let mut condition = Condition::all();
+
+                // 处理 id 字段
+                if let Some(id) = self.id {
+                    condition = condition.add(Column::Id.eq(id as i64));
+                }
+
+                #query_field_to_condition
+
+                condition
+            }
         }
     };
 
@@ -411,4 +448,87 @@ fn wrap_type(ty: &syn::Type) -> syn::Type {
     let type_str = quote! { #ty }.to_string();
     let wrapped_str = format!("Option<{}>", type_str);
     syn::parse_str(&wrapped_str).unwrap_or_else(|_| ty.clone())
+}
+
+fn add_query_field_to_condition_tokens(field: &Field) -> TokenStream {
+    let field_name = field.ident.as_ref().unwrap();
+    let column_name = format_ident!("{}", snake_to_pascal(&field_name.to_string()));
+    // 判断字段类型
+    let ty = &field.ty;
+    if is_option_type(ty) {
+        if let syn::Type::Path(type_path) = ty {
+            if let Some(segment) = type_path.path.segments.last() {
+                // Option<T> 类型 -> 在 QueryDto 中被包装为 Option<Option<T>>
+                if let syn::PathArguments::AngleBracketed(args) = &segment.arguments {
+                    if let Some(syn::GenericArgument::Type(inner_ty)) = args.args.first() {
+                        if let syn::Type::Path(inner_path) = inner_ty {
+                            if let Some(inner_segment) = inner_path.path.segments.last() {
+                                let inner_type_name = inner_segment.ident.to_string();
+                                let v = get_value_token_stream(&inner_type_name);
+                                return quote! {
+                                    if let Some(v) = self.#field_name.as_ref() {
+                                        if let Some(v) = v {
+                                            condition = condition.add(Column::#column_name.eq(#v));
+                                        }else {
+                                            condition = condition.add(Column::#column_name.is_null());
+                                        }
+                                    }
+                                };
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    if let syn::Type::Path(type_path) = ty {
+        if let Some(segment) = type_path.path.segments.last() {
+            // 非 Option 类型 -> 在 QueryDto 中被包装为 Option<T>
+            let inner_type_name = segment.ident.to_string();
+            let v = get_value_token_stream(&inner_type_name);
+            return quote! {
+                if let Some(v) = self.#field_name.as_ref() {
+                    condition = condition.add(Column::#column_name.eq(#v));
+                }
+            };
+        }
+    }
+
+    // 无法解析类型时报错
+    syn::Error::new_spanned(
+        ty,
+        format!(
+            "字段 '{}' 的类型无法识别，请使用基本类型或 Option<T> 包裹的基本类型",
+            field_name
+        ),
+    )
+    .to_compile_error()
+    .into()
+}
+
+fn get_value_token_stream(type_name: &str) -> TokenStream {
+    match type_name {
+        "u8" => {
+            quote! { *v as i8 }
+        }
+        "u16" => {
+            quote! { *v as i16 }
+        }
+        "u32" => {
+            quote! { *v as i32 }
+        }
+        "u64" => {
+            quote! { *v as i64 }
+        }
+        "u128" => {
+            quote! { *v as i128 }
+        }
+        "bool" => {
+            quote! { *v }
+        }
+        _ => {
+            quote! { v }
+        }
+    }
 }

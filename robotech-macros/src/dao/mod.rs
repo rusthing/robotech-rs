@@ -1,5 +1,5 @@
 use proc_macro2::{Ident, Span, TokenStream};
-use quote::quote;
+use quote::{format_ident, quote};
 use syn::parse::{Parse, ParseStream};
 use syn::{bracketed, parenthesized, Expr, ItemStruct, Lit, LitStr, Token};
 use wheel_rs::str_utils::{split_camel_case, CamelFormat};
@@ -180,10 +180,12 @@ pub(super) fn dao_macro(args: DaoArgs, input: ItemStruct) -> TokenStream {
     }
     let mut struct_name_split = struct_name_split.unwrap();
     struct_name_split.pop();
-    let table_name = struct_name_split.join("_").to_lowercase();
+    let module_name = struct_name_split.join("_").to_lowercase();
+    let module = format_ident!("{module_name}");
+    let table_name = module_name;
 
     // 生成 use 导入
-    let generated_use = if !unique_keys.is_empty() || !foreign_keys.is_empty() {
+    let generated_use_linkme = if !unique_keys.is_empty() || !foreign_keys.is_empty() {
         quote! {
             use linkme::distributed_slice;
         }
@@ -348,26 +350,26 @@ pub(super) fn dao_macro(args: DaoArgs, input: ItemStruct) -> TokenStream {
 
     // 生成delete方法
     generated_members.push(quote! {
-            /// # 删除记录
-            ///
-            /// 此函数负责根据关键字段删除相应的记录
-            ///
-            /// ## 参数
-            /// * `active_model` - 包含待删除数据的 ActiveModel 实例
-            /// * `db` - 数据库连接 trait 对象
-            ///
-            /// ## 返回值
-            /// 如果删除成功则返回 Ok(())，如果删除失败则返回相应的错误信息
-            pub async fn delete<C>(active_model: ActiveModel, db: &C) -> Result<sea_orm::DeleteResult, DaoError>
-            where
-                C: ConnectionTrait,
-            {
-                active_model
-                    .delete(db)
-                    .await
-                    .map_err(|e| DaoError::parse_db_err(e))
-            }
-        });
+        /// # 删除记录
+        ///
+        /// 此函数负责根据关键字段删除相应的记录
+        ///
+        /// ## 参数
+        /// * `active_model` - 包含待删除数据的 ActiveModel 实例
+        /// * `db` - 数据库连接 trait 对象
+        ///
+        /// ## 返回值
+        /// 如果删除成功则返回 Ok(())，如果删除失败则返回相应的错误信息
+        pub async fn delete<C>(active_model: ActiveModel, db: &C) -> Result<sea_orm::DeleteResult, DaoError>
+        where
+            C: ConnectionTrait,
+        {
+            active_model
+                .delete(db)
+                .await
+                .map_err(|e| DaoError::parse_db_err(e))
+        }
+    });
 
     // 生成get_by_id方法
     generated_members.push(quote! {
@@ -392,6 +394,30 @@ pub(super) fn dao_macro(args: DaoArgs, input: ItemStruct) -> TokenStream {
         }
     });
 
+    // 生成get方法
+    generated_members.push(quote! {
+        /// # 获取记录
+        ///
+        /// 根据提供的查询参数获取数据库中的记录
+        ///
+        /// ## 参数
+        /// - `condition`: 查询条件
+        /// - `db`: 数据库连接，如果未提供则使用全局数据库连接
+        ///
+        /// ## 返回值
+        /// - `Result<Ro<Model>, SvcError>` - 查询结果封装为Ro对象，如果查询成功则返回封装了Model的Ro对象，否则返回错误信息
+        pub async fn get<C>(condition: Condition, db: &C) -> Result<Option<Model>, DaoError>
+        where
+            C: ConnectionTrait,
+        {
+            Entity::find()
+                .filter(condition)
+                .one(db)
+                .await
+                .map_err(DaoError::from)
+        }
+    });
+
     // 生成also_related相关方法
     if !related_tables.is_empty() {
         // 从 related_tables 中提取表名
@@ -404,21 +430,6 @@ pub(super) fn dao_macro(args: DaoArgs, input: ItemStruct) -> TokenStream {
                 }
             }
         }
-
-        // // 生成 use 导入语句
-        // let table_modules: Vec<Ident> = table_names
-        //     .iter()
-        //     .map(|name| Ident::new(name, Span::call_site()))
-        //     .collect();
-
-        // // 生成 Model 类型
-        // let model_types: Vec<TokenStream> = table_names
-        //     .iter()
-        //     .map(|table_name| {
-        //         let module_ident = syn::Ident::new(table_name, Span::call_site());
-        //         quote! { #module_ident::Model }
-        //     })
-        //     .collect();
 
         // 生成 Entity 引用
         let entity_refs: Vec<TokenStream> = table_names
@@ -493,9 +504,12 @@ pub(super) fn dao_macro(args: DaoArgs, input: ItemStruct) -> TokenStream {
     let expanded = quote! {
         use robotech::dao::DaoError;
         use sea_orm::{
-            ActiveModelTrait, ActiveValue, ConnectionTrait, EntityTrait,
+            ActiveModelTrait, ActiveValue, ConnectionTrait, EntityTrait, Condition, QueryFilter
         };
-        #generated_use
+
+        use crate::model::#module::{ActiveModel, Column, Entity, Model};
+
+        #generated_use_linkme
 
         #generated_unique_keys
 

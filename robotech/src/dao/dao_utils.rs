@@ -1,6 +1,6 @@
 use crate::dao::{init_foreign_keys, init_unique_keys, DaoError};
 use crate::db::get_db_conn;
-use sea_orm::sea_query::{Expr, Func, SimpleExpr};
+use sea_orm::sea_query::{Expr, Func};
 use sea_orm::{
     ColumnTrait, Condition, ConnectionTrait, DatabaseConnection, DatabaseTransaction, DbConn,
     ExprTrait, TransactionTrait,
@@ -36,19 +36,12 @@ pub async fn commit_transaction(db: DatabaseTransaction) -> Result<(), DaoError>
     Ok(())
 }
 
-/// 单字段不区分大小写模糊查询
-pub fn like<T>(keyword: &str, col: &T) -> SimpleExpr
+/// 关键字多字段OR模糊查询
+pub fn build_like_condition<T>(keyword: &str, cols: &[T]) -> Condition
 where
     T: ColumnTrait,
 {
-    Func::lower(Expr::col(*col)).like(format!("%{}%", keyword.to_lowercase()))
-}
-
-/// 多字段 OR 模糊查询
-pub fn like_any<T>(keyword: &str, cols: &[T]) -> Condition
-where
-    T: ColumnTrait,
-{
-    cols.into_iter()
-        .fold(Condition::any(), |cond, col| cond.add(like(keyword, col)))
+    cols.into_iter().fold(Condition::any(), |condition, col| {
+        condition.add(Func::lower(Expr::col(*col)).like(format!("%{}%", keyword.to_lowercase())))
+    })
 }

@@ -12,11 +12,11 @@ use crate::dao::{dao_macro, DaoArgs};
 use crate::db::MigrateArgs;
 use crate::dto::crud_dto_macro;
 use crate::log::{log_call_macro, LogCallArgs};
-use crate::svc::{db_unwrap_macro, svc_macro, DbUnwrapArgs, SvcArgs};
+use crate::svc::{db_unwrap_macro, svc_macro, DbUnwrapArgs};
 use crate::vo::vo_macro;
-use crate::web::{ctrl_macro, CtrlArgs};
+use crate::web::ctrl_macro;
 use proc_macro::TokenStream;
-use syn::{parse_macro_input, ItemFn, ItemStruct};
+use syn::{parse_macro_input, DeriveInput, ItemFn, ItemStruct};
 
 #[proc_macro]
 pub fn watch_cfg_file(args: TokenStream) -> TokenStream {
@@ -141,17 +141,15 @@ pub fn db_unwrap(args: TokenStream, input: TokenStream) -> TokenStream {
 }
 
 #[proc_macro_attribute]
-pub fn svc(args: TokenStream, input: TokenStream) -> TokenStream {
-    let args = parse_macro_input!(args as SvcArgs);
+pub fn svc(_args: TokenStream, input: TokenStream) -> TokenStream {
     let input = parse_macro_input!(input as ItemStruct);
-    svc_macro(args, input).into()
+    svc_macro(input).into()
 }
 
 #[proc_macro_attribute]
-pub fn ctrl(args: TokenStream, input: TokenStream) -> TokenStream {
-    let args = parse_macro_input!(args as CtrlArgs);
+pub fn ctrl(_args: TokenStream, input: TokenStream) -> TokenStream {
     let input = parse_macro_input!(input as ItemStruct);
-    ctrl_macro(args, input).into()
+    ctrl_macro(input).into()
 }
 
 /// 属性宏：为 VO 结构体自动生成标准属性
@@ -200,6 +198,6 @@ pub fn ctrl(args: TokenStream, input: TokenStream) -> TokenStream {
 /// ```
 #[proc_macro_attribute]
 pub fn vo(_args: TokenStream, input: TokenStream) -> TokenStream {
-    let input = parse_macro_input!(input as syn::DeriveInput);
+    let input = parse_macro_input!(input as DeriveInput);
     vo_macro(input).into()
 }
