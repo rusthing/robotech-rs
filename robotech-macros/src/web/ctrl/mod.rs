@@ -6,7 +6,7 @@ use wheel_rs::str_utils::{split_camel_case, CamelFormat};
 pub(crate) fn ctrl_macro(input: ItemStruct) -> TokenStream {
     let struct_name = &input.ident;
 
-    // 解析结构体的名称，必须是Svc结尾，符合大驼峰命名规范
+    // 解析结构体的名称，必须是Ctrl结尾，符合大驼峰命名规范
     let struct_name_str = struct_name.to_string();
     if !struct_name_str.ends_with("Ctrl") {
         return syn::Error::new_spanned(struct_name, "Struct name must end with 'Ctrl'")
@@ -24,15 +24,15 @@ pub(crate) fn ctrl_macro(input: ItemStruct) -> TokenStream {
     }
     let mut struct_name_split = struct_name_split.unwrap();
     struct_name_split.pop();
-    let path = struct_name_split.join("/");
+    let entity_name = struct_name_split.join("");
+    let module_name = struct_name_split.join("_").to_lowercase();
+    let path = struct_name_split.join("/").to_lowercase();
     let module_path = format!("/{path}");
     let crud_path = module_path.clone();
     let save_path = format!("{module_path}/save");
-    let del_by_id_path = format!("{module_path}/{{id}}");
-    let get_by_id_path = format!("{module_path}/{{id}}");
-    let get_path = module_path.clone();
-    let entity_name = struct_name_split.join("");
-    let module_name = struct_name_split.join("_").to_lowercase();
+    let del_by_id_path = format!("{crud_path}/{{id}}");
+    let get_by_id_path = format!("{crud_path}/{{id}}");
+    let get_by_query_dto = crud_path.clone();
     let dto_module = format_ident!("{module_name}_dto");
     let svc_name = format_ident!("{}Svc", entity_name);
     let vo_name = format_ident!("{}Vo", entity_name);
@@ -235,7 +235,7 @@ pub(crate) fn ctrl_macro(input: ItemStruct) -> TokenStream {
         /// * 失败时返回相应的错误信息
         #[utoipa::path(
                     get,
-                    path = #get_path,
+                    path = #get_by_query_dto,
                     params(#query_dto_name),
                     responses(
                         (status = OK, body = Ro<#vo_name>)

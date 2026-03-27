@@ -90,28 +90,28 @@ impl Parse for DaoArgs {
             let _colon: Token![:] = input.parse()?;
 
             if ident == "unique_keys" {
-                // 解开方括号
                 let content;
+                // 解开方括号
                 bracketed!(content in input);
                 let unique_keys_args = content.parse_terminated(UniqueKeyArgs::parse, Token![,])?;
                 unique_keys = unique_keys_args.into_iter().collect();
             } else if ident == "foreign_keys" {
-                // 解开方括号
                 let content;
+                // 解开方括号
                 bracketed!(content in input);
                 let foreign_keys_args =
                     content.parse_terminated(ForeignKeyArgs::parse, Token![,])?;
                 foreign_keys = foreign_keys_args.into_iter().collect();
             } else if ident == "like_columns" {
-                // 解开方括号
                 let content;
+                // 解开方括号
                 bracketed!(content in input);
                 // 解析逗号分隔的列表
                 let parsed_args = content.parse_terminated(Expr::parse, Token![,])?;
                 like_columns = parsed_args.into_iter().collect();
             } else if ident == "related_table" {
-                // 解开方括号
                 let content;
+                // 解开方括号
                 bracketed!(content in input);
                 // 解析逗号分隔的列表
                 let parsed_args = content.parse_terminated(Expr::parse, Token![,])?;

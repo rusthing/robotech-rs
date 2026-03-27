@@ -50,9 +50,11 @@ pub(crate) fn svc_macro(input: ItemStruct) -> TokenStream {
         /// ## 返回值
         /// * `Ok(Ro<Vo>)` - 添加成功，返回封装了新增Vo的Ro对象
         /// * `Err(SvcError)` - 添加失败，可能是因为违反唯一约束或其他数据库错误
+        // #[log_call]
         #[db_unwrap(transaction_required)]
         pub async fn add<C>(
             add_dto: #add_dto_name,
+            // #[skip_log]
             db: Option<&C>,
         ) -> Result<Ro<#vo_name>, SvcError>
         where
@@ -227,6 +229,7 @@ pub(crate) fn svc_macro(input: ItemStruct) -> TokenStream {
         use robotech::ro::Ro;
         use robotech::svc::SvcError;
         use robotech_macros::db_unwrap;
+        use robotech_macros::log_call;
         use sea_orm::ConnectionTrait;
         use validator::Validate;
 

@@ -1,4 +1,5 @@
 mod cfg;
+mod comm;
 mod dao;
 mod db;
 mod dto;
@@ -14,7 +15,7 @@ use crate::dto::crud_dto_macro;
 use crate::log::{log_call_macro, LogCallArgs};
 use crate::svc::{db_unwrap_macro, svc_macro, DbUnwrapArgs};
 use crate::vo::vo_macro;
-use crate::web::ctrl_macro;
+use crate::web::{ctrl_macro, router_macro, RouterArgs};
 use proc_macro::TokenStream;
 use syn::{parse_macro_input, DeriveInput, ItemFn, ItemStruct};
 
@@ -82,6 +83,56 @@ pub fn db_migrate(args: TokenStream) -> TokenStream {
 pub fn crud_dto(_args: TokenStream, input: TokenStream) -> TokenStream {
     let input = parse_macro_input!(input as ItemStruct);
     crud_dto_macro(input).into()
+}
+
+/// 属性宏：为 VO 结构体自动生成标准属性
+///
+/// 此宏会自动为 VO 结构体添加以下属性和派生宏：
+/// - `#[skip_serializing_none]` - 跳过空字段序列化
+/// - `#[derive(o2o, ToSchema, Debug, Serialize, Clone)]` - 必要的派生宏
+/// - `#[from_owned(Model)]` - o2o 转换配置
+/// - `#[serde(rename_all = "camelCase")]` - 驼峰命名
+/// - `#[serde_as]` - serde_with 支持
+///
+/// 同时会自动为无符号整型字段添加：
+/// - `#[from(~ as u64)]` 或 `#[from(~.to_string())]` - 根据字段名自动判断
+/// - `#[serde_as(as = "String")]` - 避免 JS 精度丢失
+///
+/// # 使用示例
+/// ```
+/// #[vo]
+/// pub struct StudentVo {
+///     /// ID
+///     pub id: u64,
+///     /// 名称
+///     pub name: String,
+///     /// 备注
+///     pub remark: Option<String>,
+/// }
+/// ```
+///
+/// 上述代码会被展开为：
+/// ```
+/// #[skip_serializing_none]
+/// #[derive(o2o, ToSchema, Debug, Serialize, Clone)]
+/// #[from_owned(Model)]
+/// #[serde(rename_all = "camelCase")]
+/// #[serde_as]
+/// pub struct StudentVo {
+///     /// ID
+///     #[from(~ as u64)]
+///     #[serde_as(as = "String")]
+///     pub id: u64,
+///     /// 名称
+///     pub name: String,
+///     /// 备注
+///     pub remark: Option<String>,
+/// }
+/// ```
+#[proc_macro_attribute]
+pub fn vo(_args: TokenStream, input: TokenStream) -> TokenStream {
+    let input = parse_macro_input!(input as DeriveInput);
+    vo_macro(input).into()
 }
 
 /// 属性宏：为DAO结构体生成标准的CRUD方法
@@ -152,52 +203,9 @@ pub fn ctrl(_args: TokenStream, input: TokenStream) -> TokenStream {
     ctrl_macro(input).into()
 }
 
-/// 属性宏：为 VO 结构体自动生成标准属性
-///
-/// 此宏会自动为 VO 结构体添加以下属性和派生宏：
-/// - `#[skip_serializing_none]` - 跳过空字段序列化
-/// - `#[derive(o2o, ToSchema, Debug, Serialize, Clone)]` - 必要的派生宏
-/// - `#[from_owned(Model)]` - o2o 转换配置
-/// - `#[serde(rename_all = "camelCase")]` - 驼峰命名
-/// - `#[serde_as]` - serde_with 支持
-///
-/// 同时会自动为无符号整型字段添加：
-/// - `#[from(~ as u64)]` 或 `#[from(~.to_string())]` - 根据字段名自动判断
-/// - `#[serde_as(as = "String")]` - 避免 JS 精度丢失
-///
-/// # 使用示例
-/// ```
-/// #[vo]
-/// pub struct StudentVo {
-///     /// ID
-///     pub id: u64,
-///     /// 名称
-///     pub name: String,
-///     /// 备注
-///     pub remark: Option<String>,
-/// }
-/// ```
-///
-/// 上述代码会被展开为：
-/// ```
-/// #[skip_serializing_none]
-/// #[derive(o2o, ToSchema, Debug, Serialize, Clone)]
-/// #[from_owned(Model)]
-/// #[serde(rename_all = "camelCase")]
-/// #[serde_as]
-/// pub struct StudentVo {
-///     /// ID
-///     #[from(~ as u64)]
-///     #[serde_as(as = "String")]
-///     pub id: u64,
-///     /// 名称
-///     pub name: String,
-///     /// 备注
-///     pub remark: Option<String>,
-/// }
-/// ```
 #[proc_macro_attribute]
-pub fn vo(_args: TokenStream, input: TokenStream) -> TokenStream {
-    let input = parse_macro_input!(input as DeriveInput);
-    vo_macro(input).into()
+pub fn router(args: TokenStream, input: TokenStream) -> TokenStream {
+    let args = parse_macro_input!(args as RouterArgs);
+    let input = parse_macro_input!(input as ItemStruct);
+    router_macro(args, input).into()
 }
