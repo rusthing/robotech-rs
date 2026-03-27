@@ -1,7 +1,7 @@
 use proc_macro2::{Ident, Span, TokenStream};
 use quote::{format_ident, quote};
 use syn::parse::{Parse, ParseStream};
-use syn::{FnArg, ItemFn, Pat, Token};
+use syn::{FnArg, ItemFn, Pat, PatType, Token};
 
 #[derive(PartialEq)]
 enum RecordMode {
@@ -14,8 +14,7 @@ enum RecordMode {
 pub(super) struct LogCallArgs {
     /// 日志级别
     level: Ident,
-    /// 记录模式
-    /// 进入、退出、两者都记录
+    /// 记录模式：进入、退出、两者都记录
     mode: RecordMode,
 }
 
@@ -57,12 +56,18 @@ impl Parse for LogCallArgs {
 /// 类型名后必须紧跟 '<'，避免误匹配 PathBuf 等类型
 fn is_axum_wrapper(type_str: &str) -> bool {
     let normalized = type_str.replace(' ', "");
-    normalized.contains("Path<")
-        || normalized.contains("Json<")
-        || normalized.contains("Query<")
+    normalized.contains("Path<") || normalized.contains("Json<") || normalized.contains("Query<")
 }
 
-pub(super) fn log_call_macro(args: LogCallArgs, input: ItemFn) -> TokenStream {
+/// 检查参数是否带有 #[skip_log] 属性
+fn has_skip_log(pat_type: &PatType) -> bool {
+    pat_type
+        .attrs
+        .iter()
+        .any(|attr| attr.path().is_ident("skip_log"))
+}
+
+pub(super) fn log_call_macro(args: LogCallArgs, mut input: ItemFn) -> TokenStream {
     let LogCallArgs {
         level: log_level,
         mode: record_mode,
@@ -72,14 +77,19 @@ pub(super) fn log_call_macro(args: LogCallArgs, input: ItemFn) -> TokenStream {
     let fn_name_str = fn_name.to_string();
     let fn_block = &input.block;
     let fn_vis = &input.vis;
-    let fn_sig = &input.sig;
 
+    // ── 第一步：收集需要记录的参数，同时剥除所有 #[skip_log] 属性 ──────────────
     let mut param_formats = Vec::new();
     let mut param_values = Vec::new();
 
     for arg in &input.sig.inputs {
         match arg {
             FnArg::Typed(pat_type) => {
+                // 跳过带 #[skip_log] 的参数，不收集其格式和值
+                if has_skip_log(pat_type) {
+                    continue;
+                }
+
                 let ty = &pat_type.ty;
                 let type_str = quote!(#ty).to_string();
                 let is_wrapper = is_axum_wrapper(&type_str);
@@ -90,20 +100,17 @@ pub(super) fn log_call_macro(args: LogCallArgs, input: ItemFn) -> TokenStream {
                     let param_name_str = param_name.to_string();
                     param_formats.push(format!("{} = {{:?}}", param_name_str));
                     if is_wrapper {
-                        // path: Path<T> → path.0 取出内部值
                         param_values.push(quote! { #param_name.0 });
                     } else {
                         param_values.push(quote! { #param_name });
                     }
                 } else if let Pat::TupleStruct(pat_ts) = &*pat_type.pat {
                     // 解构写法：Path(id): Path<u64>  /  Json(mut dto): Json<Dto>
-                    // 注意：内部可能带 mut（如 Json(mut dto)），必须剥离 mut 只取 Ident
-                    // 否则 quote! { #inner } 会生成 `mut dto`，在表达式位置非法
+                    // 必须用裸 Ident，避免 mut 被带入表达式位置
                     if pat_ts.elems.len() == 1 {
                         if let Pat::Ident(inner) = &pat_ts.elems[0] {
                             let inner_name = inner.ident.to_string();
                             param_formats.push(format!("{} = {{:?}}", inner_name));
-                            // 剥离 mut：只使用纯 Ident，不携带 mutability
                             let bare_ident = Ident::new(&inner_name, Span::call_site());
                             param_values.push(quote! { #bare_ident });
                         }
@@ -131,6 +138,19 @@ pub(super) fn log_call_macro(args: LogCallArgs, input: ItemFn) -> TokenStream {
         }
     }
 
+    // ── 第二步：从函数签名中剥除所有 #[skip_log] 属性 ────────────────────────
+    // 必须在生成代码之前完成，否则编译器会报"未知属性"错误
+    for arg in input.sig.inputs.iter_mut() {
+        if let FnArg::Typed(pat_type) = arg {
+            pat_type
+                .attrs
+                .retain(|attr| !attr.path().is_ident("skip_log"));
+        }
+    }
+
+    let fn_sig = &input.sig;
+
+    // ── 第三步：生成日志代码 ──────────────────────────────────────────────────
     let enter_log = format!(
         "进入方法 ➡️ {fn_name_str}{}",
         if param_formats.is_empty() {
