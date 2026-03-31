@@ -373,6 +373,29 @@ pub(super) fn dao_macro(args: DaoArgs, input: ItemStruct) -> TokenStream {
 
     // 生成delete_by_condition方法
     generated_members.push(quote! {
+        /// # 删除记录
+        ///
+        /// 根据提供的查询参数删除数据库中的记录
+        ///
+        /// ## 参数
+        /// - `condition`: 查询条件
+        /// - `db`: 数据库连接，如果未提供则使用全局数据库连接
+        ///
+        /// ## 返回值
+        /// - `Result<DeleteResult, DaoError>` - 删除结果
+        pub async fn delete_by_condition<C>(
+            condition: Condition,
+            db: &C,
+        ) -> Result<DeleteResult, DaoError>
+        where
+            C: ConnectionTrait,
+        {
+            Entity::delete_many()
+                .filter(condition)
+                .exec(db)
+                .await
+                .map_err(|e| DaoError::parse_db_err(e))
+        }
     });
 
     // 生成get_by_id方法
@@ -508,7 +531,7 @@ pub(super) fn dao_macro(args: DaoArgs, input: ItemStruct) -> TokenStream {
     let expanded = quote! {
         use robotech::dao::DaoError;
         use sea_orm::{
-            ActiveModelTrait, ActiveValue, ConnectionTrait, EntityTrait, Condition, QueryFilter
+            ActiveModelTrait, ActiveValue, ConnectionTrait, EntityTrait, Condition, QueryFilter, DeleteResult
         };
 
         use crate::model::#module::{ActiveModel, Column, Entity, Model};

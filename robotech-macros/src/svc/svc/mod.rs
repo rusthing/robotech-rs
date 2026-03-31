@@ -2,6 +2,7 @@ use proc_macro2::TokenStream;
 use quote::{format_ident, quote};
 use syn::ItemStruct;
 use wheel_rs::str_utils::{split_camel_case, CamelFormat};
+use crate::db_unwrap;
 
 pub(crate) fn svc_macro(input: ItemStruct) -> TokenStream {
     let struct_name = &input.ident;
@@ -173,6 +174,38 @@ pub(crate) fn svc_macro(input: ItemStruct) -> TokenStream {
                 return Err(SvcError::NotFound(id.to_string()));
             }
             Ok(Ro::success("删除成功".to_string()).extra(Some(one)))
+        }
+    });
+
+    // 生成del_by_query_dto方法
+    generated_methods.push(quote! {
+        /// # 删除记录
+        ///
+        /// 根据提供的查询参数获取数据库中的记录
+        ///
+        /// ## 参数
+        /// * `dto` - 查询参数
+        /// * `db` - 数据库连接，如果未提供则使用全局数据库连接
+        ///
+        /// ## 返回值
+        /// * `Result<Ro<Vo>, SvcError>` - 查询结果封装为Ro对象，如果查询成功则返回封装了Vo的Ro对象，否则返回错误信息
+        #[db_unwrap(transaction_required)]
+        #[log_call]
+        pub async fn del_by_query_dto<C>(
+            dto: #query_dto_name,
+            #[skip_log]
+            db: Option<&C>,
+        ) -> Result<Ro<()>, SvcError>
+        where
+            C: ConnectionTrait,
+        {
+            let mut condition = dto.to_condition();
+            if let Some(keyword) = &dto._keyword {
+                condition = condition.add(build_like_condition(keyword, #dao_name::LIKE_COLUMNS));
+            }
+
+            #dao_name::delete_by_condition(condition, db).await?;
+            Ok(Ro::success("删除成功".to_string()))
         }
     });
 
