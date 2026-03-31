@@ -73,6 +73,7 @@ pub(super) fn log_call_macro(args: LogCallArgs, mut input: ItemFn) -> TokenStrea
         mode: record_mode,
     } = args;
 
+    let fn_attrs = &input.attrs;
     let fn_name = &input.sig.ident;
     let fn_name_str = fn_name.to_string();
     let fn_block = &input.block;
@@ -175,6 +176,7 @@ pub(super) fn log_call_macro(args: LogCallArgs, mut input: ItemFn) -> TokenStrea
     };
 
     let expanded = quote! {
+        #(#fn_attrs)*
         #fn_vis #fn_sig {
             #enter_log
             let result = #fn_block;

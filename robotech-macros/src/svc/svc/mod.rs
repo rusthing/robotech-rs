@@ -50,11 +50,11 @@ pub(crate) fn svc_macro(input: ItemStruct) -> TokenStream {
         /// ## 返回值
         /// * `Ok(Ro<Vo>)` - 添加成功，返回封装了新增Vo的Ro对象
         /// * `Err(SvcError)` - 添加失败，可能是因为违反唯一约束或其他数据库错误
-        // #[log_call]
         #[db_unwrap(transaction_required)]
+        #[log_call]
         pub async fn add<C>(
             add_dto: #add_dto_name,
-            // #[skip_log]
+            #[skip_log]
             db: Option<&C>,
         ) -> Result<Ro<#vo_name>, SvcError>
         where
@@ -85,8 +85,10 @@ pub(crate) fn svc_macro(input: ItemStruct) -> TokenStream {
         /// * `Ok(Ro<Vo>)` - 修改成功，返回封装了更新后Vo的Ro对象
         /// * `Err(SvcError)` - 修改失败，可能因为记录不存在、违反唯一约束或其他数据库错误
         #[db_unwrap(transaction_required)]
+        #[log_call]
         pub async fn modify<C>(
             modify_dto: #modify_dto_name,
+            #[skip_log]
             db: Option<&C>,
         ) -> Result<Ro<#vo_name>, SvcError>
         where
@@ -146,8 +148,10 @@ pub(crate) fn svc_macro(input: ItemStruct) -> TokenStream {
         /// * `Ok(Ro<Vo>)` - 删除成功，返回封装了Vo的Ro对象
         /// * `Err(SvcError)` - 删除失败，可能因为记录不存在或其他数据库错误
         #[db_unwrap(transaction_required)]
+        #[log_call]
         pub async fn del_by_id<C>(
             id: u64,
+            #[skip_log]
             db: Option<&C>,
         ) -> Result<Ro<#vo_name>, SvcError>
         where
@@ -186,7 +190,12 @@ pub(crate) fn svc_macro(input: ItemStruct) -> TokenStream {
         /// * `Ok(Ro<Vo>)` - 查询成功，如果记录存在，返回封装了Vo的Ro对象，如果不存在则返回对象的extra为None
         /// * `Err(SvcError)` - 查询失败，可能是数据库错误
         #[db_unwrap]
-        pub async fn get_by_id<C>(id: u64, db: Option<&C>) -> Result<Ro<#vo_name>, SvcError>
+        #[log_call]
+        pub async fn get_by_id<C>(
+            id: u64,
+            #[skip_log]
+            db: Option<&C>
+        ) -> Result<Ro<#vo_name>, SvcError>
         where
             C: ConnectionTrait,
         {
@@ -208,7 +217,12 @@ pub(crate) fn svc_macro(input: ItemStruct) -> TokenStream {
         /// ## 返回值
         /// * `Result<Ro<Vo>, SvcError>` - 查询结果封装为Ro对象，如果查询成功则返回封装了Vo的Ro对象，否则返回错误信息
         #[db_unwrap]
-        pub async fn get_by_query_dto<C>(dto: #query_dto_name, db: Option<&C>) -> Result<Ro<#vo_name>, SvcError>
+        #[log_call]
+        pub async fn get_by_query_dto<C>(
+            dto: #query_dto_name,
+            #[skip_log]
+            db: Option<&C>
+        ) -> Result<Ro<#vo_name>, SvcError>
         where
             C: ConnectionTrait,
         {
@@ -217,7 +231,7 @@ pub(crate) fn svc_macro(input: ItemStruct) -> TokenStream {
                 condition = condition.add(build_like_condition(keyword, #dao_name::LIKE_COLUMNS));
             }
 
-            let one = #dao_name::get(condition, db)
+            let one = #dao_name::get_by_condition(condition, db)
                 .await?
                 .map(|value| #vo_name::from(value));
             Ok(Ro::success("查询成功".to_string()).extra(one))

@@ -371,6 +371,10 @@ pub(super) fn dao_macro(args: DaoArgs, input: ItemStruct) -> TokenStream {
         }
     });
 
+    // 生成delete_by_condition方法
+    generated_members.push(quote! {
+    });
+
     // 生成get_by_id方法
     generated_members.push(quote! {
         /// # 根据ID查询相应记录
@@ -394,7 +398,7 @@ pub(super) fn dao_macro(args: DaoArgs, input: ItemStruct) -> TokenStream {
         }
     });
 
-    // 生成get方法
+    // 生成get_by_condition方法
     generated_members.push(quote! {
         /// # 获取记录
         ///
@@ -406,7 +410,7 @@ pub(super) fn dao_macro(args: DaoArgs, input: ItemStruct) -> TokenStream {
         ///
         /// ## 返回值
         /// - `Result<Ro<Model>, SvcError>` - 查询结果封装为Ro对象，如果查询成功则返回封装了Model的Ro对象，否则返回错误信息
-        pub async fn get<C>(condition: Condition, db: &C) -> Result<Option<Model>, DaoError>
+        pub async fn get_by_condition<C>(condition: Condition, db: &C) -> Result<Option<Model>, DaoError>
         where
             C: ConnectionTrait,
         {

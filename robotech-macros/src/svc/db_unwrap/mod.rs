@@ -30,6 +30,7 @@ impl Parse for DbUnwrapArgs {
 }
 
 pub(crate) fn db_unwrap_macro(args: DbUnwrapArgs, input: ItemFn) -> TokenStream {
+    let fn_attrs = &input.attrs;
     let fn_vis = &input.vis;
     let fn_sig = &input.sig;
 
@@ -47,7 +48,7 @@ pub(crate) fn db_unwrap_macro(args: DbUnwrapArgs, input: ItemFn) -> TokenStream 
         _ => false,
     });
 
-    // 如果没有db参数，报错
+    // 如果没有 db 参数，报错
     if !has_db_param {
         return syn::Error::new_spanned(
             &fn_sig,
@@ -62,6 +63,7 @@ pub(crate) fn db_unwrap_macro(args: DbUnwrapArgs, input: ItemFn) -> TokenStream 
 
     // 生成包装后的方法
     let expanded = quote! {
+        #(#fn_attrs)*
         #fn_vis #fn_sig {
             if let Some(db) = db {
                 #user_block
