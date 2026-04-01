@@ -1,7 +1,7 @@
 use proc_macro2::TokenStream;
 use quote::{format_ident, quote};
 use syn::{Attribute, Field, Fields, ItemStruct};
-use wheel_rs::str_utils::{snake_to_pascal, split_camel_case, CamelFormat};
+use wheel_rs::str_utils::{CamelFormat, snake_to_pascal, split_camel_case};
 
 /// crud_dto宏：自动生成XxxAddDto、XxxModifyDto、XxxSaveDto
 pub fn crud_dto_macro(input: ItemStruct) -> TokenStream {
@@ -69,6 +69,7 @@ pub fn crud_dto_macro(input: ItemStruct) -> TokenStream {
         };
 
     let expanded = quote! {
+        use std::fmt::{Display, Formatter};
         use derive_setters::Setters;
         use sea_orm::{ActiveValue, ColumnTrait, Condition};
         use typed_builder::TypedBuilder;
@@ -147,6 +148,12 @@ pub fn crud_dto_macro(input: ItemStruct) -> TokenStream {
             #[serde(skip_deserializing)]
             #[builder(default, setter(strip_option))]
             pub _current_user_id: Option<u64>,
+        }
+
+        impl Display for #query_dto_name {
+            fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+                write!(f, "{:?}", self)
+            }
         }
 
         impl #query_dto_name {
