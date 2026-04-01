@@ -1,8 +1,7 @@
 use proc_macro2::TokenStream;
 use quote::{format_ident, quote};
 use syn::ItemStruct;
-use wheel_rs::str_utils::{split_camel_case, CamelFormat};
-use crate::db_unwrap;
+use wheel_rs::str_utils::{CamelFormat, split_camel_case};
 
 pub(crate) fn svc_macro(input: ItemStruct) -> TokenStream {
     let struct_name = &input.ident;
@@ -204,7 +203,10 @@ pub(crate) fn svc_macro(input: ItemStruct) -> TokenStream {
                 condition = condition.add(build_like_condition(keyword, #dao_name::LIKE_COLUMNS));
             }
 
-            #dao_name::delete_by_condition(condition, db).await?;
+            let rows_affected = #dao_name::delete_by_condition(condition, db).await?.rows_affected;
+            if rows_affected == 0 {
+                return Err(SvcError::NotFound(dto.to_string()));
+            }
             Ok(Ro::success("删除成功".to_string()))
         }
     });

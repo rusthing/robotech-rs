@@ -2,8 +2,8 @@ use crate::comm::SetArgsMode;
 use proc_macro2::{Ident, TokenStream};
 use quote::{format_ident, quote};
 use syn::parse::{Parse, ParseStream};
-use syn::{bracketed, parenthesized, ItemStruct, Token};
-use wheel_rs::str_utils::{split_camel_case, CamelFormat};
+use syn::{ItemStruct, Token, bracketed, parenthesized};
+use wheel_rs::str_utils::{CamelFormat, split_camel_case};
 
 /// 唯一键字段配置项
 #[derive(Debug)]
@@ -49,7 +49,7 @@ impl RouterArgs {
             modify: true,
             save: true,
             del_by_id: true,
-            del_by_query_dto: false,
+            del_by_query_dto: true,
             get_by_id: true,
             get_by_query_dto: true,
             list_by_query_dto: false,
@@ -191,9 +191,9 @@ pub(crate) fn router_macro(args: RouterArgs, input: ItemStruct) -> TokenStream {
     let crud_path = module_path.clone();
     let save_path = format!("{module_path}/save");
     let del_by_id_path = format!("{crud_path}/{{id}}");
-    let del_by_query_dto = crud_path.clone();
+    let del_by_query_dto_path = crud_path.clone();
     let get_by_id_path = format!("{crud_path}/{{id}}");
-    let get_by_query_dto = crud_path.clone();
+    let get_by_query_dto_path = crud_path.clone();
     let mut routes = vec![];
 
     if args.add {
@@ -209,13 +209,13 @@ pub(crate) fn router_macro(args: RouterArgs, input: ItemStruct) -> TokenStream {
         routes.push(quote! {#del_by_id_path, delete(del_by_id)});
     }
     if args.del_by_query_dto {
-        routes.push(quote! {#del_by_query_dto, delete(del_by_query_dto)});
+        routes.push(quote! {#del_by_query_dto_path, delete(del_by_query_dto)});
     }
     if args.get_by_id {
         routes.push(quote! {#get_by_id_path, get(get_by_id)});
     }
     if args.get_by_query_dto {
-        routes.push(quote! {#get_by_query_dto, get(get_by_query_dto)});
+        routes.push(quote! {#get_by_query_dto_path, get(get_by_query_dto)});
     }
     if args.list_by_query_dto {
         routes.push(quote! {#crud_path, get(list_by_query_dto)});

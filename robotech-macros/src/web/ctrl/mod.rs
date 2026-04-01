@@ -1,7 +1,7 @@
 use proc_macro2::TokenStream;
 use quote::{format_ident, quote};
 use syn::ItemStruct;
-use wheel_rs::str_utils::{split_camel_case, CamelFormat};
+use wheel_rs::str_utils::{CamelFormat, split_camel_case};
 
 pub(crate) fn ctrl_macro(input: ItemStruct) -> TokenStream {
     let struct_name = &input.ident;
@@ -31,6 +31,7 @@ pub(crate) fn ctrl_macro(input: ItemStruct) -> TokenStream {
     let crud_path = module_path.clone();
     let save_path = format!("{module_path}/save");
     let del_by_id_path = format!("{crud_path}/{{id}}");
+    let del_by_query_dto_path = crud_path.clone();
     let get_by_id_path = format!("{crud_path}/{{id}}");
     let get_by_query_dto = crud_path.clone();
     let dto_module = format_ident!("{module_name}_dto");
@@ -187,6 +188,32 @@ pub(crate) fn ctrl_macro(input: ItemStruct) -> TokenStream {
         }
     });
 
+    // 生成del_by_query_dto方法
+    generated_methods.push(quote! {
+        /// # 根据查询条件删除记录
+        ///
+        /// 该接口用于根据查询条件删除一个或多个已存在的记录
+        ///
+        /// ## 请求体
+        /// * `DelByQueryDto` - 封装查询条件的结构体
+        ///
+        /// ## 错误处理
+        /// * 当缺少必要参数时，返回`ValidationError`错误
+        /// * 当参数格式不正确时，返回`ValidationError`错误
+        /// * 当根据查询条件找不到对应记录时，返回相应的错误信息
+        #[utoipa::path(
+            post,
+            path = #del_by_query_dto_path,
+            params(#query_dto_name),
+            responses((status = OK, body = Ro<#vo_name>))
+        )]
+        #[log_call]
+        pub async fn del_by_query_dto(Query(dto): Query<#query_dto_name>) -> Result<Json<Ro<()>>, CtrlError> {
+            let ro = #svc_name::del_by_query_dto::<DatabaseTransaction>(dto, None).await?;
+            Ok(Json(ro))
+        }
+    });
+
     // 生成get_by_id方法
     generated_methods.push(quote! {
         /// # 根据ID获取记录的信息
@@ -234,12 +261,12 @@ pub(crate) fn ctrl_macro(input: ItemStruct) -> TokenStream {
         /// * 成功时返回对应的记录信息的JSON格式数据
         /// * 失败时返回相应的错误信息
         #[utoipa::path(
-                    get,
-                    path = #get_by_query_dto,
-                    params(#query_dto_name),
-                    responses(
-                        (status = OK, body = Ro<#vo_name>)
-                    )
+            get,
+            path = #get_by_query_dto,
+            params(#query_dto_name),
+            responses(
+                (status = OK, body = Ro<#vo_name>)
+            )
         )]
         #[log_call]
         pub async fn get_by_query_dto(Query(dto): Query<#query_dto_name>) -> Result<Json<Ro<#vo_name>>, CtrlError> {
