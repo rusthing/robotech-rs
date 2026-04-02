@@ -425,14 +425,14 @@ pub(super) fn dao_macro(args: DaoArgs, input: ItemStruct) -> TokenStream {
     generated_members.push(quote! {
         /// # 获取记录
         ///
-        /// 根据提供的查询参数获取数据库中的记录
+        /// 根据提供的查询条件获取数据库中的记录
         ///
         /// ## 参数
         /// - `condition`: 查询条件
         /// - `db`: 数据库连接，如果未提供则使用全局数据库连接
         ///
         /// ## 返回值
-        /// - `Result<Ro<Model>, SvcError>` - 查询结果封装为Ro对象，如果查询成功则返回封装了Model的Ro对象，否则返回错误信息
+        /// - `Result<Ro<Model>, DaoError>` - 查询结果封装为Model对象，如果查询成功则返回封装了Model的Ro对象，否则返回错误信息
         pub async fn get_by_condition<C>(condition: Condition, db: &C) -> Result<Option<Model>, DaoError>
         where
             C: ConnectionTrait,
@@ -440,6 +440,30 @@ pub(super) fn dao_macro(args: DaoArgs, input: ItemStruct) -> TokenStream {
             Entity::find()
                 .filter(condition)
                 .one(db)
+                .await
+                .map_err(DaoError::from)
+        }
+    });
+
+    // 生成list_by_condition方法
+    generated_members.push(quote! {
+        /// # 查询记录列表
+        ///
+        /// 根据提供的查询条件获取数据库中的记录列表
+        ///
+        /// ## 参数
+        /// - `condition`: 查询条件
+        /// - `db`: 数据库连接，如果未提供则使用全局数据库连接
+        ///
+        /// ## 返回值
+        /// - `Result<Option<Model>, DaoError>` - 查询结果封装为Model对象的列表，如果查询成功则返回封装了Model的列表，否则返回错误信息
+        pub async fn list_by_condition<C>(condition: Condition, db: &C) -> Result<Vec<Model>, DaoError>
+        where
+            C: ConnectionTrait,
+        {
+            Entity::find()
+                .filter(condition)
+                .all(db)
                 .await
                 .map_err(DaoError::from)
         }
