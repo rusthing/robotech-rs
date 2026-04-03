@@ -53,7 +53,7 @@ impl RouterArgs {
             get_by_id: true,
             get_by_query_dto: true,
             list_by_query_dto: false,
-            page_by_query_dto: false,
+            page_by_query_dto: true,
             routes: vec![],
         }
     }
@@ -67,7 +67,7 @@ impl RouterArgs {
             get_by_id: true,
             get_by_query_dto: true,
             list_by_query_dto: true,
-            page_by_query_dto: true,
+            page_by_query_dto: false,
             routes: vec![],
         }
     }
@@ -194,6 +194,8 @@ pub(crate) fn router_macro(args: RouterArgs, input: ItemStruct) -> TokenStream {
     let del_by_query_dto_path = crud_path.clone();
     let get_by_id_path = format!("{crud_path}/{{id}}");
     let get_by_query_dto_path = crud_path.clone();
+    let list_by_query_dto_path = format!("{module_path}/list");
+    let page_by_query_dto_path = format!("{module_path}/page");
     let mut routes = vec![];
 
     if args.add {
@@ -218,10 +220,10 @@ pub(crate) fn router_macro(args: RouterArgs, input: ItemStruct) -> TokenStream {
         routes.push(quote! {#get_by_query_dto_path, get(get_by_query_dto)});
     }
     if args.list_by_query_dto {
-        routes.push(quote! {#crud_path, get(list_by_query_dto)});
+        routes.push(quote! {#list_by_query_dto_path, get(list_by_query_dto)});
     }
     if args.page_by_query_dto {
-        routes.push(quote! {#crud_path, get(page_by_query_dto)});
+        routes.push(quote! {#page_by_query_dto_path, get(page_by_query_dto)});
     }
 
     for route_args in &args.routes {

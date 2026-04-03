@@ -33,7 +33,9 @@ pub(crate) fn ctrl_macro(input: ItemStruct) -> TokenStream {
     let del_by_id_path = format!("{crud_path}/{{id}}");
     let del_by_query_dto_path = crud_path.clone();
     let get_by_id_path = format!("{crud_path}/{{id}}");
-    let get_by_query_dto = crud_path.clone();
+    let get_by_query_dto_path = crud_path.clone();
+    let list_by_query_dto_path = format!("{module_path}/list");
+    let page_by_query_dto_path = format!("{module_path}/page");
     let dto_module = format_ident!("{module_name}_dto");
     let svc_name = format_ident!("{}Svc", entity_name);
     let vo_name = format_ident!("{}Vo", entity_name);
@@ -262,7 +264,7 @@ pub(crate) fn ctrl_macro(input: ItemStruct) -> TokenStream {
         /// * 失败时返回相应的错误信息
         #[utoipa::path(
             get,
-            path = #get_by_query_dto,
+            path = #get_by_query_dto_path,
             params(#query_dto_name),
             responses(
                 (status = OK, body = Ro<#vo_name>)
@@ -271,6 +273,33 @@ pub(crate) fn ctrl_macro(input: ItemStruct) -> TokenStream {
         #[log_call]
         pub async fn get_by_query_dto(Query(dto): Query<#query_dto_name>) -> Result<Json<Ro<#vo_name>>, CtrlError> {
             let ro = #svc_name::get_by_query_dto::<DatabaseConnection>(dto, None).await?;
+            Ok(Json(ro))
+        }
+    });
+
+    // 生成list_by_query_dto方法
+    generated_methods.push(quote! {
+        /// # 查询记录列表
+        ///
+        /// 该接口通过查询参数获取对应记录列表的详细信息
+        ///
+        /// ## 查询参数
+        /// * `QueryDto` - 包含查询条件的结构体
+        ///
+        /// ## 返回值
+        /// * 成功时返回对应的记录信息的JSON格式数据
+        /// * 失败时返回相应的错误信息
+        #[utoipa::path(
+            get,
+            path = #list_by_query_dto_path,
+            params(#query_dto_name),
+            responses(
+                (status = OK, body = Ro<Vec<#vo_name>>)
+            )
+        )]
+        #[log_call]
+        pub async fn list_by_query_dto(Query(dto): Query<#query_dto_name>) -> Result<Json<Ro<Vec<#vo_name>>>, CtrlError> {
+            let ro = #svc_name::list_by_query_dto::<DatabaseConnection>(dto, None).await?;
             Ok(Json(ro))
         }
     });
