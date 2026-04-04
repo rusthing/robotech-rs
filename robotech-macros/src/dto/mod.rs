@@ -143,11 +143,13 @@ pub fn crud_dto_macro(input: ItemStruct) -> TokenStream {
             #[builder(default, setter(strip_option))]
             pub id: Option<u64>,
             #query_fields
+            #[serde(alias = "_keyword")]
             #[builder(default, setter(strip_option))]
             pub _keyword: Option<String>,
             #[serde(skip_deserializing)]
             #[builder(default, setter(strip_option))]
             pub _current_user_id: Option<u64>,
+            #[serde(alias = "_orderBy")]
             #[builder(default, setter(strip_option))]
             pub _order_by: Option<String>,
         }
