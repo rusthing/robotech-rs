@@ -499,6 +499,9 @@ pub(super) fn dao_macro(args: DaoArgs, input: ItemStruct) -> TokenStream {
             }
             let paginator = add_order_by(Entity::find().filter(condition), order_by)?.paginate(db, page_size);
             let total  = paginator.num_items().await.map_err(DaoError::from)?;
+            if total == 0 {
+                return Ok((1, 0, vec![]));
+            }
             let total_pages = total / page_size + if total % page_size > 0 { 1 } else { 0 };
             if page_num > total_pages {
                 page_num = total_pages;
