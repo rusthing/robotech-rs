@@ -148,6 +148,8 @@ pub fn crud_dto_macro(input: ItemStruct) -> TokenStream {
             #[serde(skip_deserializing)]
             #[builder(default, setter(strip_option))]
             pub _current_user_id: Option<u64>,
+            #[builder(default, setter(strip_option))]
+            pub _order_by: Option<String>,
         }
 
         impl Display for #query_dto_name {

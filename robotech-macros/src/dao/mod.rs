@@ -1,8 +1,8 @@
 use proc_macro2::{Ident, Span, TokenStream};
 use quote::{format_ident, quote};
 use syn::parse::{Parse, ParseStream};
-use syn::{bracketed, parenthesized, Expr, ItemStruct, Lit, LitStr, Token};
-use wheel_rs::str_utils::{split_camel_case, CamelFormat};
+use syn::{Expr, ItemStruct, Lit, LitStr, Token, bracketed, parenthesized};
+use wheel_rs::str_utils::{CamelFormat, split_camel_case};
 
 /// 唯一键字段配置项
 #[derive(Debug)]
@@ -457,12 +457,11 @@ pub(super) fn dao_macro(args: DaoArgs, input: ItemStruct) -> TokenStream {
         ///
         /// ## 返回值
         /// - `Result<Option<Model>, DaoError>` - 查询结果封装为Model对象的列表，如果查询成功则返回封装了Model的列表，否则返回错误信息
-        pub async fn list_by_condition<C>(condition: Condition, db: &C) -> Result<Vec<Model>, DaoError>
+        pub async fn list_by_condition<C>(condition: Condition, order_by: &Option<String>, db: &C) -> Result<Vec<Model>, DaoError>
         where
             C: ConnectionTrait,
         {
-            Entity::find()
-                .filter(condition)
+            add_order_by(Entity::find().filter(condition), order_by)?
                 .all(db)
                 .await
                 .map_err(DaoError::from)
@@ -553,7 +552,7 @@ pub(super) fn dao_macro(args: DaoArgs, input: ItemStruct) -> TokenStream {
     }
 
     let expanded = quote! {
-        use robotech::dao::DaoError;
+        use robotech::dao::{add_order_by, DaoError};
         use sea_orm::{
             ActiveModelTrait, ActiveValue, ConnectionTrait, EntityTrait, Condition, QueryFilter, DeleteResult
         };

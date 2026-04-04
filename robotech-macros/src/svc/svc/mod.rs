@@ -295,12 +295,14 @@ pub(crate) fn svc_macro(input: ItemStruct) -> TokenStream {
         where
             C: ConnectionTrait,
         {
+            let keyword = &dto._keyword;
+            let order_by = &dto._order_by;
             let mut condition = dto.to_condition();
-            if let Some(keyword) = &dto._keyword {
+            if let Some(keyword) = keyword {
                 condition = condition.add(build_like_condition(keyword, #dao_name::LIKE_COLUMNS));
             }
 
-            let all = #dao_name::list_by_condition(condition, db)
+            let all = #dao_name::list_by_condition(condition, order_by, db)
                 .await?
                 .into_iter()
                 .map(#vo_name::from)
