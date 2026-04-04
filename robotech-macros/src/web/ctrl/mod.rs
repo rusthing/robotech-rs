@@ -304,12 +304,40 @@ pub(crate) fn ctrl_macro(input: ItemStruct) -> TokenStream {
         }
     });
 
+    // 生成page_by_query_dto方法
+    generated_methods.push(quote! {
+        /// # 查询记录列表
+        ///
+        /// 该接口通过查询参数获取对应记录列表的详细信息
+        ///
+        /// ## 查询参数
+        /// * `QueryDto` - 包含查询条件的结构体
+        ///
+        /// ## 返回值
+        /// * 成功时返回对应的记录信息的JSON格式数据
+        /// * 失败时返回相应的错误信息
+        #[utoipa::path(
+            get,
+            path = #page_by_query_dto_path,
+            params(#query_dto_name),
+            responses(
+                (status = OK, body = Ro<PageRx<#vo_name>>)
+            )
+        )]
+        #[log_call]
+        pub async fn page_by_query_dto(Query(dto): Query<#query_dto_name>) -> Result<Json<Ro<PageRx<#vo_name>>>, CtrlError> {
+            let ro = #svc_name::page_by_query_dto::<DatabaseConnection>(dto, None).await?;
+            Ok(Json(ro))
+        }
+    });
+
     let expanded = quote! {
         use axum::extract::{Path, Query};
         use axum::http::HeaderMap;
         use axum::response::Json;
         use robotech::macros::log_call;
         use robotech::ro::Ro;
+        use robotech::rx::PageRx;
         use robotech::web::ctrl_utils::get_current_user_id;
         use robotech::web::CtrlError;
         use sea_orm::{DatabaseConnection, DatabaseTransaction};

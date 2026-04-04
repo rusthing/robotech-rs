@@ -449,10 +449,11 @@ pub(super) fn dao_macro(args: DaoArgs, input: ItemStruct) -> TokenStream {
     generated_members.push(quote! {
         /// # 查询记录列表
         ///
-        /// 根据提供的查询条件获取数据库中的记录列表
+        /// 根据提供的查询条件查询数据库中的记录列表
         ///
         /// ## 参数
         /// - `condition`: 查询条件
+        /// - `order_by`: 排序字段
         /// - `db`: 数据库连接，如果未提供则使用全局数据库连接
         ///
         /// ## 返回值
@@ -465,6 +466,45 @@ pub(super) fn dao_macro(args: DaoArgs, input: ItemStruct) -> TokenStream {
                 .all(db)
                 .await
                 .map_err(DaoError::from)
+        }
+    });
+
+    // 生成page_by_condition方法
+    generated_members.push(quote! {
+        /// # 分页查询记录列表
+        ///
+        /// 根据提供的查询条件分页查询数据库中的记录列表
+        ///
+        /// ## 参数
+        /// - `condition`: 查询条件
+        /// - `order_by`: 排序字段
+        /// - `page_num`: 当前页码
+        /// - `page_size`: 每页大小
+        /// - `db`: 数据库连接，如果未提供则使用全局数据库连接
+        ///
+        /// ## 返回值
+        /// - `Result<Option<Model>, DaoError>` - 查询结果封装为Model对象的列表，如果查询成功则返回封装了Model的列表，否则返回错误信息
+        pub async fn page_by_condition<C>(
+            condition: Condition,
+            order_by: &Option<String>,
+            mut page_num: u64,
+            page_size: u64,
+            db: &C
+        ) -> Result<(u64, u64, Vec<Model>), DaoError>
+        where
+            C: ConnectionTrait,
+        {
+            if page_num < 1 {
+                page_num = 1;
+            }
+            let paginator = add_order_by(Entity::find().filter(condition), order_by)?.paginate(db, page_size);
+            let total  = paginator.num_items().await.map_err(DaoError::from)?;
+            let total_pages = total / page_size + if total % page_size > 0 { 1 } else { 0 };
+            if page_num > total_pages {
+                page_num = total_pages;
+            }
+            let models = paginator.fetch_page(page_num - 1).await.map_err(DaoError::from)?;
+            Ok((page_num, total, models))
         }
     });
 
@@ -554,7 +594,7 @@ pub(super) fn dao_macro(args: DaoArgs, input: ItemStruct) -> TokenStream {
     let expanded = quote! {
         use robotech::dao::{add_order_by, DaoError};
         use sea_orm::{
-            ActiveModelTrait, ActiveValue, ConnectionTrait, EntityTrait, Condition, QueryFilter, DeleteResult
+            ActiveModelTrait, ActiveValue, Condition, ConnectionTrait, EntityTrait, PaginatorTrait, QueryFilter, DeleteResult
         };
 
         use crate::model::#module::{ActiveModel, Column, Entity, Model};

@@ -22,3 +22,5 @@ pub mod signal;
 pub mod svc;
 #[cfg(feature = "web")]
 pub mod web;
+
+pub use ro::rx;

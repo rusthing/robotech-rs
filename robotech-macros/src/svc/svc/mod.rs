@@ -311,9 +311,59 @@ pub(crate) fn svc_macro(input: ItemStruct) -> TokenStream {
         }
     });
 
+    // 生成page_by_query_dto方法
+    generated_methods.push(quote! {
+        /// # 查询记录列表
+        ///
+        /// 根据提供的查询参数获取数据库中的记录列表
+        ///
+        /// ## 参数
+        /// * `dto` - 查询参数
+        /// * `db` - 数据库连接，如果未提供则使用全局数据库连接
+        ///
+        /// ## 返回值
+        /// * `Result<Ro<Vec<Vo>>, SvcError>` - 查询结果封装为Ro对象，如果查询成功则返回封装了Vo的Ro对象，否则返回错误信息
+        #[db_unwrap]
+        #[log_call]
+        pub async fn page_by_query_dto<C>(
+            dto: #query_dto_name,
+            #[skip_log]
+            db: Option<&C>
+        ) -> Result<Ro<PageRx<#vo_name>>, SvcError>
+        where
+            C: ConnectionTrait,
+        {
+            let keyword = &dto._keyword;
+            let order_by = &dto._order_by;
+            let page_num = dto._page.unwrap_or(1);
+            let page_size = dto._size.unwrap_or(10);
+
+            let mut condition = dto.to_condition();
+            if let Some(keyword) = keyword {
+                condition = condition.add(build_like_condition(keyword, #dao_name::LIKE_COLUMNS));
+            }
+
+            let (page_num, total, models) = #dao_name::page_by_condition(
+                condition,
+                order_by,
+                page_num,
+                page_size,
+                db
+            ).await?;
+            let list = models.into_iter().map(#vo_name::from).collect();
+            Ok(Ro::success("查询成功".to_string()).extra(Some(PageRx::builder()
+                .total(total)
+                .page_num(page_num)
+                .list(list)
+                .build()
+            )))
+        }
+    });
+
     let expanded = quote! {
         use robotech::dao::{begin_transaction, build_like_condition};
         use robotech::ro::Ro;
+        use robotech::rx::PageRx;
         use robotech::svc::SvcError;
         use robotech_macros::db_unwrap;
         use robotech_macros::log_call;

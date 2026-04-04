@@ -67,7 +67,7 @@ impl RouterArgs {
             get_by_id: true,
             get_by_query_dto: true,
             list_by_query_dto: true,
-            page_by_query_dto: false,
+            page_by_query_dto: true,
             routes: vec![],
         }
     }
