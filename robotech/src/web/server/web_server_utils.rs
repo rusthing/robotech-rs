@@ -1,5 +1,5 @@
-use crate::web::{build_cors, build_https, HttpsConfig, WebServerConfig, WebServerError};
-use axum::{routing::get, Router};
+use crate::web::{HttpsConfig, WebServerConfig, WebServerError, build_cors, build_https};
+use axum::{Router, routing::get};
 use linkme::distributed_slice;
 use log::{debug, error, info};
 use robotech_macros::log_call;
@@ -11,10 +11,15 @@ use tokio::sync::broadcast;
 use tokio::task::JoinHandle;
 use tokio::time::timeout;
 use tower_http::trace::TraceLayer;
+use utoipa::openapi::OpenApi;
+use utoipa_swagger_ui::{SwaggerUi, Url};
 use wheel_rs::process::terminate_process;
 
 #[distributed_slice]
-pub static INIT_ROUTERS_SLICE: [fn() -> Router];
+pub static ROUTER_SLICE: [fn() -> Router];
+
+#[distributed_slice]
+pub static API_DOC_SLICE: [fn() -> (Url<'static>, OpenApi)];
 
 static WEB_SERVICE_HANDLES: RwLock<Option<Vec<JoinHandle<()>>>> = RwLock::new(None);
 static STOP_WEB_SERVICE_SENDER: RwLock<Option<broadcast::Sender<()>>> = RwLock::new(None);
@@ -116,7 +121,7 @@ pub async fn start_web_server(
 
     // 初始化路由
     let mut router = Router::new();
-    for init_router in INIT_ROUTERS_SLICE.iter() {
+    for init_router in ROUTER_SLICE.iter() {
         router = router.merge(init_router());
     }
 
@@ -131,6 +136,14 @@ pub async fn start_web_server(
     // 添加CORS中间件
     if let Some(cors_layer) = build_cors(&cors_config)? {
         router = router.layer(cors_layer);
+    }
+    // 集成 Swagger UI，访问 /swagger 即可查看文档
+    let mut api_docs = vec![];
+    for init_api_doc in API_DOC_SLICE.iter() {
+        api_docs.push(init_api_doc());
+    }
+    if !api_docs.is_empty() {
+        router = router.merge(SwaggerUi::new("/swagger-ui").urls(api_docs));
     }
 
     // 判断HTTP协议

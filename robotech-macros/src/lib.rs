@@ -8,16 +8,16 @@ mod svc;
 mod vo;
 mod web;
 
-use crate::cfg::{watch_cfg_file_macro, WatchCfgFileArgs};
-use crate::dao::{dao_macro, DaoArgs};
+use crate::cfg::{WatchCfgFileArgs, watch_cfg_file_macro};
+use crate::dao::{DaoArgs, dao_macro};
 use crate::db::MigrateArgs;
 use crate::dto::crud_dto_macro;
-use crate::log::{log_call_macro, LogCallArgs};
-use crate::svc::{db_unwrap_macro, svc_macro, DbUnwrapArgs};
+use crate::log::{LogCallArgs, log_call_macro};
+use crate::svc::{DbUnwrapArgs, db_unwrap_macro, svc_macro};
 use crate::vo::vo_macro;
-use crate::web::{ctrl_macro, router_macro, RouterArgs};
+use crate::web::{ApiDocArgs, RouterArgs, api_doc_macro, ctrl_macro, router_macro};
 use proc_macro::TokenStream;
-use syn::{parse_macro_input, DeriveInput, ItemFn, ItemStruct};
+use syn::{DeriveInput, ItemFn, ItemStruct, parse_macro_input};
 
 #[proc_macro]
 pub fn watch_cfg_file(args: TokenStream) -> TokenStream {
@@ -208,4 +208,11 @@ pub fn router(args: TokenStream, input: TokenStream) -> TokenStream {
     let args = parse_macro_input!(args as RouterArgs);
     let input = parse_macro_input!(input as ItemStruct);
     router_macro(args, input).into()
+}
+
+#[proc_macro_attribute]
+pub fn api_doc(args: TokenStream, input: TokenStream) -> TokenStream {
+    let args = parse_macro_input!(args as ApiDocArgs);
+    let input = parse_macro_input!(input as ItemStruct);
+    api_doc_macro(args, input).into()
 }

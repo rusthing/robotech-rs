@@ -26,16 +26,16 @@ pub(crate) fn ctrl_macro(input: ItemStruct) -> TokenStream {
     struct_name_split.pop();
     let entity_name = struct_name_split.join("");
     let module_name = struct_name_split.join("_").to_lowercase();
-    let path = struct_name_split.join("/").to_lowercase();
-    let module_path = format!("/{path}");
-    let crud_path = module_path.clone();
-    let save_path = format!("{module_path}/save");
+    let prefix = struct_name_split.remove(0).to_lowercase();
+    let module_path = struct_name_split.join("-").to_lowercase();
+    let crud_path = format!("/{prefix}/{module_path}");
+    let save_path = format!("{crud_path}/save");
     let del_by_id_path = format!("{crud_path}/{{id}}");
     let del_by_query_dto_path = crud_path.clone();
     let get_by_id_path = format!("{crud_path}/{{id}}");
     let get_by_query_dto_path = crud_path.clone();
-    let list_by_query_dto_path = format!("{module_path}/list");
-    let page_by_query_dto_path = format!("{module_path}/page");
+    let list_by_query_dto_path = format!("{crud_path}/list");
+    let page_by_query_dto_path = format!("{crud_path}/page");
     let dto_module = format_ident!("{module_name}_dto");
     let svc_name = format_ident!("{}Svc", entity_name);
     let vo_name = format_ident!("{}Vo", entity_name);
@@ -71,6 +71,7 @@ pub(crate) fn ctrl_macro(input: ItemStruct) -> TokenStream {
             path = #crud_path,
             responses((status = OK, body = Ro<#vo_name>))
         )]
+        #[debug_handler]
         #[log_call]
         pub async fn add(
             headers: HeaderMap,
@@ -109,6 +110,7 @@ pub(crate) fn ctrl_macro(input: ItemStruct) -> TokenStream {
             path = #crud_path,
             responses((status = OK, body = Ro<#vo_name>))
         )]
+        #[debug_handler]
         #[log_call]
         pub async fn modify(
             headers: HeaderMap,
@@ -147,6 +149,7 @@ pub(crate) fn ctrl_macro(input: ItemStruct) -> TokenStream {
             path = #save_path,
             responses((status = OK, body = Ro<#vo_name>))
         )]
+        #[debug_handler]
         #[log_call]
         pub async fn save(
             headers: HeaderMap,
@@ -181,6 +184,7 @@ pub(crate) fn ctrl_macro(input: ItemStruct) -> TokenStream {
             ),
             responses((status = OK, body = Ro<#vo_name>))
         )]
+        #[debug_handler]
         #[log_call]
         pub async fn del_by_id(
             Path(id): Path<u64>,
@@ -209,6 +213,7 @@ pub(crate) fn ctrl_macro(input: ItemStruct) -> TokenStream {
             params(#query_dto_name),
             responses((status = OK, body = Ro<#vo_name>))
         )]
+        #[debug_handler]
         #[log_call]
         pub async fn del_by_query_dto(Query(dto): Query<#query_dto_name>) -> Result<Json<Ro<()>>, CtrlError> {
             let ro = #svc_name::del_by_query_dto::<DatabaseTransaction>(dto, None).await?;
@@ -243,6 +248,7 @@ pub(crate) fn ctrl_macro(input: ItemStruct) -> TokenStream {
                 (status = OK, body = Ro<#vo_name>)
             )
         )]
+        #[debug_handler]
         #[log_call]
         pub async fn get_by_id(Path(id): Path<u64>) -> Result<Json<Ro<#vo_name>>, CtrlError> {
             let ro = #svc_name::get_by_id::<DatabaseConnection>(id, None).await?;
@@ -270,6 +276,7 @@ pub(crate) fn ctrl_macro(input: ItemStruct) -> TokenStream {
                 (status = OK, body = Ro<#vo_name>)
             )
         )]
+        #[debug_handler]
         #[log_call]
         pub async fn get_by_query_dto(Query(dto): Query<#query_dto_name>) -> Result<Json<Ro<#vo_name>>, CtrlError> {
             let ro = #svc_name::get_by_query_dto::<DatabaseConnection>(dto, None).await?;
@@ -297,6 +304,7 @@ pub(crate) fn ctrl_macro(input: ItemStruct) -> TokenStream {
                 (status = OK, body = Ro<Vec<#vo_name>>)
             )
         )]
+        #[debug_handler]
         #[log_call]
         pub async fn list_by_query_dto(Query(dto): Query<#query_dto_name>) -> Result<Json<Ro<Vec<#vo_name>>>, CtrlError> {
             let ro = #svc_name::list_by_query_dto::<DatabaseConnection>(dto, None).await?;
@@ -324,6 +332,7 @@ pub(crate) fn ctrl_macro(input: ItemStruct) -> TokenStream {
                 (status = OK, body = Ro<PageRx<#vo_name>>)
             )
         )]
+        #[debug_handler]
         #[log_call]
         pub async fn page_by_query_dto(Query(dto): Query<#query_dto_name>) -> Result<Json<Ro<PageRx<#vo_name>>>, CtrlError> {
             let ro = #svc_name::page_by_query_dto::<DatabaseConnection>(dto, None).await?;
@@ -332,6 +341,7 @@ pub(crate) fn ctrl_macro(input: ItemStruct) -> TokenStream {
     });
 
     let expanded = quote! {
+        use axum::debug_handler;
         use axum::extract::{Path, Query};
         use axum::http::HeaderMap;
         use axum::response::Json;

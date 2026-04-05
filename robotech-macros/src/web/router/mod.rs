@@ -5,13 +5,13 @@ use syn::parse::{Parse, ParseStream};
 use syn::{ItemStruct, Token, bracketed, parenthesized};
 use wheel_rs::str_utils::{CamelFormat, split_camel_case};
 
-/// 唯一键字段配置项
+/// Routes字段配置项
 #[derive(Debug)]
-struct RouteArgs {
+struct RoutesArgs {
     value: TokenStream,
 }
 
-impl Parse for RouteArgs {
+impl Parse for RoutesArgs {
     fn parse(input: ParseStream) -> syn::Result<Self> {
         let content;
         // 解开圆括号
@@ -23,7 +23,7 @@ impl Parse for RouteArgs {
     }
 }
 
-/// DAO方法生成宏参数解析
+/// router方法生成宏参数解析
 #[derive(Debug, Default)]
 pub(crate) struct RouterArgs {
     add: bool,
@@ -35,7 +35,7 @@ pub(crate) struct RouterArgs {
     get_by_query_dto: bool,
     list_by_query_dto: bool,
     page_by_query_dto: bool,
-    routes: Vec<RouteArgs>,
+    routes: Vec<RoutesArgs>,
 }
 
 impl RouterArgs {
@@ -136,7 +136,7 @@ impl Parse for RouterArgs {
                     // 解开方括号
                     bracketed!(content in input);
                     // 解析逗号分隔的列表
-                    let parsed_args = content.parse_terminated(RouteArgs::parse, Token![,])?;
+                    let parsed_args = content.parse_terminated(RoutesArgs::parse, Token![,])?;
                     routes = parsed_args.into_iter().collect();
                 }
                 _ => {
@@ -185,17 +185,17 @@ pub(crate) fn router_macro(args: RouterArgs, input: ItemStruct) -> TokenStream {
     let mut struct_name_split = struct_name_split.unwrap();
     struct_name_split.pop();
     let module_name = struct_name_split.join("_").to_lowercase();
-    let path = struct_name_split.join("/").to_lowercase();
     let ctrl_module = format_ident!("{module_name}_ctrl");
-    let module_path = format!("/{path}");
-    let crud_path = module_path.clone();
-    let save_path = format!("{module_path}/save");
+    let prefix = struct_name_split.remove(0).to_lowercase();
+    let module_path = struct_name_split.join("-").to_lowercase();
+    let crud_path = format!("/{prefix}/{module_path}");
+    let save_path = format!("{crud_path}/save");
     let del_by_id_path = format!("{crud_path}/{{id}}");
     let del_by_query_dto_path = crud_path.clone();
     let get_by_id_path = format!("{crud_path}/{{id}}");
     let get_by_query_dto_path = crud_path.clone();
-    let list_by_query_dto_path = format!("{module_path}/list");
-    let page_by_query_dto_path = format!("{module_path}/page");
+    let list_by_query_dto_path = format!("{crud_path}/list");
+    let page_by_query_dto_path = format!("{crud_path}/page");
     let mut routes = vec![];
 
     if args.add {
@@ -237,12 +237,12 @@ pub(crate) fn router_macro(args: RouterArgs, input: ItemStruct) -> TokenStream {
             Router,
         };
         use linkme::distributed_slice;
-        use robotech::web::INIT_ROUTERS_SLICE;
+        use robotech::web::ROUTER_SLICE;
 
-        #[distributed_slice(INIT_ROUTERS_SLICE)]
-        static INIT_ROUTERS_FN: fn() -> Router = init_routes;
+        #[distributed_slice(ROUTER_SLICE)]
+        static BUILD_ROUTER_FN: fn() -> Router = build_router;
 
-        fn init_routes() -> Router {
+        fn build_router() -> Router {
             Router::new()
             #(.route(#routes))*
         }
