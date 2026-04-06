@@ -121,8 +121,8 @@ pub async fn start_web_server(
 
     // 初始化路由
     let mut router = Router::new();
-    for init_router in ROUTER_SLICE.iter() {
-        router = router.merge(init_router());
+    for build_router in ROUTER_SLICE.iter() {
+        router = router.merge(build_router());
     }
 
     // 判断是否支持健康检查
@@ -137,7 +137,7 @@ pub async fn start_web_server(
     if let Some(cors_layer) = build_cors(&cors_config)? {
         router = router.layer(cors_layer);
     }
-    // 集成 Swagger UI，访问 /swagger 即可查看文档
+    // 集成 Swagger UI，访问 /swagger-ui 即可查看文档
     let mut api_docs = vec![];
     for init_api_doc in API_DOC_SLICE.iter() {
         api_docs.push(init_api_doc());
