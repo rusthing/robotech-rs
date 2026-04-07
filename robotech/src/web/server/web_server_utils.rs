@@ -1,5 +1,5 @@
 use crate::web::{HttpsConfig, WebServerConfig, WebServerError, build_cors, build_https};
-use axum::{Router, routing::get};
+use axum::{Router, debug_handler, routing::get};
 use linkme::distributed_slice;
 use log::{debug, error, info};
 use robotech_macros::log_call;
@@ -17,6 +17,12 @@ use wheel_rs::process::terminate_process;
 
 #[distributed_slice]
 pub static ROUTER_SLICE: [fn() -> Router];
+
+#[distributed_slice(ROUTER_SLICE)]
+static BUILD_ROUTER_FN: fn() -> Router = build_router;
+fn build_router() -> Router {
+    Router::new().route("/health", get(health))
+}
 
 #[distributed_slice]
 pub static API_DOC_SLICE: [fn() -> (Url<'static>, OpenApi)];
@@ -60,6 +66,7 @@ fn take_stop_web_service_sender() -> Result<Option<broadcast::Sender<()>>, WebSe
 ///
 /// ## 返回值
 /// 返回实现了 Responder trait 的响应对象
+#[debug_handler]
 #[log_call]
 pub async fn health() -> &'static str {
     "Ok"
@@ -489,9 +496,11 @@ fn bind_and_start(
         } else {
             &bind
         };
-        domain_url = format!("{http_protocol}://{ip}:{port}");
 
-        info!("监听 <{actual_addr}> 成功✅  -> 🌐 {domain_url}");
+        info!("监听 <{actual_addr}> 成功✅  -> 🌐 {http_protocol}://{ip}:{port}");
+
+        // 设置域名返回给外部用来测试监听是否成功
+        domain_url = format!("{http_protocol}://localhost:{port}");
     }
     Ok((domain_url, web_service_handles))
 }
