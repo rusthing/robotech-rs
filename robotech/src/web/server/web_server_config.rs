@@ -1,3 +1,4 @@
+use crate::web::HealthCheckConfig;
 use crate::web::cors::CorsConfig;
 use crate::web::https::HttpsConfig;
 use serde::{Deserialize, Serialize};
@@ -23,7 +24,6 @@ pub struct WebServerConfig {
     ///
     /// * 启用端口复用是为了实现无缝重启服务器，发指令重启服务器时，会在新的服务器启动完成后，才会关闭旧的服务器，达到无缝重启服务器的效果
     /// * 如果绑定监听的是随机端口，会自动禁用，因为随机端口新旧服务器的端口就不会冲突
-    /// * 如果启用，同时也会开启支持健康检查，因为重启时需要健康检查来判断新的服务器是否启动成功，才停止旧的服务器
     #[serde(default = "reuse_port_default")]
     pub reuse_port: bool,
 
@@ -39,10 +39,9 @@ pub struct WebServerConfig {
     #[serde(default)]
     pub cors: Option<CorsConfig>,
 
-    /// 是否支持健康检查
-    /// 如果绑定或监听随机端口，或是启用端口复用，都会自动启用支持健康检查，因为重启时需要健康检查来判断新的服务器是否启动成功，才停止旧的服务器
-    #[serde(default = "support_health_check_default")]
-    pub support_health_check: bool,
+    /// 是否暴露健康检查(默认不暴露，只能本地访问)
+    #[serde(default)]
+    pub health_check: HealthCheckConfig,
 
     #[serde(with = "duration_serde", default = "start_wait_timeout_default")]
     pub start_wait_timeout: Duration,
@@ -73,7 +72,7 @@ impl Default for WebServerConfig {
             https: None,
             log_enabled: false,
             cors: None,
-            support_health_check: support_health_check_default(),
+            health_check: HealthCheckConfig::default(),
             start_wait_timeout: start_wait_timeout_default(),
             start_retry_interval: start_retry_interval_default(),
             terminate_old_app_wait_timeout: terminate_old_app_wait_timeout_default(),
@@ -95,10 +94,6 @@ fn listen_default() -> Vec<String> {
 
 fn reuse_port_default() -> bool {
     false
-}
-
-fn support_health_check_default() -> bool {
-    true
 }
 
 fn start_wait_timeout_default() -> Duration {

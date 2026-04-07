@@ -18,12 +18,6 @@ use wheel_rs::process::terminate_process;
 #[distributed_slice]
 pub static ROUTER_SLICE: [fn() -> Router];
 
-#[distributed_slice(ROUTER_SLICE)]
-static BUILD_ROUTER_FN: fn() -> Router = build_router;
-fn build_router() -> Router {
-    Router::new().route("/health", get(health))
-}
-
 #[distributed_slice]
 pub static API_DOC_SLICE: [fn() -> (Url<'static>, OpenApi)];
 
@@ -86,12 +80,14 @@ pub async fn start_web_server(
         https: https_config,
         log_enabled,
         cors: cors_config,
-        support_health_check,
+        health_check,
         start_wait_timeout,
         start_retry_interval,
         terminate_old_app_wait_timeout,
         terminate_old_app_retry_interval,
     } = web_server_config;
+
+    let health_check_uri = &health_check.uri;
 
     let (is_random_port, listen_binds) =
         get_listen_binds(port_of_args, binds, port_option, listens)?;
@@ -131,11 +127,13 @@ pub async fn start_web_server(
     for build_router in ROUTER_SLICE.iter() {
         router = router.merge(build_router());
     }
-
     // 判断是否支持健康检查
-    if support_health_check {
-        router = router.route("/health", get(health));
+    if health_check.exposed {
+        router = router.route(health_check_uri, get(health));
+    } else {
+        router = router.route(health_check_uri, get(health));
     }
+
     // 添加日志中间件
     if log_enabled {
         router = router.layer(TraceLayer::new_for_http());
@@ -173,9 +171,9 @@ pub async fn start_web_server(
         stop_web_service_receiver,
     )?;
 
-    // 如果支持健康检查，且没有旧服务，则等待新服务器启动成功
-    if support_health_check && old_web_service_handles.is_none() {
-        let heath_check_url = format!("{domain_url}/health");
+    // 如果没有旧服务，则等待新服务器启动成功
+    if old_web_service_handles.is_none() {
+        let heath_check_url = format!("{domain_url}/{health_check_uri}");
         wait_for_web_server_ready(
             heath_check_url.as_str(),
             start_wait_timeout,
