@@ -1,20 +1,22 @@
-use crate::env::{AppEnv, EnvError, APP_ENV};
+use crate::env::{APP_ENV, AppEnv, EnvError};
 use crate::web::{HttpsConfig, WebServerError};
 use axum::Router;
+use axum::extract::ConnectInfo;
 use hyper::service::service_fn;
 use hyper_util::rt::{TokioExecutor, TokioIo};
 use hyper_util::server;
 use log::{debug, error};
 use rustls_pemfile::{certs, private_key};
+use std::convert::Infallible;
 use std::fs::File;
 use std::io::BufReader;
 use std::sync::{Arc, OnceLock};
 use tokio::net::TcpListener;
 use tokio::sync::broadcast::Receiver;
 use tokio::task::JoinHandle;
-use tokio_rustls::rustls::crypto::aws_lc_rs;
-use tokio_rustls::rustls::ServerConfig;
 use tokio_rustls::TlsAcceptor;
+use tokio_rustls::rustls::ServerConfig;
+use tokio_rustls::rustls::crypto::aws_lc_rs;
 
 static CRYPTO_PROVIDER_INITIALIZED: OnceLock<()> = OnceLock::new();
 
@@ -104,11 +106,17 @@ pub fn build_https(
                     Ok(tls_stream) => {
                         // 将 TlsStream 包装为 Hyper 认识的 TokioIo
                         let io = TokioIo::new(tls_stream);
-                        use tower::ServiceExt;
                         // 使用 Hyper 的 Builder 服务单个连接
-                        let hyper_service = service_fn(move |request| {
+                        let hyper_service = service_fn(move |mut request| {
                             let router = router.clone();
-                            async move { router.oneshot(request).await }
+                            request
+                                .extensions_mut()
+                                .insert(ConnectInfo(client_socket_addr));
+
+                            async move {
+                                use tower::ServiceExt;
+                                Ok::<_, Infallible>(router.oneshot(request).await.unwrap())
+                            }
                         });
                         let builder = server::conn::auto::Builder::new(TokioExecutor::new());
                         let conn = builder.serve_connection_with_upgrades(io, hyper_service);

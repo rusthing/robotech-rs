@@ -1,3 +1,4 @@
+use crate::web::middleware::local_only;
 use crate::web::{HttpsConfig, WebServerConfig, WebServerError, build_cors, build_https};
 use axum::{Router, debug_handler, routing::get};
 use linkme::distributed_slice;
@@ -86,7 +87,6 @@ pub async fn start_web_server(
         terminate_old_app_wait_timeout,
         terminate_old_app_retry_interval,
     } = web_server_config;
-
     let health_check_uri = &health_check.uri;
 
     let (is_random_port, listen_binds) =
@@ -127,11 +127,14 @@ pub async fn start_web_server(
     for build_router in ROUTER_SLICE.iter() {
         router = router.merge(build_router());
     }
-    // 判断是否支持健康检查
+    // 判断是否暴露健康检查
     if health_check.exposed {
         router = router.route(health_check_uri, get(health));
     } else {
-        router = router.route(health_check_uri, get(health));
+        router = router.route(
+            health_check_uri,
+            get(health).layer(axum::middleware::from_fn(local_only)),
+        );
     }
 
     // 添加日志中间件
@@ -162,7 +165,7 @@ pub async fn start_web_server(
 
     // 绑定地址及端口，并启动服务
     let (stop_web_service_sender, stop_web_service_receiver) = broadcast::channel::<()>(1);
-    let (domain_url, web_service_handles) = bind_and_start(
+    let (health_check_url_prefix, web_service_handles) = bind_and_start(
         router,
         reuse_port,
         listen_binds,
@@ -173,7 +176,7 @@ pub async fn start_web_server(
 
     // 如果没有旧服务，则等待新服务器启动成功
     if old_web_service_handles.is_none() {
-        let heath_check_url = format!("{domain_url}/{health_check_uri}");
+        let heath_check_url = format!("{health_check_url_prefix}{health_check_uri}");
         wait_for_web_server_ready(
             heath_check_url.as_str(),
             start_wait_timeout,
@@ -453,7 +456,7 @@ fn bind_and_start(
     stop_web_service_receiver: broadcast::Receiver<()>,
 ) -> Result<(String, Vec<JoinHandle<()>>), WebServerError> {
     let mut web_service_handles = Vec::new();
-    let mut domain_url = String::new();
+    let mut health_check_url_prefix = None;
     for (bind, port) in listen_binds {
         let tcp_listener = create_listener(bind.to_string(), port, reuse_port)?;
         // 在 serve 之前获取实际端口
@@ -474,11 +477,17 @@ fn bind_and_start(
             )?;
             web_service_handles.push(handle);
         } else {
-            let server =
-                axum::serve(tokio_listener, router.clone()).with_graceful_shutdown(async move {
-                    let _ = stop_web_service_receiver.recv().await;
-                    info!("停止Axum Web服务");
-                });
+            let server = axum::serve(
+                tokio_listener,
+                router
+                    .clone()
+                    // 注意：必须调用 into_make_service_with_connect_info 才能获取客户端 IP
+                    .into_make_service_with_connect_info::<SocketAddr>(),
+            )
+            .with_graceful_shutdown(async move {
+                let _ = stop_web_service_receiver.recv().await;
+                info!("停止Axum Web服务");
+            });
             let handle = tokio::spawn(async move {
                 if let Err(e) = server.await {
                     error!("Axum Web服务运行异常: {:#}", e);
@@ -488,17 +497,21 @@ fn bind_and_start(
         }
 
         let ip = if bind == "0.0.0.0" {
+            // 设置域名返回给外部用来健康检查
+            health_check_url_prefix = Some(format!("{http_protocol}://localhost:{port}"));
             "127.0.0.1"
         } else if bind == r"[::]" {
+            // 设置域名返回给外部用来健康检查
+            health_check_url_prefix = Some(format!("{http_protocol}://localhost:{port}"));
             r"[::1]"
         } else {
+            // 设置域名返回给外部用来健康检查
+            if health_check_url_prefix.is_none() {
+                health_check_url_prefix = Some(format!("{http_protocol}://{bind}:{port}"));
+            }
             &bind
         };
-
         info!("监听 <{actual_addr}> 成功✅  -> 🌐 {http_protocol}://{ip}:{port}");
-
-        // 设置域名返回给外部用来测试监听是否成功
-        domain_url = format!("{http_protocol}://localhost:{port}");
     }
-    Ok((domain_url, web_service_handles))
+    Ok((health_check_url_prefix.unwrap(), web_service_handles))
 }
