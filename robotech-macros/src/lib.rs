@@ -1,5 +1,4 @@
 mod cfg;
-mod comm;
 mod dao;
 mod db;
 mod dto;
