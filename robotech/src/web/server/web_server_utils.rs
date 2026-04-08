@@ -1,12 +1,14 @@
-use crate::web::middleware::local_only;
+use crate::web::middleware::{
+    ForbiddenUrnsState, forbidden_urns_middleware, local_only_middleware,
+};
 use crate::web::{HttpsConfig, WebServerConfig, WebServerError, build_cors, build_https};
-use axum::{Router, debug_handler, routing::get};
+use axum::{Router, debug_handler, middleware, routing::get};
 use linkme::distributed_slice;
 use log::{debug, error, info};
 use robotech_macros::log_call;
 use socket2::{Domain, Socket, Type};
 use std::net::{IpAddr, SocketAddr, TcpListener};
-use std::sync::RwLock;
+use std::sync::{Arc, RwLock};
 use std::time::Duration;
 use tokio::sync::broadcast;
 use tokio::task::JoinHandle;
@@ -55,6 +57,45 @@ fn take_stop_web_service_sender() -> Result<Option<broadcast::Sender<()>>, WebSe
     Ok(write_lock.take())
 }
 
+/// # 构建带中间件的路由
+///
+/// 为路由添加中间件层的声明宏（仅内部使用）
+///
+/// ## 参数
+/// * `$router` - Axum路由器实例
+/// * `$uri` - 路由URI路径
+/// * `$handler` - 处理函数（会被 `get()` 包裹）
+/// * `[$($layer),*]` - 中间件层数组（可选，支持多个，按顺序应用）
+///
+/// ## 返回值
+/// 返回配置好路由的路由器实例
+///
+/// ## 使用示例
+/// ```rust
+/// // 不使用中间件
+/// router = build_route!(router, "/health", health);
+///
+/// // 使用单个中间件
+/// router = build_route!(router, "/health", health, [axum::middleware::from_fn(local_only)]);
+///
+/// // 使用多个中间件
+/// router = build_route!(router, "/api", handler, [layer1, layer2, layer3]);
+/// ```
+macro_rules! add_route {
+    // 无 layer
+    ($router:expr, $uri:expr, $handler:expr) => {
+        $router.route($uri, get($handler))
+    };
+    // 单个 layer
+    ($router:expr, $uri:expr, $handler:expr, $layer:expr) => {
+        $router.route($uri, get($handler).layer($layer))
+    };
+    // 多个 layer（用逗号分隔传入）
+    ($router:expr, $uri:expr, $handler:expr, $($layer:expr),+) => {
+        $router.route($uri, get($handler)$(.layer($layer))+)
+    };
+}
+
 /// # 健康检查端点
 ///
 /// 提供简单的健康检查接口，返回 "Ok" 字符串表示服务正常运行
@@ -79,6 +120,8 @@ pub async fn start_web_server(
         listen: listens,
         mut reuse_port,
         https: https_config,
+        forbidden_urns,
+        local_only_urns,
         log_enabled,
         cors: cors_config,
         health_check,
@@ -133,13 +176,24 @@ pub async fn start_web_server(
     } else {
         router = router.route(
             health_check_uri,
-            get(health).layer(axum::middleware::from_fn(local_only)),
+            get(health).layer(axum::middleware::from_fn(local_only_middleware)),
         );
     }
 
     // 添加日志中间件
     if log_enabled {
         router = router.layer(TraceLayer::new_for_http());
+    }
+    // 添加禁止访问中间件
+    if !forbidden_urns.is_empty() {
+        let forbidden_urns_state = ForbiddenUrnsState {
+            forbidden_urns: Arc::new(forbidden_urns.clone()),
+        };
+        // router = router.with_state(forbidden_urns_state);
+        router = router.layer(middleware::from_fn_with_state(
+            forbidden_urns_state.clone(),
+            forbidden_urns_middleware,
+        ));
     }
     // 添加CORS中间件
     if let Some(cors_layer) = build_cors(&cors_config)? {

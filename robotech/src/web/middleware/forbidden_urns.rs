@@ -7,18 +7,22 @@ use axum::{
 use std::sync::Arc;
 use wheel_rs::urn_utils::Urn;
 
-type ForbiddenUrns = Arc<Vec<Urn>>;
+#[derive(Clone)]
+pub struct ForbiddenUrnsState {
+    pub(crate) forbidden_urns: Arc<Vec<Urn>>,
+}
 
 // 注意：返回值改为了明确的 Response，而不是 Result<Response, StatusCode>
 pub async fn forbidden_urns_middleware(
-    State(forbidden_urns): State<ForbiddenUrns>,
+    State(state): State<ForbiddenUrnsState>,
     request: Request, // 剥离 <Body>，直接使用 axum 原生的 Request
     next: Next,
 ) -> Response {
     let request_method = request.method().to_string().to_uppercase();
     let request_uri = request.uri().path();
 
-    if forbidden_urns
+    if state
+        .forbidden_urns
         .iter()
         .any(|forbidden_urn| forbidden_urn.matches(&request_method, request_uri))
     {
