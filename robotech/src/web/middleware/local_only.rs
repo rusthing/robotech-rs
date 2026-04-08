@@ -7,7 +7,7 @@ use axum::{
 };
 use std::net::SocketAddr;
 
-pub async fn local_only(
+pub async fn local_only_middleware(
     ConnectInfo(addr): ConnectInfo<SocketAddr>,
     request: Request<Body>,
     next: Next,

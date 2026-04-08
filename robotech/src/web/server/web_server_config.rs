@@ -1,12 +1,13 @@
 use crate::web::HealthCheckConfig;
 use crate::web::cors::CorsConfig;
 use crate::web::https::HttpsConfig;
-use serde::{Deserialize, Serialize};
+use serde::Deserialize;
 use std::time::Duration;
 use wheel_rs::serde::duration_serde;
 use wheel_rs::serde::vec_serde;
+use wheel_rs::urn_utils::Urn;
 
-#[derive(Debug, Serialize, Deserialize, Clone)]
+#[derive(Debug, Deserialize, Clone)]
 #[serde(rename_all = "kebab-case")]
 pub struct WebServerConfig {
     /// 绑定的IP地址
@@ -30,6 +31,14 @@ pub struct WebServerConfig {
     /// 是否启用Https(默认关闭)
     #[serde(default)]
     pub https: Option<HttpsConfig>,
+
+    /// 只允许本地访问的URN列表(默认为空)
+    #[serde(default)]
+    pub local_only_urns: Vec<Urn>,
+
+    /// 禁止访问的URN列表(默认为空)
+    #[serde(default)]
+    pub forbidden_urns: Vec<Urn>,
 
     /// 是否启用日志(默认关闭)
     #[serde(default)]
@@ -70,6 +79,8 @@ impl Default for WebServerConfig {
             listen: listen_default(),
             reuse_port: reuse_port_default(),
             https: None,
+            forbidden_urns: vec![],
+            local_only_urns: vec![],
             log_enabled: false,
             cors: None,
             health_check: HealthCheckConfig::default(),
