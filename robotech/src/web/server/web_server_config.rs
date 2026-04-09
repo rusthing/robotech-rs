@@ -1,10 +1,10 @@
 use crate::web::HealthCheckConfig;
 use crate::web::cors::CorsConfig;
 use crate::web::https::HttpsConfig;
+use ipnet::IpNet;
 use serde::Deserialize;
 use std::time::Duration;
-use wheel_rs::serde::duration_serde;
-use wheel_rs::serde::vec_serde;
+use wheel_rs::serde::{duration_serde, vec_ipnet_serde, vec_serde};
 use wheel_rs::urn_utils::Urn;
 
 #[derive(Debug, Deserialize, Clone)]
@@ -39,6 +39,14 @@ pub struct WebServerConfig {
     /// 禁止访问的URN列表(默认为空)
     #[serde(default)]
     pub forbidden_urns: Vec<Urn>,
+
+    /// ip白名单
+    #[serde(default, with = "vec_ipnet_serde")]
+    pub ip_white_list: Vec<IpNet>,
+
+    /// ip黑名单
+    #[serde(default, with = "vec_ipnet_serde")]
+    pub ip_black_list: Vec<IpNet>,
 
     /// 是否启用日志(默认关闭)
     #[serde(default)]
@@ -81,6 +89,8 @@ impl Default for WebServerConfig {
             https: None,
             forbidden_urns: vec![],
             local_only_urns: vec![],
+            ip_white_list: vec![],
+            ip_black_list: vec![],
             log_enabled: false,
             cors: None,
             health_check: HealthCheckConfig::default(),

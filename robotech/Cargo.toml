@@ -14,7 +14,7 @@ readme = "README.md"
 [features]
 api-client = ["dep:reqwest"]
 app = ["dep:anyhow", "dep:config", "dep:validator", "dep:wheel-rs", "dep:idworker"]
-web = ["app", "dep:axum", "dep:tower", "dep:tower-http", "dep:tokio-rustls", "dep:hyper", "dep:hyper-util", "dep:rustls-pemfile", "dep:socket2", "dep:reqwest"]
+web = ["app", "dep:ipnet", "dep:axum", "dep:tower", "dep:tower-http", "dep:tokio-rustls", "dep:hyper", "dep:hyper-util", "dep:rustls-pemfile", "dep:socket2", "dep:reqwest"]
 db = ["app", "dep:sqlx", "dep:sea-orm", "dep:regex", "dep:once_cell"]
 macros = ["robotech-macros"]
 
@@ -40,6 +40,7 @@ utoipa-swagger-ui = { workspace = true, features = ["axum"] }
 anyhow = { workspace = true, optional = true }
 config = { workspace = true, optional = true }
 regex = { workspace = true, optional = true }
+ipnet = { workspace = true, optional = true }
 axum = { workspace = true, optional = true, features = ["multipart", "macros"] }                  # Web框架
 tower = { workspace = true, optional = true }
 tower-http = { workspace = true, features = ["cors", "trace", "fs"], optional = true }          # axum常用中间件集合 (CORS, 日志, 静态文件服务, 追踪等)

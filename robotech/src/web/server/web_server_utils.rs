@@ -1,6 +1,6 @@
 use crate::web::middleware::{
-    ForbiddenUrnsState, LocalOnlyUrnsState, forbidden_urns_middleware, local_only_middleware,
-    local_only_urns_middleware,
+    ForbiddenUrnsState, IpBanState, LocalOnlyUrnsState, forbidden_urns_middleware,
+    ip_ban_middleware, local_only_middleware, local_only_urns_middleware,
 };
 use crate::web::{HttpsConfig, WebServerConfig, WebServerError, build_cors, build_https};
 use axum::{Router, debug_handler, middleware, routing::get};
@@ -84,6 +84,8 @@ pub async fn start_web_server(
         https: https_config,
         forbidden_urns,
         local_only_urns,
+        ip_white_list,
+        ip_black_list,
         log_enabled,
         cors: cors_config,
         health_check,
@@ -153,6 +155,17 @@ pub async fn start_web_server(
     // 添加日志中间件
     if log_enabled {
         router = router.layer(TraceLayer::new_for_http());
+    }
+    // 添加IP拦截中间件
+    if !ip_white_list.is_empty() || !ip_black_list.is_empty() {
+        let ip_ban_state = IpBanState {
+            ip_white_list: Arc::new(ip_white_list.clone()),
+            ip_black_list: Arc::new(ip_black_list.clone()),
+        };
+        router = router.layer(middleware::from_fn_with_state(
+            ip_ban_state.clone(),
+            ip_ban_middleware,
+        ));
     }
     // 添加禁止访问中间件
     if !forbidden_urns.is_empty() {
