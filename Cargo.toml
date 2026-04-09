@@ -25,6 +25,7 @@ utoipa = "5.4.0"
 utoipa-swagger-ui = "9.0.2"
 anyhow = "1.0.102"
 config = "0.15.22"
+linkme = "0.3.35"
 regex = "1.12.3"
 nix = "0.31.2"
 axum = "0.8.8"
@@ -45,6 +46,7 @@ ipnet = "2.12.0"
 
 idworker = "1.1.0"
 wheel-rs = "1.4.0"
+robotech-macros = "1.5.0"
 
 # macro依赖
 proc-macro2 = "1.0.106"             # 提供与标准库 proc_macro 兼容但更易测试的接口
@@ -54,3 +56,4 @@ syn = "2.0.117"                     # 用于解析 Rust 代码为语法树（AST
 [patch.crates-io]
 idworker = { path = "../idworker" }
 wheel-rs = { path = "../wheel-rs" }
+robotech-macros = { path = "./robotech-macros" }

@@ -63,7 +63,6 @@ impl Parse for ForeignKeyArgs {
 }
 
 /// DAO方法生成宏参数解析
-#[derive(Debug)]
 pub(super) struct DaoArgs {
     /// 唯一键
     unique_keys: Vec<UniqueKeyArgs>,
