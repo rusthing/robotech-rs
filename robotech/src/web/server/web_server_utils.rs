@@ -1,5 +1,6 @@
 use crate::web::middleware::{
-    ForbiddenUrnsState, forbidden_urns_middleware, local_only_middleware,
+    ForbiddenUrnsState, LocalOnlyUrnsState, forbidden_urns_middleware, local_only_middleware,
+    local_only_urns_middleware,
 };
 use crate::web::{HttpsConfig, WebServerConfig, WebServerError, build_cors, build_https};
 use axum::{Router, debug_handler, middleware, routing::get};
@@ -55,45 +56,6 @@ fn take_stop_web_service_sender() -> Result<Option<broadcast::Sender<()>>, WebSe
         .write()
         .map_err(|e| WebServerError::TakeWebServiceHandles(e.to_string()))?;
     Ok(write_lock.take())
-}
-
-/// # 构建带中间件的路由
-///
-/// 为路由添加中间件层的声明宏（仅内部使用）
-///
-/// ## 参数
-/// * `$router` - Axum路由器实例
-/// * `$uri` - 路由URI路径
-/// * `$handler` - 处理函数（会被 `get()` 包裹）
-/// * `[$($layer),*]` - 中间件层数组（可选，支持多个，按顺序应用）
-///
-/// ## 返回值
-/// 返回配置好路由的路由器实例
-///
-/// ## 使用示例
-/// ```rust
-/// // 不使用中间件
-/// router = build_route!(router, "/health", health);
-///
-/// // 使用单个中间件
-/// router = build_route!(router, "/health", health, [axum::middleware::from_fn(local_only)]);
-///
-/// // 使用多个中间件
-/// router = build_route!(router, "/api", handler, [layer1, layer2, layer3]);
-/// ```
-macro_rules! add_route {
-    // 无 layer
-    ($router:expr, $uri:expr, $handler:expr) => {
-        $router.route($uri, get($handler))
-    };
-    // 单个 layer
-    ($router:expr, $uri:expr, $handler:expr, $layer:expr) => {
-        $router.route($uri, get($handler).layer($layer))
-    };
-    // 多个 layer（用逗号分隔传入）
-    ($router:expr, $uri:expr, $handler:expr, $($layer:expr),+) => {
-        $router.route($uri, get($handler)$(.layer($layer))+)
-    };
 }
 
 /// # 健康检查端点
@@ -179,6 +141,14 @@ pub async fn start_web_server(
             get(health).layer(axum::middleware::from_fn(local_only_middleware)),
         );
     }
+    // 集成 Swagger UI，访问 /swagger-ui 即可查看文档
+    let mut api_docs = vec![];
+    for init_api_doc in API_DOC_SLICE.iter() {
+        api_docs.push(init_api_doc());
+    }
+    if !api_docs.is_empty() {
+        router = router.merge(SwaggerUi::new("/swagger-ui").urls(api_docs));
+    }
 
     // 添加日志中间件
     if log_enabled {
@@ -189,23 +159,24 @@ pub async fn start_web_server(
         let forbidden_urns_state = ForbiddenUrnsState {
             forbidden_urns: Arc::new(forbidden_urns.clone()),
         };
-        // router = router.with_state(forbidden_urns_state);
         router = router.layer(middleware::from_fn_with_state(
             forbidden_urns_state.clone(),
             forbidden_urns_middleware,
         ));
     }
+    // 添加仅本地访问中间件
+    if !local_only_urns.is_empty() {
+        let local_only_urns_state = LocalOnlyUrnsState {
+            local_only_urns: Arc::new(local_only_urns.clone()),
+        };
+        router = router.layer(middleware::from_fn_with_state(
+            local_only_urns_state.clone(),
+            local_only_urns_middleware,
+        ));
+    }
     // 添加CORS中间件
     if let Some(cors_layer) = build_cors(&cors_config)? {
         router = router.layer(cors_layer);
-    }
-    // 集成 Swagger UI，访问 /swagger-ui 即可查看文档
-    let mut api_docs = vec![];
-    for init_api_doc in API_DOC_SLICE.iter() {
-        api_docs.push(init_api_doc());
-    }
-    if !api_docs.is_empty() {
-        router = router.merge(SwaggerUi::new("/swagger-ui").urls(api_docs));
     }
 
     // 判断HTTP协议
