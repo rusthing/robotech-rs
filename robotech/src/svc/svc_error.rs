@@ -1,9 +1,12 @@
 #[cfg(feature = "api-client")]
 use crate::api_client::ApiClientError;
 use crate::app::AppError;
+#[cfg(feature = "db")]
 use crate::dao::DaoError;
+#[cfg(feature = "db")]
 use crate::db::DbError;
 use crate::env::EnvError;
+#[cfg(feature = "web")]
 use axum::extract::multipart::MultipartError;
 use idworker::IdWorkerError;
 use std::time::SystemTimeError;

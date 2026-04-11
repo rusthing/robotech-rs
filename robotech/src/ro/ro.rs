@@ -26,6 +26,7 @@ pub struct Ro<E> {
     /// 响应消息，对结果的简要描述
     pub message: String,
     /// 时间戳，记录响应生成的时间（毫秒）
+    /// 这里默认值为当前时间戳，懒得考虑系统时间错误的问题
     #[builder(default = Utc::now().timestamp_millis() as u64)]
     #[serde(with = "u64_serde")]
     pub timestamp: u64,

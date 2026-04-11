@@ -30,13 +30,13 @@ pub(super) fn watch_cfg_file_macro(args: WatchCfgFileArgs) -> TokenStream {
     let reload_block = &reload_block.stmts;
 
     let expanded = quote! {
-        debug!("watch {} cfg file...", #title);
+        log::debug!("watch {} cfg file...", #title);
         tokio::spawn({
             async move {
                 let (_watcher, receiver) = watch_cfg_file(files).expect(&format!("watch {} cfg file error", #title));
 
                 // 创建一个1秒间隔的定时器
-                let mut interval = interval(Duration::from_secs(1));
+                let mut interval = tokio::time::interval(std::time::Duration::from_secs(1));
                 loop {
                     // 等待下一个时间点
                     interval.tick().await;
@@ -47,30 +47,30 @@ pub(super) fn watch_cfg_file_macro(args: WatchCfgFileArgs) -> TokenStream {
                                 Ok(events) => {
                                     // 处理文件事件
                                     for event in events {
-                                        debug!("{} cfg file change event: {:?}", #title, event);
+                                        log::debug!("{} cfg file change event: {:?}", #title, event);
                                     }
-                                    debug!("reload from {} cfg file...", #title);
+                                    log::debug!("reload from {} cfg file...", #title);
 
                                     #( #reload_block )*
                                 }
                                 Err(e) => {
-                                    warn!("error receiving {} cfg file events: {:?}", #title, e);
+                                    log::warn!("error receiving {} cfg file events: {:?}", #title, e);
                                 }
                             }
                         }
-                        Err(mpsc::TryRecvError::Empty) => {
+                        Err(std::sync::mpsc::TryRecvError::Empty) => {
                             // 没有消息，继续下一次循环
                             continue;
                         }
-                        Err(mpsc::TryRecvError::Disconnected) => {
+                        Err(std::sync::mpsc::TryRecvError::Disconnected) => {
                             // 通道关闭
-                            debug!("{} cfg file watcher channel closed, exiting watcher loop", #title);
+                            log::debug!("{} cfg file watcher channel closed, exiting watcher loop", #title);
                             break;
                         }
                     }
                 }
 
-                debug!("{} cfg file watcher task finished", #title);
+                log::debug!("{} cfg file watcher task finished", #title);
             }
         });
     };

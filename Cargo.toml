@@ -38,15 +38,15 @@ rustls = "0.23.37"
 rustls-pemfile = "2.2.0" # 用于读取 pem 证书文件
 socket2 = "0.6.3"
 sqlx = "0.9.0-alpha.1"
-sea-orm = "2.0.0-rc.37"
+sea-orm = "2.0.0-rc.38"
 once_cell = "1.21.4"
 validator = "0.20.0"
 reqwest = "0.13.2"
 ipnet = "2.12.0"
 
 idworker = "1.1.0"
-wheel-rs = "1.4.0"
-robotech-macros = "1.5.0"
+wheel-rs = "1.5.0"
+robotech-macros = "1.5.1"
 
 # macro依赖
 proc-macro2 = "1.0.106"             # 提供与标准库 proc_macro 兼容但更易测试的接口

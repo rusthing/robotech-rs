@@ -1,13 +1,11 @@
-use crate::cfg::{build_cfg, watch_cfg_file, CfgError};
-use crate::env::{AppEnv, EnvError, APP_ENV};
+use crate::cfg::{CfgError, build_cfg, watch_cfg_file};
+use crate::env::{APP_ENV, AppEnv, EnvError};
 use crate::log::{LogConfig, LogError};
-use log::{debug, warn};
+use log::debug;
 use robotech_macros::watch_cfg_file;
 use std::env;
 use std::path::Path;
-use std::sync::{mpsc, Arc, RwLock};
-use std::time::Duration;
-use tokio::time::interval;
+use std::sync::{Arc, RwLock};
 use tracing_appender::non_blocking::WorkerGuard;
 use tracing_appender::rolling::RollingFileAppender;
 use tracing_core::{Event, Level, Subscriber};
@@ -18,7 +16,7 @@ use tracing_subscriber::fmt::{FmtContext, FormatEvent, FormatFields};
 use tracing_subscriber::layer::SubscriberExt;
 use tracing_subscriber::registry::LookupSpan;
 use tracing_subscriber::util::SubscriberInitExt;
-use tracing_subscriber::{fmt, reload, EnvFilter};
+use tracing_subscriber::{EnvFilter, fmt, reload};
 
 /// 日志文件输出锁
 /// 解决锁在初始化方法结束后被提前释放导致后续日志不能输出

@@ -1,6 +1,6 @@
 [package]
 name = "robotech"
-version = "1.5.0"
+version = "1.5.1"
 edition = "2024"
 authors = ["zbz"]
 keywords = ["crud", "microservice", "service", "RESTful"]
@@ -16,7 +16,7 @@ api-client = ["dep:reqwest"]
 app = ["dep:anyhow", "dep:config", "dep:validator", "dep:idworker"]
 web = ["app", "dep:ipnet", "dep:axum", "dep:tower", "dep:tower-http", "dep:tokio-rustls", "dep:hyper", "dep:hyper-util", "dep:rustls-pemfile", "dep:socket2", "dep:reqwest"]
 db = ["app", "dep:sqlx", "dep:sea-orm", "dep:regex", "dep:once_cell"]
-macros = ["robotech-macros"]
+macros = ["dep:robotech-macros"]
 
 [dependencies]
 log = { workspace = true }

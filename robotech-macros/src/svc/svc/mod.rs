@@ -365,8 +365,8 @@ pub(crate) fn svc_macro(input: ItemStruct) -> TokenStream {
         use robotech::ro::Ro;
         use robotech::rx::PageRx;
         use robotech::svc::SvcError;
-        use robotech_macros::db_unwrap;
-        use robotech_macros::log_call;
+        use robotech::macros::db_unwrap;
+        use robotech::macros::log_call;
         use sea_orm::ConnectionTrait;
         use validator::Validate;
 
