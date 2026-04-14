@@ -23,7 +23,9 @@ use tracing_subscriber::{EnvFilter, fmt, reload};
 static LOG_GUARD: RwLock<Option<WorkerGuard>> = RwLock::new(None);
 
 struct CustomConsoleFormatter {
+    /// 时间格式
     timer_format: String,
+    /// 是否打印 span 链（包括函数名和参数，需 #[instrument] 配合）
     show_spans: bool,
 }
 

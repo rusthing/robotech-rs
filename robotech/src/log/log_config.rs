@@ -13,7 +13,7 @@ pub struct LogConfig {
     pub file_time_format: String,
     #[serde(with = "rotation_serde", default = "log_rotation_default")]
     pub rotation: Rotation,
-    #[serde(default = "spans_config_default")]
+    #[serde(default)]
     pub show_spans: bool,
 }
 
@@ -31,8 +31,4 @@ fn file_time_format_default() -> String {
 
 fn log_rotation_default() -> Rotation {
     Rotation::HOURLY
-}
-
-fn spans_config_default() -> bool {
-    true
 }
