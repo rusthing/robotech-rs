@@ -18,7 +18,7 @@ pub struct SignalManager {
 
 impl SignalManager {
     #[log_call]
-    pub fn new(signal_instruction: String) -> Result<(Self, Option<i32>), SignalManagerError> {
+    pub fn new(signal_instruction: String) -> Result<(Self, Option<u32>), SignalManagerError> {
         let AppEnv { app_file_path, .. } = APP_ENV.get().ok_or(EnvError::GetAppEnv())?;
         let pid_file_path = get_pid_file_path(app_file_path);
         let old_pid = Self::parse_and_handle_signal_args(signal_instruction, &pid_file_path)?;
@@ -71,7 +71,7 @@ impl SignalManager {
     fn parse_and_handle_signal_args(
         signal_instruction: String,
         pid_file_path: &PathBuf,
-    ) -> Result<Option<i32>, SignalManagerError> {
+    ) -> Result<Option<u32>, SignalManagerError> {
         let old_pid = read_pid(pid_file_path)?;
         if signal_instruction == "restart" {
             // 不处理，直接返回(restart指令在本函数中不处理，后续在需要时再单独发送信号停止旧程序)

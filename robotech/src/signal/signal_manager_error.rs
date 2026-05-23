@@ -14,5 +14,5 @@ pub enum SignalManagerError {
     #[error("PID file not found: {0}")]
     NotFoundPidFile(PathBuf),
     #[error("Program is running: {0}")]
-    ProgramIsRunning(i32),
+    ProgramIsRunning(u32),
 }
