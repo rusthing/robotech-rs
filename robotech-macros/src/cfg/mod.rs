@@ -1,10 +1,11 @@
-use proc_macro2::TokenStream;
+use proc_macro2::{Ident, TokenStream};
 use quote::quote;
 use syn::parse::{Parse, ParseStream};
 use syn::{Block, Token};
 
 pub(super) struct WatchCfgFileArgs {
     title: String,
+    files: Ident,
     reload_block: Block,
 }
 
@@ -12,10 +13,15 @@ impl Parse for WatchCfgFileArgs {
     fn parse(input: ParseStream) -> syn::Result<Self> {
         let title = input.parse::<syn::LitStr>()?.value();
         let _: Token![,] = input.parse()?;
+
+        let files = input.parse::<Ident>()?;
+
+        let _: Token![,] = input.parse()?;
         let reload_block = input.parse()?;
 
         Ok(WatchCfgFileArgs {
             title,
+            files,
             reload_block,
         })
     }
@@ -24,16 +30,16 @@ impl Parse for WatchCfgFileArgs {
 pub(super) fn watch_cfg_file_macro(args: WatchCfgFileArgs) -> TokenStream {
     let WatchCfgFileArgs {
         title,
+        files,
         reload_block,
     } = args;
-
     let reload_block = &reload_block.stmts;
 
     let expanded = quote! {
         log::debug!("watch {} cfg file...", #title);
         tokio::spawn({
             async move {
-                let (_watcher, receiver) = watch_cfg_file(files).expect(&format!("watch {} cfg file error", #title));
+                let (_watcher, receiver) = watch_cfg_file(#files).expect(&format!("watch {} cfg file error", #title));
 
                 // 创建一个1秒间隔的定时器
                 let mut interval = tokio::time::interval(std::time::Duration::from_secs(1));

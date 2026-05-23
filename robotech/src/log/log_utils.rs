@@ -207,7 +207,7 @@ pub fn init_log() -> Result<(), LogError> {
     debug!("初始化日志成功");
 
     let files = files.clone();
-    watch_cfg_file!("log", {
+    watch_cfg_file!("log", files, {
         // 重新加载配置
         let (
             LogConfig {
