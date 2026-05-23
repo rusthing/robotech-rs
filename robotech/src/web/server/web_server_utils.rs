@@ -74,7 +74,7 @@ pub async fn health() -> &'static str {
 pub async fn start_web_server(
     web_server_config: WebServerConfig,
     port_of_args: Option<u16>,
-    old_pid: Option<i32>,
+    old_pid: Option<u32>,
 ) -> Result<(), WebServerError> {
     let WebServerConfig {
         bind: binds,
@@ -416,7 +416,7 @@ pub async fn stop_old_web_service(
 /// stop_old_web_server(12345).await?;
 /// ```
 async fn terminate_old_app(
-    old_pid: i32,
+    old_pid: u32,
     wait_timeout: Duration,
     retry_interval: Duration,
 ) -> Result<(), WebServerError> {
