@@ -6,7 +6,7 @@ use syn::{Block, Expr, Token};
 pub(super) struct WatchCfgFileArgs {
     title: String,
     files: Expr,
-    reload_block: Block,
+    on_files_changed: Block,
 }
 
 impl Parse for WatchCfgFileArgs {
@@ -17,12 +17,12 @@ impl Parse for WatchCfgFileArgs {
         let files = input.parse::<Expr>()?;
 
         let _: Token![,] = input.parse()?;
-        let reload_block = input.parse()?;
+        let on_files_changed = input.parse()?;
 
         Ok(WatchCfgFileArgs {
             title,
             files,
-            reload_block,
+            on_files_changed,
         })
     }
 }
@@ -31,9 +31,9 @@ pub(super) fn watch_cfg_file_macro(args: WatchCfgFileArgs) -> TokenStream {
     let WatchCfgFileArgs {
         title,
         files,
-        reload_block,
+        on_files_changed,
     } = args;
-    let reload_block = &reload_block.stmts;
+    let on_files_changed = &on_files_changed.stmts;
 
     let expanded = quote! {
         use notify_debouncer_mini::DebouncedEventKind;
@@ -62,9 +62,9 @@ pub(super) fn watch_cfg_file_macro(args: WatchCfgFileArgs) -> TokenStream {
                                             continue;
                                         }
                                     }
-                                    log::debug!("reload from {} cfg file: {:?} ...", #title, #files);
+                                    log::debug!("{} cfg file changed: {:?} ...", #title, #files);
 
-                                    #( #reload_block )*
+                                    #( #on_files_changed )*
                                 }
                                 Err(e) => {
                                     log::warn!("error receiving {} cfg file events: {:?} {:?}", #title, #files, e);
