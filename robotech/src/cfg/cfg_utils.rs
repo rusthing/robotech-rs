@@ -1,11 +1,11 @@
 use crate::cfg::cfg_error::CfgError;
-use crate::env::{APP_ENV, AppEnv, EnvError};
+use crate::env::{AppEnv, EnvError, APP_ENV};
 use config::builder::DefaultState;
 use config::{Config, ConfigBuilder};
 use notify::{RecommendedWatcher, RecursiveMode};
-use notify_debouncer_mini::{DebounceEventResult, Debouncer, new_debouncer};
+use notify_debouncer_mini::{new_debouncer, DebounceEventResult, Debouncer};
 use std::path::Path;
-use std::sync::{Arc, mpsc};
+use std::sync::{mpsc, Arc};
 use std::time::Duration;
 
 pub fn build_cfg<'a, T: serde::Deserialize<'a>>(

@@ -1,11 +1,11 @@
-use proc_macro2::{Ident, TokenStream};
+use proc_macro2::TokenStream;
 use quote::quote;
 use syn::parse::{Parse, ParseStream};
-use syn::{Block, Token};
+use syn::{Block, Expr, Token};
 
 pub(super) struct WatchCfgFileArgs {
     title: String,
-    files: Ident,
+    files: Expr,
     reload_block: Block,
 }
 
@@ -14,7 +14,7 @@ impl Parse for WatchCfgFileArgs {
         let title = input.parse::<syn::LitStr>()?.value();
         let _: Token![,] = input.parse()?;
 
-        let files = input.parse::<Ident>()?;
+        let files = input.parse::<Expr>()?;
 
         let _: Token![,] = input.parse()?;
         let reload_block = input.parse()?;
@@ -36,10 +36,13 @@ pub(super) fn watch_cfg_file_macro(args: WatchCfgFileArgs) -> TokenStream {
     let reload_block = &reload_block.stmts;
 
     let expanded = quote! {
-        log::debug!("watch {} cfg file...", #title);
+        use notify_debouncer_mini::DebouncedEventKind;
+
+
+        log::debug!("watch {} cfg file: {:?} ...", #title, #files);
         tokio::spawn({
             async move {
-                let (_watcher, receiver) = watch_cfg_file(#files).expect(&format!("watch {} cfg file error", #title));
+                let (_watcher, receiver) = watch_cfg_file(#files).expect(&format!("watch {} cfg file error: {:?}", #title, #files));
 
                 // 创建一个1秒间隔的定时器
                 let mut interval = tokio::time::interval(std::time::Duration::from_secs(1));
@@ -53,14 +56,18 @@ pub(super) fn watch_cfg_file_macro(args: WatchCfgFileArgs) -> TokenStream {
                                 Ok(events) => {
                                     // 处理文件事件
                                     for event in events {
-                                        log::debug!("{} cfg file change event: {:?}", #title, event);
+                                        log::trace!("{} cfg file change event: {:?} {:?}", #title, event, #files);
+                                        if event.kind == DebouncedEventKind::AnyContinuous {
+                                            // 事件持续发生，防抖超时了
+                                            continue;
+                                        }
                                     }
-                                    log::debug!("reload from {} cfg file...", #title);
+                                    log::debug!("reload from {} cfg file: {:?} ...", #title, #files);
 
                                     #( #reload_block )*
                                 }
                                 Err(e) => {
-                                    log::warn!("error receiving {} cfg file events: {:?}", #title, e);
+                                    log::warn!("error receiving {} cfg file events: {:?} {:?}", #title, #files, e);
                                 }
                             }
                         }
@@ -70,13 +77,13 @@ pub(super) fn watch_cfg_file_macro(args: WatchCfgFileArgs) -> TokenStream {
                         }
                         Err(std::sync::mpsc::TryRecvError::Disconnected) => {
                             // 通道关闭
-                            log::debug!("{} cfg file watcher channel closed, exiting watcher loop", #title);
+                            log::debug!("{} cfg file watcher channel closed, exiting watcher loop: {:?}", #title, #files);
                             break;
                         }
                     }
                 }
 
-                log::debug!("{} cfg file watcher task finished", #title);
+                log::debug!("{} cfg file watcher task finished: {:?}", #title, #files);
             }
         });
     };
