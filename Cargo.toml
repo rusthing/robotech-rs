@@ -44,7 +44,7 @@ reqwest = "0.13.3"
 ipnet = "2.12.0"
 
 idworker = "1.1.0"
-wheel-rs = "1.6.0"
+wheel-rs = "1.6.1"
 robotech-macros = "1.6.4"
 
 # macro依赖
