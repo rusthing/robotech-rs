@@ -23,5 +23,6 @@ pub mod svc;
 #[cfg(feature = "web")]
 pub mod web;
 pub mod mq;
+pub mod tsdb;
 
 pub use ro::rx;
