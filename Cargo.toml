@@ -23,13 +23,13 @@ tokio = "1.52.3"
 utoipa = "5.5.0"
 utoipa-swagger-ui = "9.0.2"
 anyhow = "1.0.102"
-config = "0.15.23"
+config = "0.15.24"
 linkme = "0.3.36"
-regex = "1.12.3"
+regex = "1.12.4"
 nix = "0.31.3"
 axum = "0.8.9"
 tower = "0.5.3"
-tower-http = "0.6.11"
+tower-http = "0.7.0"
 tokio-rustls = "0.26.4"
 hyper = "1.10.1"
 hyper-util = "0.1.20"
@@ -48,12 +48,12 @@ influxdb2 = "0.5.2"
 
 idworker = "1.1.0"
 wheel-rs = "1.6.1"
-robotech-macros = "1.6.5"
+robotech-macros = "1.6.6"
 
 # macro依赖
 proc-macro2 = "1.0.106"             # 提供与标准库 proc_macro 兼容但更易测试的接口
 quote = "1.0.45"                    # 用于将语法树转换回代码
-syn = "2.0.117"                     # 用于解析 Rust 代码为语法树（AST）
+syn = "2.0.118"                     # 用于解析 Rust 代码为语法树（AST）
 
 [patch.crates-io]
 idworker = { path = "../idworker" }

@@ -1,3 +1,4 @@
+use idworker::IdWorkerError;
 use rumqttc::ClientError;
 use thiserror::Error;
 
@@ -7,4 +8,6 @@ pub enum MqttError {
     Request(#[from] ClientError),
     #[error("MQTT消息处理失败: {0}")]
     Handle(String),
+    #[error("ID工作者错误: {0}")]
+    IdWorker(#[from] IdWorkerError),
 }
