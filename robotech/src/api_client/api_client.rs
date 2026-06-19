@@ -18,10 +18,10 @@ impl ApiClient {
     #[log_call]
     pub async fn get(
         &self,
-        path: &str,
+        uri: &str,
         headers: Option<HeaderMap>,
     ) -> Result<Ro<serde_json::Value>, ApiClientError> {
-        let url = format!("{}{}", self.api_client_config.base_url, path);
+        let url = format!("{}{}", self.api_client_config.base_url, uri);
         let urn = format!("GET:{}", url);
         log::debug!("{}....", urn);
         let mut request_builder = REQWEST_CLIENT.get(&url);
@@ -58,10 +58,10 @@ impl ApiClient {
     #[log_call]
     pub async fn get_bytes(
         &self,
-        path: &str,
+        uri: &str,
         headers: Option<HeaderMap>,
     ) -> Result<Vec<u8>, ApiClientError> {
-        let url = format!("{}{}", self.api_client_config.base_url, path);
+        let url = format!("{}{}", self.api_client_config.base_url, uri);
         let urn = format!("GET:{}", url);
         log::debug!("{}....", urn);
         let mut request_builder = REQWEST_CLIENT.get(&url);
@@ -94,19 +94,18 @@ impl ApiClient {
     #[log_call]
     pub async fn post<B: serde::Serialize + Sync + std::fmt::Debug>(
         &self,
-        path: &str,
+        uri: &str,
         body: &B,
         headers: Option<HeaderMap>,
     ) -> Result<Ro<serde_json::Value>, ApiClientError> {
-        let url = format!("{}{}", self.api_client_config.base_url, path);
+        let url = format!("{}{}", self.api_client_config.base_url, uri);
         let urn = format!("POST:{}", url);
         log::debug!("{}....", urn);
-        let mut request_builder = REQWEST_CLIENT.post(&url);
+        let mut request_builder = REQWEST_CLIENT.post(&url).json(body);
         if let Some(headers) = headers {
             request_builder = request_builder.headers(headers);
         }
         let response = request_builder
-            .json(body)
             .send()
             .await
             .map_err(|e| ApiClientError::Request(urn.clone(), e))?;
@@ -135,11 +134,11 @@ impl ApiClient {
     #[log_call]
     pub async fn put<B: serde::Serialize + Sync + std::fmt::Debug>(
         &self,
-        path: &str,
+        uri: &str,
         body: &B,
         headers: Option<HeaderMap>,
     ) -> Result<Ro<serde_json::Value>, ApiClientError> {
-        let url = format!("{}{}", self.api_client_config.base_url, path);
+        let url = format!("{}{}", self.api_client_config.base_url, uri);
         let urn = format!("PUT:{}", url);
         log::debug!("{}....", urn);
         let mut request_builder = REQWEST_CLIENT.put(&url);
@@ -176,10 +175,10 @@ impl ApiClient {
     #[log_call]
     pub async fn delete<B: serde::Serialize>(
         &self,
-        path: &str,
+        uri: &str,
         headers: Option<HeaderMap>,
     ) -> Result<Ro<serde_json::Value>, ApiClientError> {
-        let url = format!("{}{}", self.api_client_config.base_url, path);
+        let url = format!("{}{}", self.api_client_config.base_url, uri);
         let urn = format!("DELETE:{}", url);
         log::debug!("{}....", urn);
         let mut request_builder = REQWEST_CLIENT.delete(&url);
@@ -216,11 +215,11 @@ impl ApiClient {
     /// 执行post multipart请求的通用方法
     pub async fn multipart(
         &self,
-        path: &str,
+        uri: &str,
         form: reqwest::multipart::Form,
         headers: Option<HeaderMap>,
     ) -> Result<Ro<serde_json::Value>, ApiClientError> {
-        let url = format!("{}{}", self.api_client_config.base_url, path);
+        let url = format!("{}{}", self.api_client_config.base_url, uri);
         let urn = format!("MULTIPART POST:{}", url);
         log::debug!("{}....", urn);
         // 请求并获取响应
