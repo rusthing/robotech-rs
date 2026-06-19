@@ -1,7 +1,7 @@
-use crate::api_client::api_client_config::ApiClientConfig;
 use crate::api_client::ApiClientError;
-use crate::cst::user_id_cst::USER_ID_HEADER_NAME;
+use crate::api_client::api_client_config::ApiClientConfig;
 use crate::ro::Ro;
+use http::header::HeaderMap;
 use reqwest::Client;
 use robotech_macros::log_call;
 use std::sync::LazyLock;
@@ -19,14 +19,16 @@ impl ApiClient {
     pub async fn get(
         &self,
         path: &str,
-        current_user_id: u64,
+        headers: Option<HeaderMap>,
     ) -> Result<Ro<serde_json::Value>, ApiClientError> {
         let url = format!("{}{}", self.api_client_config.base_url, path);
         let urn = format!("GET:{}", url);
         log::debug!("{}....", urn);
-        let response = REQWEST_CLIENT
-            .get(&url)
-            .header(USER_ID_HEADER_NAME, current_user_id)
+        let mut request_builder = REQWEST_CLIENT.get(&url);
+        if let Some(headers) = headers {
+            request_builder = request_builder.headers(headers);
+        }
+        let response = request_builder
             .send()
             .await
             .map_err(|e| ApiClientError::Request(urn.clone(), e))?;
@@ -57,14 +59,16 @@ impl ApiClient {
     pub async fn get_bytes(
         &self,
         path: &str,
-        current_user_id: u64,
+        headers: Option<HeaderMap>,
     ) -> Result<Vec<u8>, ApiClientError> {
         let url = format!("{}{}", self.api_client_config.base_url, path);
         let urn = format!("GET:{}", url);
         log::debug!("{}....", urn);
-        let response = REQWEST_CLIENT
-            .get(&url)
-            .header(USER_ID_HEADER_NAME, current_user_id)
+        let mut request_builder = REQWEST_CLIENT.get(&url);
+        if let Some(headers) = headers {
+            request_builder = request_builder.headers(headers);
+        }
+        let response = request_builder
             .send()
             .await
             .map_err(|e| ApiClientError::Request(urn.clone(), e))?;
@@ -92,14 +96,16 @@ impl ApiClient {
         &self,
         path: &str,
         body: &B,
-        current_user_id: u64,
+        headers: Option<HeaderMap>,
     ) -> Result<Ro<serde_json::Value>, ApiClientError> {
         let url = format!("{}{}", self.api_client_config.base_url, path);
         let urn = format!("POST:{}", url);
         log::debug!("{}....", urn);
-        let response = REQWEST_CLIENT
-            .post(&url)
-            .header(USER_ID_HEADER_NAME, current_user_id)
+        let mut request_builder = REQWEST_CLIENT.post(&url);
+        if let Some(headers) = headers {
+            request_builder = request_builder.headers(headers);
+        }
+        let response = request_builder
             .json(body)
             .send()
             .await
@@ -131,14 +137,16 @@ impl ApiClient {
         &self,
         path: &str,
         body: &B,
-        current_user_id: u64,
+        headers: Option<HeaderMap>,
     ) -> Result<Ro<serde_json::Value>, ApiClientError> {
         let url = format!("{}{}", self.api_client_config.base_url, path);
         let urn = format!("PUT:{}", url);
         log::debug!("{}....", urn);
-        let response = REQWEST_CLIENT
-            .put(&url)
-            .header(USER_ID_HEADER_NAME, current_user_id)
+        let mut request_builder = REQWEST_CLIENT.put(&url);
+        if let Some(headers) = headers {
+            request_builder = request_builder.headers(headers);
+        }
+        let response = request_builder
             .json(body)
             .send()
             .await
@@ -169,14 +177,16 @@ impl ApiClient {
     pub async fn delete<B: serde::Serialize>(
         &self,
         path: &str,
-        current_user_id: u64,
+        headers: Option<HeaderMap>,
     ) -> Result<Ro<serde_json::Value>, ApiClientError> {
         let url = format!("{}{}", self.api_client_config.base_url, path);
         let urn = format!("DELETE:{}", url);
         log::debug!("{}....", urn);
-        let response = REQWEST_CLIENT
-            .delete(&url)
-            .header(USER_ID_HEADER_NAME, current_user_id)
+        let mut request_builder = REQWEST_CLIENT.delete(&url);
+        if let Some(headers) = headers {
+            request_builder = request_builder.headers(headers);
+        }
+        let response = request_builder
             .send()
             .await
             .map_err(|e| ApiClientError::Request(urn.clone(), e))?;
@@ -208,16 +218,17 @@ impl ApiClient {
         &self,
         path: &str,
         form: reqwest::multipart::Form,
-        current_user_id: u64,
+        headers: Option<HeaderMap>,
     ) -> Result<Ro<serde_json::Value>, ApiClientError> {
         let url = format!("{}{}", self.api_client_config.base_url, path);
         let urn = format!("MULTIPART POST:{}", url);
         log::debug!("{}....", urn);
         // 请求并获取响应
-        let response = REQWEST_CLIENT
-            .post(&url)
-            .multipart(form)
-            .header(USER_ID_HEADER_NAME, current_user_id)
+        let mut request_builder = REQWEST_CLIENT.post(&url).multipart(form);
+        if let Some(headers) = headers {
+            request_builder = request_builder.headers(headers);
+        }
+        let response = request_builder
             .send()
             .await
             .map_err(|e| ApiClientError::Request(urn.clone(), e))?;

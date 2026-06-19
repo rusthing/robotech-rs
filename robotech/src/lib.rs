@@ -15,14 +15,14 @@ pub mod env;
 pub mod log;
 #[cfg(feature = "macros")]
 pub mod macros;
+pub mod mq;
 pub mod ro;
 #[cfg(feature = "app")]
 pub mod signal;
 #[cfg(any(feature = "app"))]
 pub mod svc;
+pub mod tsdb;
 #[cfg(feature = "web")]
 pub mod web;
-pub mod mq;
-pub mod tsdb;
 
 pub use ro::rx;
