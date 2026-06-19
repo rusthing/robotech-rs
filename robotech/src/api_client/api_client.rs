@@ -9,11 +9,11 @@ use std::sync::LazyLock;
 pub static REQWEST_CLIENT: LazyLock<Client> = LazyLock::new(|| Client::new());
 
 #[derive(Debug)]
-pub struct CrudApiClient {
+pub struct ApiClient {
     pub api_client_config: ApiClientConfig,
 }
 
-impl CrudApiClient {
+impl ApiClient {
     /// 执行GET请求的通用方法
     #[log_call]
     pub async fn get(
