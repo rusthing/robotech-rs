@@ -1,12 +1,12 @@
 use crate::dao::DaoError;
 #[cfg(feature = "db")]
 use crate::ro::RO_CODE_WARNING_DELETE_VIOLATE_FK;
-use crate::ro::{Ro, RO_CODE_WARNING_DUPLICATE_KEY, RO_CODE_WARNING_INSERT_VIOLATE_FK};
+use crate::ro::{RO_CODE_WARNING_DUPLICATE_KEY, RO_CODE_WARNING_INSERT_VIOLATE_FK, Ro};
 use crate::svc::SvcError;
-use axum::http::header::InvalidHeaderValue;
-use axum::http::StatusCode;
-use axum::response::{IntoResponse, Response};
 use axum::Json;
+use axum::http::StatusCode;
+use axum::http::header::InvalidHeaderValue;
+use axum::response::{IntoResponse, Response};
 use log::warn;
 #[cfg(feature = "db")]
 use sea_orm::DbErr;
@@ -84,12 +84,11 @@ impl CtrlError {
                 }
                 #[cfg(feature = "db")]
                 SvcError::Dao(error) => match error {
-                    DaoError::DuplicateKey(unique_key, value) => Ro::warn(format!(
-                        "{}<{}>已存在！",
-                        unique_key.key_remark, value
-                    ))
-                    .code(Some(RO_CODE_WARNING_DUPLICATE_KEY.to_string()))
-                    .detail(Some(format!("{unique_key} -> value: {value}"))),
+                    DaoError::DuplicateKey(unique_key, value) => {
+                        Ro::warn(format!("{}<{}>已存在！", unique_key.key_remark, value))
+                            .code(Some(RO_CODE_WARNING_DUPLICATE_KEY.to_string()))
+                            .detail(Some(format!("{unique_key} -> value: {value}")))
+                    }
                     DaoError::InsertViolateFk(foreign_key) => Ro::warn(format!(
                         "不能插入(或更新){}，设置的{}并不存在",
                         foreign_key.fk_table_comment, foreign_key.pk_table_comment

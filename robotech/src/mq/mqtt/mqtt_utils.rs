@@ -2,10 +2,10 @@ use crate::mq::mqtt::mqtt_config::MqttConfig;
 use crate::mq::mqtt::mqtt_error::MqttError;
 use log::{debug, error};
 use rumqttc::{AsyncClient, MqttOptions, Publish, SubscribeFilter};
+use std::future::Future;
 use std::sync::Arc;
 use tokio::task::JoinHandle;
 use tokio::time::sleep;
-use std::future::Future;
 
 /// # 启动MQTT订阅者
 pub async fn start_mqtt_subscriber<F, Fut>(
@@ -28,6 +28,8 @@ where
         topic,
         qos,
         reconnect_interval,
+        handle_error_sleep,
+        ack_error_sleep,
     } = mqtt_config;
     let mut mqtt_options = MqttOptions::new(client_id, host, port);
     mqtt_options.set_keep_alive(keep_alive);
@@ -57,10 +59,12 @@ where
                                 Ok(_) => {
                                     if let Err(e) = mqtt_client_clone.ack(&publish).await {
                                         error!("应答MQTT消息失败: {:?}", e);
+                                        sleep(ack_error_sleep).await;
                                     }
                                 }
                                 Err(e) => {
                                     error!("处理MQTT消息失败: {:?}", e);
+                                    sleep(handle_error_sleep).await;
                                 }
                             }
                         }

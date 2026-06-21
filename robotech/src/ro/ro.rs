@@ -24,7 +24,7 @@ pub struct Ro<E> {
     /// 响应结果枚举值，表示请求处理的结果状态
     pub result: RoResult,
     /// 响应消息，对结果的简要描述
-    pub message: String,
+    pub msg: String,
     /// 时间戳，记录响应生成的时间（毫秒）
     /// 这里默认值为当前时间戳，懒得考虑系统时间错误的问题
     #[builder(default = Utc::now().timestamp_millis() as u64)]
@@ -61,56 +61,47 @@ impl<E> Ro<E> {
     /// # 创建一个成功的响应对象
     ///
     /// ## 参数
-    /// * `message` - 成功消息
+    /// * `msg` - 成功消息
     ///
     /// ## 返回值
     /// 返回一个结果为Success的Ro实例
-    pub fn success(message: String) -> Self {
-        Self::builder()
-            .result(RoResult::Success)
-            .message(message)
-            .build()
+    pub fn success(msg: String) -> Self {
+        Self::builder().result(RoResult::Success).msg(msg).build()
     }
 
     /// # 创建一个非法参数的响应对象
     ///
     /// ## 参数
-    /// * `message` - 错误消息
+    /// * `msg` - 错误消息
     ///
     /// ## 返回值
     /// 返回一个结果为IllegalArgument的Ro实例
-    pub fn illegal_argument(message: String) -> Self {
+    pub fn illegal_argument(msg: String) -> Self {
         Self::builder()
             .result(RoResult::IllegalArgument)
-            .message(message)
+            .msg(msg)
             .build()
     }
 
     /// # 创建一个警告的响应对象
     ///
     /// ## 参数
-    /// * `message` - 警告消息
+    /// * `msg` - 警告消息
     ///
     /// ## 返回值
     /// 返回一个结果为Warn的Ro实例
-    pub fn warn(message: String) -> Self {
-        Self::builder()
-            .result(RoResult::Warn)
-            .message(message)
-            .build()
+    pub fn warn(msg: String) -> Self {
+        Self::builder().result(RoResult::Warn).msg(msg).build()
     }
 
     /// # 创建一个失败的响应对象
     ///
     /// ## 参数
-    /// * `message` - 失败消息
+    /// * `msg` - 失败消息
     ///
     /// ## 返回值
     /// 返回一个结果为Fail的Ro实例
-    pub fn fail(message: String) -> Self {
-        Self::builder()
-            .result(RoResult::Fail)
-            .message(message)
-            .build()
+    pub fn fail(msg: String) -> Self {
+        Self::builder().result(RoResult::Fail).msg(msg).build()
     }
 }

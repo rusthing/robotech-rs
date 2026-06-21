@@ -67,7 +67,7 @@ pub(crate) fn svc_macro(input: ItemStruct) -> TokenStream {
             let one = #vo_name::from(#dao_name::insert(active_model, db).await?);
             Ok(Self::get_by_id(one.id as u64, Some(db))
                 .await?
-                .message("添加成功".to_string()))
+                .msg("添加成功".to_string()))
         }
     });
 
@@ -102,7 +102,7 @@ pub(crate) fn svc_macro(input: ItemStruct) -> TokenStream {
             let one = #vo_name::from(#dao_name::update(active_model, db).await?);
             Ok(Self::get_by_id(one.id, Some(db))
                 .await?
-                .message("修改成功".to_string()))
+                .msg("修改成功".to_string()))
         }
     });
 

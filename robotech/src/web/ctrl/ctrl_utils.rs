@@ -24,17 +24,17 @@ pub fn get_current_user_id(headers: &HeaderMap) -> Result<u64, validator::Valida
     headers
         .get(USER_ID_HEADER_NAME)
         .ok_or_else(|| {
-            let message = format!("缺少必要参数<{}>", USER_ID_HEADER_NAME);
-            validator::ValidationError::new(Box::leak(message.into_boxed_str()))
+            let msg = format!("缺少必要参数<{}>", USER_ID_HEADER_NAME);
+            validator::ValidationError::new(Box::leak(msg.into_boxed_str()))
         })?
         .to_str()
         .map_err(|_| {
-            let message = format!("参数<{}>格式不正确", USER_ID_HEADER_NAME);
-            validator::ValidationError::new(Box::leak(message.into_boxed_str()))
+            let msg = format!("参数<{}>格式不正确", USER_ID_HEADER_NAME);
+            validator::ValidationError::new(Box::leak(msg.into_boxed_str()))
         })?
         .parse::<u64>()
         .map_err(|_| {
-            let message = format!("参数<{}>格式不正确", USER_ID_HEADER_NAME);
-            validator::ValidationError::new(Box::leak(message.into_boxed_str()))
+            let msg = format!("参数<{}>格式不正确", USER_ID_HEADER_NAME);
+            validator::ValidationError::new(Box::leak(msg.into_boxed_str()))
         })
 }

@@ -2,8 +2,8 @@ mod cors;
 mod ctrl;
 mod health_check;
 mod https;
-mod server;
 pub mod middleware;
+mod server;
 
 // 重新导出结构体，简化外部引用
 pub(crate) use cors::*;

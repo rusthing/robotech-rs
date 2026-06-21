@@ -1,5 +1,5 @@
-use crate::dao::eo::ForeignKey;
 use crate::dao::DaoError;
+use crate::dao::eo::ForeignKey;
 use linkme::distributed_slice;
 use std::collections::HashMap;
 use std::sync::OnceLock;

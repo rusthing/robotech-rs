@@ -21,6 +21,8 @@ pub enum ApiClientError {
     Request(String, #[source] reqwest::Error),
     #[error("获取响应失败: {0}")]
     Response(String, #[source] reqwest::Error),
+    #[error("JWT编码失败: {0}")]
+    Jwt(#[from] jsonwebtoken::errors::Error),
     /// 响应状态非2xx
     ///
     /// 当服务器返回的状态码不在 2xx 范围内时触发此错误，

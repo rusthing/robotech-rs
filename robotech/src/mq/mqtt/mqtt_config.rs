@@ -40,6 +40,12 @@ pub struct MqttConfig {
     /// mqtt服务器断开重连时间间隔
     #[serde(with = "duration_serde", default = "default_reconnect_interval")]
     pub reconnect_interval: Duration,
+    /// 处理消息错误睡眠时间
+    #[serde(with = "duration_serde", default = "default_handle_error_sleep")]
+    pub handle_error_sleep: Duration,
+    /// 应答消息错误睡眠时间
+    #[serde(with = "duration_serde", default = "default_ack_error_sleep")]
+    pub ack_error_sleep: Duration,
 }
 
 fn default_keep_alive() -> Duration {
@@ -56,4 +62,10 @@ fn default_qos() -> QoS {
 }
 fn default_reconnect_interval() -> Duration {
     Duration::from_secs(30)
+}
+fn default_handle_error_sleep() -> Duration {
+    Duration::from_secs(1)
+}
+fn default_ack_error_sleep() -> Duration {
+    Duration::from_secs(1)
 }
