@@ -4,7 +4,7 @@ resolver = "3"
 
 [workspace.dependencies]
 # rototech依赖
-log = "0.4.32"
+log = "0.4.33"
 tracing = "0.1.44"
 tracing-log = "0.2.0"
 tracing-core = "0.1.36"
