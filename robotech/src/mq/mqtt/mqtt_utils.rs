@@ -34,7 +34,11 @@ where
     let mut mqtt_options = MqttOptions::new(client_id, host, port);
     mqtt_options.set_keep_alive(keep_alive);
     mqtt_options.set_clean_session(clean_session);
-    mqtt_options.set_credentials(username, password);
+    if let Some(username) = username
+        && let Some(password) = password
+    {
+        mqtt_options.set_credentials(username, password);
+    }
     mqtt_options.set_manual_acks(true);
 
     let (mqtt_client, mut mqtt_event_loop) = AsyncClient::new(mqtt_options, cap);

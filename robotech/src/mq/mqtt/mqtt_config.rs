@@ -24,10 +24,10 @@ pub struct MqttConfig {
     pub clean_session: bool,
     /// mqtt服务器用户名
     #[serde()]
-    pub username: String,
+    pub username: Option<String>,
     /// mqtt服务器密码
     #[serde()]
-    pub password: String,
+    pub password: Option<String>,
     /// mqtt服务器消息缓存容量
     #[serde(default = "default_cap")]
     pub cap: usize,
