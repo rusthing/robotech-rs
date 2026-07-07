@@ -9,9 +9,12 @@ pub struct Influxdb2Config {
     /// 组织名称
     #[serde()]
     pub org: String,
-    /// 桶
+    /// 桶(数据库)
     #[serde()]
     pub bucket: String,
+    /// 量度(表)
+    #[serde()]
+    pub measurement: Option<String>,
     /// 数据库token
     #[serde()]
     pub token: String,
