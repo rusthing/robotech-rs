@@ -30,7 +30,7 @@ pub fn db_migrate_macro(args: MigrateArgs) -> TokenStream {
     let db_url = args.db_url;
 
     let expanded = quote! {
-        use log::debug;
+        use tracing::debug;
         use sqlx::any::install_default_drivers;
         use sqlx::AnyPool;
 

@@ -39,7 +39,7 @@ pub(super) fn watch_cfg_file_macro(args: WatchCfgFileArgs) -> TokenStream {
         use notify_debouncer_mini::DebouncedEventKind;
 
 
-        log::debug!("watch {} cfg file: {:?} ...", #title, #files);
+        tracing::debug!("watch {} cfg file: {:?} ...", #title, #files);
         tokio::spawn({
             async move {
                 let (_watcher, receiver) = watch_cfg_file(#files).expect(&format!("watch {} cfg file error: {:?}", #title, #files));
@@ -56,18 +56,18 @@ pub(super) fn watch_cfg_file_macro(args: WatchCfgFileArgs) -> TokenStream {
                                 Ok(events) => {
                                     // 处理文件事件
                                     for event in events {
-                                        log::trace!("{} cfg file trigger {:?}: {:?}", #title, event, #files);
+                                        tracing::trace!("{} cfg file trigger {:?}: {:?}", #title, event, #files);
                                         if event.kind == DebouncedEventKind::AnyContinuous {
                                             // 事件持续发生，防抖超时了
                                             continue;
                                         }
                                     }
-                                    log::debug!("{} cfg file trigger {:?}: {:?} ...", #title, event, #files);
+                                    tracing::debug!("{} cfg file trigger {:?}: {:?} ...", #title, event, #files);
 
                                     #( #on_files_changed )*
                                 }
                                 Err(e) => {
-                                    log::warn!("error receiving {} cfg file events: {:?} {:?}", #title, #files, e);
+                                    tracing::warn!("error receiving {} cfg file events: {:?} {:?}", #title, #files, e);
                                 }
                             }
                         }
@@ -77,13 +77,13 @@ pub(super) fn watch_cfg_file_macro(args: WatchCfgFileArgs) -> TokenStream {
                         }
                         Err(std::sync::mpsc::TryRecvError::Disconnected) => {
                             // 通道关闭
-                            log::debug!("{} cfg file watcher channel closed, exiting watcher loop: {:?}", #title, #files);
+                            tracing::debug!("{} cfg file watcher channel closed, exiting watcher loop: {:?}", #title, #files);
                             break;
                         }
                     }
                 }
 
-                log::debug!("{} cfg file watcher task finished: {:?}", #title, #files);
+                tracing::debug!("{} cfg file watcher task finished: {:?}", #title, #files);
             }
         });
     };

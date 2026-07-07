@@ -1,7 +1,7 @@
 use crate::cfg::{CfgError, build_cfg, watch_cfg_file};
 use crate::env::{APP_ENV, AppEnv, EnvError};
 use crate::log::{LogConfig, LogError};
-use log::debug;
+use tracing::debug;
 use robotech_macros::watch_cfg_file;
 use std::env;
 use std::path::Path;

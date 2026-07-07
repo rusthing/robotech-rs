@@ -1,6 +1,6 @@
 use crate::web::{CorsConfig, WebServerError};
 use axum::http;
-use log::debug;
+use tracing::debug;
 use std::str::FromStr;
 use tower_http::cors::CorsLayer;
 

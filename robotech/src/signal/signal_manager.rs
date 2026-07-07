@@ -1,6 +1,6 @@
 use crate::env::{APP_ENV, AppEnv, EnvError};
 use crate::signal::signal_manager_error::SignalManagerError;
-use log::error;
+use tracing::error;
 use robotech_macros::log_call;
 use std::path::PathBuf;
 use std::process;

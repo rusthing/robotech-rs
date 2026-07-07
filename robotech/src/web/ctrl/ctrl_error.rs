@@ -7,7 +7,7 @@ use axum::Json;
 use axum::http::StatusCode;
 use axum::http::header::InvalidHeaderValue;
 use axum::response::{IntoResponse, Response};
-use log::warn;
+use tracing::warn;
 #[cfg(feature = "db")]
 use sea_orm::DbErr;
 use thiserror::Error;

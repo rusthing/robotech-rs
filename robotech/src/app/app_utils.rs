@@ -1,6 +1,6 @@
 use crate::app::AppError;
 use crate::cfg::build_cfg;
-use log::{debug, warn};
+use tracing::{debug, warn};
 use robotech_macros::log_call;
 use tokio::sync::broadcast;
 

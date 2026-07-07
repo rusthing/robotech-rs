@@ -48,9 +48,9 @@ rumqttc = "0.25.1"
 influxdb2 = "0.5.2"
 jsonwebtoken = "10.4.0"
 
-idworker = "1.1.0"
-wheel-rs = "1.8.0"
-robotech-macros = "1.7.3"
+idworker = "1.1.1"
+wheel-rs = "1.8.1"
+robotech-macros = "1.7.4"
 
 # macro依赖
 proc-macro2 = "1.0.106"             # 提供与标准库 proc_macro 兼容但更易测试的接口

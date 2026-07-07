@@ -34,7 +34,7 @@ impl ApiClient {
         let url = format!("{}{}", self.api_client_config.base_url, uri);
         let urn = Urn::from_str(&format!("{method}:{url}"))
             .map_err(|e| ApiClientError::SetApiClient(format!("解析url失败: {e}")))?;
-        log::debug!("request: {urn}....");
+        tracing::debug!("request: {urn}....");
         let mut request_builder = REQWEST_CLIENT.request(method, &url);
         if let Some(headers) = headers {
             request_builder = request_builder.headers(headers);
@@ -88,7 +88,7 @@ impl ApiClient {
             .send()
             .await
             .map_err(|e| ApiClientError::Request(urn.to_string(), e))?;
-        log::debug!("{urn} response....");
+        tracing::debug!("{urn} response....");
         // 检查状态码，如果不是成功状态码则转换为错误
         let status_code = response.status();
         if !status_code.is_success() {
@@ -108,7 +108,7 @@ impl ApiClient {
             .text()
             .await
             .map_err(|e| ApiClientError::Response(urn.to_string(), e))?;
-        log::debug!("{urn} response body: {response_text}");
+        tracing::debug!("{urn} response body: {response_text}");
 
         // 将文本解析为JSON
         let result: Ro<E> = serde_json::from_str(&response_text)
@@ -190,7 +190,7 @@ impl ApiClient {
             .bytes()
             .await
             .map_err(|e| ApiClientError::ParseBytes(urn.to_string(), e))?;
-        log::debug!("{urn} response.");
+        tracing::debug!("{urn} response.");
         Ok(result.to_vec())
     }
 

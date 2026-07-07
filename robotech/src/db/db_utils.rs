@@ -1,5 +1,5 @@
 use crate::db::{DbConnConfig, DbError};
-use log::debug;
+use tracing::debug;
 use robotech_macros::log_call;
 use sea_orm::{ConnectOptions, Database, DbConn};
 use std::sync::{Arc, RwLock};

@@ -5,7 +5,7 @@ use crate::web::middleware::{
 use crate::web::{HttpsConfig, WebServerConfig, WebServerError, build_cors, build_https};
 use axum::{Router, debug_handler, middleware, routing::get};
 use linkme::distributed_slice;
-use log::{debug, error, info};
+use tracing::{debug, error, info};
 use robotech_macros::log_call;
 use socket2::{Domain, Socket, Type};
 use std::net::{IpAddr, SocketAddr, TcpListener};

@@ -1,6 +1,6 @@
 [package]
 name = "robotech"
-version = "1.7.3"
+version = "1.7.4"
 edition = "2024"
 authors = ["zbz"]
 keywords = ["crud", "microservice", "service", "RESTful"]
@@ -22,6 +22,7 @@ macros = ["dep:robotech-macros"]
 
 [dependencies]
 log = { workspace = true }
+tracing = { workspace = true }
 tracing-log = { workspace = true }
 tracing-core = { workspace = true }
 tracing-appender = { workspace = true }

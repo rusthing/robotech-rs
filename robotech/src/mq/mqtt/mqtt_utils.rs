@@ -1,11 +1,11 @@
 use crate::mq::mqtt::mqtt_config::MqttConfig;
 use crate::mq::mqtt::mqtt_error::MqttError;
-use log::{debug, error};
 use rumqttc::{AsyncClient, MqttOptions, Publish, SubscribeFilter};
 use std::future::Future;
 use std::sync::Arc;
 use tokio::task::JoinHandle;
 use tokio::time::sleep;
+use tracing::{debug, error};
 
 /// # 启动MQTT订阅者
 pub async fn start_mqtt_subscriber<F, Fut>(

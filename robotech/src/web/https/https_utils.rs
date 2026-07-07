@@ -5,7 +5,7 @@ use axum::extract::ConnectInfo;
 use hyper::service::service_fn;
 use hyper_util::rt::{TokioExecutor, TokioIo};
 use hyper_util::server;
-use log::{debug, error};
+use tracing::{debug, error};
 use rustls_pemfile::{certs, private_key};
 use std::convert::Infallible;
 use std::fs::File;

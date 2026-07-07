@@ -162,14 +162,14 @@ pub(super) fn log_call_macro(args: LogCallArgs, mut input: ItemFn) -> TokenStrea
     );
     let enter_log = if record_mode == RecordMode::Both || record_mode == RecordMode::Enter {
         quote! {
-            log::#log_level!(#enter_log, #(#param_values),*);
+            tracing::#log_level!(#enter_log, #(#param_values),*);
         }
     } else {
         quote! {}
     };
     let exit_log = if record_mode == RecordMode::Both || record_mode == RecordMode::Exit {
         quote! {
-            log::#log_level!("退出方法 ↩️ {}(), 返回值: {:?}", #fn_name_str, result);
+            tracing::#log_level!("退出方法 ↩️ {}(), 返回值: {:?}", #fn_name_str, result);
         }
     } else {
         quote! {}
