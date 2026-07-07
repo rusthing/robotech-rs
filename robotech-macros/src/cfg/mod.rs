@@ -56,13 +56,13 @@ pub(super) fn watch_cfg_file_macro(args: WatchCfgFileArgs) -> TokenStream {
                                 Ok(events) => {
                                     // 处理文件事件
                                     for event in events {
-                                        tracing::trace!("{} cfg file trigger {:?}: {:?}", #title, event, #files);
+                                        tracing::debug!("{} cfg file trigger {:?}: {:?}", #title, event, #files);
                                         if event.kind == DebouncedEventKind::AnyContinuous {
                                             // 事件持续发生，防抖超时了
                                             continue;
                                         }
                                     }
-                                    tracing::debug!("{} cfg file trigger {:?}: {:?} ...", #title, event, #files);
+                                    tracing::debug!("{} cfg file changed: {:?} ...", #title, #files);
 
                                     #( #on_files_changed )*
                                 }
