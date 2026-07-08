@@ -50,7 +50,7 @@ jsonwebtoken = "10.4.0"
 
 idworker = "1.1.1"
 wheel-rs = "1.8.1"
-robotech-macros = "1.7.5"
+robotech-macros = "1.7.6"
 
 # macro依赖
 proc-macro2 = "1.0.106"             # 提供与标准库 proc_macro 兼容但更易测试的接口

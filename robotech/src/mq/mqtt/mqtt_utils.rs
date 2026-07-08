@@ -58,7 +58,11 @@ where
                 Ok(notification) => {
                     match notification {
                         rumqttc::Event::Incoming(rumqttc::Packet::Publish(publish)) => {
-                            debug!("收到MQTT消息: {:?}", publish);
+                            debug!(
+                                "收到MQTT消息: {:?} {}",
+                                publish,
+                                String::from_utf8_lossy(&publish.payload)
+                            );
                             match do_received(publish.clone()).await {
                                 Ok(_) => {
                                     if let Err(e) = mqtt_client_clone.ack(&publish).await {
