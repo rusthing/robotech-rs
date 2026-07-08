@@ -46,6 +46,9 @@ pub struct MqttConfig {
     /// 应答消息错误睡眠时间
     #[serde(with = "duration_serde", default = "default_ack_error_sleep")]
     pub ack_error_sleep: Duration,
+    /// 是否抛弃处理错误的消息
+    #[serde(default = "default_discard_error")]
+    pub discard_error: bool,
 }
 
 fn default_keep_alive() -> Duration {
@@ -68,4 +71,7 @@ fn default_handle_error_sleep() -> Duration {
 }
 fn default_ack_error_sleep() -> Duration {
     Duration::from_secs(1)
+}
+fn default_discard_error() -> bool {
+    false
 }

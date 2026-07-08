@@ -30,6 +30,7 @@ where
         reconnect_interval,
         handle_error_sleep,
         ack_error_sleep,
+        discard_error,
     } = mqtt_config;
     let mut mqtt_options = MqttOptions::new(client_id, host, port);
     mqtt_options.set_keep_alive(keep_alive);
@@ -72,6 +73,12 @@ where
                                 }
                                 Err(e) => {
                                     error!("处理MQTT消息失败: {:?}", e);
+                                    if discard_error {
+                                        if let Err(e) = mqtt_client_clone.ack(&publish).await {
+                                            error!("应答MQTT消息失败: {:?}", e);
+                                            sleep(ack_error_sleep).await;
+                                        }
+                                    }
                                     sleep(handle_error_sleep).await;
                                 }
                             }
