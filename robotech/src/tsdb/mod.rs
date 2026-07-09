@@ -1,2 +1,2 @@
-#[cfg(feature = "influxdb2")]
-pub mod influxdb2;
+#[cfg(feature = "influxdb")]
+pub mod influxdb;

@@ -45,12 +45,12 @@ http = "1.4.2"
 ipnet = "2.12.0"
 bytes = "1.12.0"
 rumqttc = "0.25.1"
-influxdb2 = "0.5.2"
+influxdb = "0.8.0"
 jsonwebtoken = "10.4.0"
 
 idworker = "1.1.1"
 wheel-rs = "1.8.1"
-robotech-macros = "1.7.7"
+robotech-macros = "1.8.0"
 
 # macro依赖
 proc-macro2 = "1.0.106"             # 提供与标准库 proc_macro 兼容但更易测试的接口

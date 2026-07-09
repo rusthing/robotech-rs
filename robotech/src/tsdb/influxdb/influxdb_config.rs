@@ -2,13 +2,10 @@ use serde::Deserialize;
 
 #[derive(Debug, Deserialize, Clone)]
 #[serde(rename_all = "kebab-case")]
-pub struct Influxdb2Config {
+pub struct InfluxdbConfig {
     /// 数据库URL
     #[serde()]
     pub url: String,
-    /// 组织名称
-    #[serde()]
-    pub org: String,
     /// 桶(数据库)
     #[serde()]
     pub bucket: String,
@@ -18,4 +15,11 @@ pub struct Influxdb2Config {
     /// 数据库token
     #[serde()]
     pub token: String,
+    /// 连接池最大大小
+    #[serde(default = "default_pool_max_size")]
+    pub pool_max_size: usize,
+}
+
+fn default_pool_max_size() -> usize {
+    5000
 }

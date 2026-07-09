@@ -1,6 +1,6 @@
 [package]
 name = "robotech"
-version = "1.7.7"
+version = "1.8.0"
 edition = "2024"
 authors = ["zbz"]
 keywords = ["crud", "microservice", "service", "RESTful"]
@@ -17,7 +17,7 @@ app = ["dep:anyhow", "dep:config", "dep:validator", "dep:idworker"]
 web = ["app", "dep:ipnet", "dep:axum", "dep:tower", "dep:tower-http", "dep:tokio-rustls", "dep:hyper", "dep:hyper-util", "dep:rustls-pemfile", "dep:socket2", "dep:reqwest"]
 db = ["app", "dep:sqlx", "dep:sea-orm", "dep:regex", "dep:once_cell"]
 mqtt = ["dep:rumqttc", "dep:bytes"]
-influxdb2 = ["dep:influxdb2"]
+influxdb = ["dep:influxdb", "dep:reqwest"]
 macros = ["dep:robotech-macros"]
 
 [dependencies]
@@ -62,7 +62,8 @@ http = { workspace = true, optional = true }
 jsonwebtoken = { workspace = true, optional = true }
 rumqttc = { workspace = true, optional = true }
 bytes = { workspace = true, optional = true }
-influxdb2 = { workspace = true, optional = true }
+influxdb = { workspace = true, optional = true }
+
 
 idworker = { workspace = true, optional = true }
 wheel-rs = { workspace = true }
