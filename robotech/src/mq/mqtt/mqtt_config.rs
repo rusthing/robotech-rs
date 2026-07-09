@@ -61,7 +61,7 @@ fn default_cap() -> usize {
     1024
 }
 fn default_qos() -> QoS {
-    QoS::AtLeastOnce
+    QoS::AtMostOnce
 }
 fn default_reconnect_interval() -> Duration {
     Duration::from_secs(30)
