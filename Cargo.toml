@@ -49,7 +49,7 @@ influxdb = "0.8.0"
 jsonwebtoken = "10.4.0"
 
 idworker = "1.1.1"
-wheel-rs = "1.8.1"
+wheel-rs = "1.8.2"
 robotech-macros = "1.8.0"
 
 # macro依赖
