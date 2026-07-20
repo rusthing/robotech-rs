@@ -1,11 +1,12 @@
-use crate::cfg::{CfgError, build_cfg, watch_cfg_file};
-use crate::env::{APP_ENV, AppEnv, EnvError};
+use crate::app::watch_file;
+use crate::cfg::{build_cfg, CfgError};
+use crate::env::{AppEnv, EnvError, APP_ENV};
 use crate::log::{LogConfig, LogError};
-use tracing::debug;
-use robotech_macros::watch_cfg_file;
+use robotech_macros::watch_file;
 use std::env;
 use std::path::Path;
 use std::sync::{Arc, RwLock};
+use tracing::debug;
 use tracing_appender::non_blocking::WorkerGuard;
 use tracing_appender::rolling::RollingFileAppender;
 use tracing_core::{Event, Level, Subscriber};
@@ -16,7 +17,7 @@ use tracing_subscriber::fmt::{FmtContext, FormatEvent, FormatFields};
 use tracing_subscriber::layer::SubscriberExt;
 use tracing_subscriber::registry::LookupSpan;
 use tracing_subscriber::util::SubscriberInitExt;
-use tracing_subscriber::{EnvFilter, fmt, reload};
+use tracing_subscriber::{fmt, reload, EnvFilter};
 
 /// 日志文件输出锁
 /// 解决锁在初始化方法结束后被提前释放导致后续日志不能输出
@@ -206,7 +207,7 @@ pub fn init_log() -> Result<(), LogError> {
         .init();
     debug!("初始化日志成功");
 
-    watch_cfg_file!("log", files.clone(), {
+    watch_file!("log", files.clone(), {
         // 重新加载配置
         let (
             LogConfig {

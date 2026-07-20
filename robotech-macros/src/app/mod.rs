@@ -3,13 +3,13 @@ use quote::quote;
 use syn::parse::{Parse, ParseStream};
 use syn::{Block, Expr, Token};
 
-pub(super) struct WatchCfgFileArgs {
+pub(super) struct WatchFileArgs {
     title: String,
     files: Expr,
     on_files_changed: Block,
 }
 
-impl Parse for WatchCfgFileArgs {
+impl Parse for WatchFileArgs {
     fn parse(input: ParseStream) -> syn::Result<Self> {
         let title = input.parse::<syn::LitStr>()?.value();
         let _: Token![,] = input.parse()?;
@@ -19,7 +19,7 @@ impl Parse for WatchCfgFileArgs {
         let _: Token![,] = input.parse()?;
         let on_files_changed = input.parse()?;
 
-        Ok(WatchCfgFileArgs {
+        Ok(WatchFileArgs {
             title,
             files,
             on_files_changed,
@@ -27,8 +27,8 @@ impl Parse for WatchCfgFileArgs {
     }
 }
 
-pub(super) fn watch_cfg_file_macro(args: WatchCfgFileArgs) -> TokenStream {
-    let WatchCfgFileArgs {
+pub(super) fn watch_file_macro(args: WatchFileArgs) -> TokenStream {
+    let WatchFileArgs {
         title,
         files,
         on_files_changed,
@@ -39,10 +39,10 @@ pub(super) fn watch_cfg_file_macro(args: WatchCfgFileArgs) -> TokenStream {
         use notify_debouncer_mini::DebouncedEventKind;
 
 
-        tracing::debug!("watch {} cfg file: {:?} ...", #title, #files);
+        tracing::debug!("watch {} file: {:?} ...", #title, #files);
         tokio::spawn({
             async move {
-                let (_watcher, receiver) = watch_cfg_file(#files).expect(&format!("watch {} cfg file error: {:?}", #title, #files));
+                let (_watcher, receiver) = watch_file(#files).expect(&format!("watch {} file error: {:?}", #title, #files));
 
                 // 创建一个1秒间隔的定时器
                 let mut interval = tokio::time::interval(std::time::Duration::from_secs(1));
@@ -56,18 +56,18 @@ pub(super) fn watch_cfg_file_macro(args: WatchCfgFileArgs) -> TokenStream {
                                 Ok(events) => {
                                     // 处理文件事件
                                     for event in events {
-                                        tracing::debug!("{} cfg file trigger {:?}: {:?}", #title, event, #files);
+                                        tracing::debug!("{} file trigger {:?}: {:?}", #title, event, #files);
                                         if event.kind == DebouncedEventKind::AnyContinuous {
                                             // 事件持续发生，防抖超时了
                                             continue;
                                         }
                                     }
-                                    tracing::debug!("{} cfg file changed: {:?} ...", #title, #files);
+                                    tracing::debug!("{} file changed: {:?} ...", #title, #files);
 
                                     #( #on_files_changed )*
                                 }
                                 Err(e) => {
-                                    tracing::warn!("error receiving {} cfg file events: {:?} {:?}", #title, #files, e);
+                                    tracing::warn!("error receiving {} file events: {:?} {:?}", #title, #files, e);
                                 }
                             }
                         }
@@ -77,13 +77,13 @@ pub(super) fn watch_cfg_file_macro(args: WatchCfgFileArgs) -> TokenStream {
                         }
                         Err(std::sync::mpsc::TryRecvError::Disconnected) => {
                             // 通道关闭
-                            tracing::debug!("{} cfg file watcher channel closed, exiting watcher loop: {:?}", #title, #files);
+                            tracing::debug!("{} file watcher channel closed, exiting watcher loop: {:?}", #title, #files);
                             break;
                         }
                     }
                 }
 
-                tracing::debug!("{} cfg file watcher task finished: {:?}", #title, #files);
+                tracing::debug!("{} file watcher task finished: {:?}", #title, #files);
             }
         });
     };

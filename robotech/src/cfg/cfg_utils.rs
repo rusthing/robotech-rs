@@ -1,12 +1,8 @@
 use crate::cfg::cfg_error::CfgError;
-use crate::env::{APP_ENV, AppEnv, EnvError};
+use crate::env::{AppEnv, EnvError, APP_ENV};
 use config::builder::DefaultState;
 use config::{Config, ConfigBuilder};
-use notify::{RecommendedWatcher, RecursiveMode};
-use notify_debouncer_mini::{DebounceEventResult, Debouncer, new_debouncer};
 use std::path::Path;
-use std::sync::{Arc, mpsc};
-use std::time::Duration;
 
 pub fn build_cfg<'a, T: serde::Deserialize<'a>>(
     env_var_prefix: &str,
@@ -46,7 +42,7 @@ pub fn build_cfg<'a, T: serde::Deserialize<'a>>(
 
     // 后续添加环境变量，以覆盖配置文件中的设置
     let config = config
-        // Add in cfg from the environment (with a prefix of XXX)
+        // Add in app from the environment (with a prefix of XXX)
         // E.g. `XXX_DEBUG=true ./target/app` would set the `debug` to `true`
         .add_source(config::Environment::with_prefix(env_var_prefix))
         .build()
@@ -76,30 +72,4 @@ fn add_source(
     files.push(file_path_string.clone());
     let file = config::File::with_name(file_path_string.as_str());
     config.add_source(file)
-}
-
-pub fn watch_cfg_file(
-    files: Arc<Vec<String>>,
-) -> Result<
-    (
-        Debouncer<RecommendedWatcher>,
-        mpsc::Receiver<DebounceEventResult>,
-    ),
-    notify::Error,
-> {
-    let (sender, receiver) = mpsc::channel();
-
-    let mut debouncer = new_debouncer(
-        Duration::from_millis(500), // 防抖延迟时间
-        sender,
-    )?;
-
-    let watcher = debouncer.watcher();
-
-    // 开始监控
-    for file in &*files {
-        watcher.watch(Path::new(&file), RecursiveMode::NonRecursive)?;
-    }
-
-    Ok((debouncer, receiver))
 }
