@@ -1,4 +1,5 @@
 use serde::{Deserialize, Serialize};
+use std::collections::HashMap;
 use tracing_appender::rolling::Rotation;
 use wheel_rs::serde::rotation_serde;
 
@@ -7,6 +8,8 @@ use wheel_rs::serde::rotation_serde;
 pub struct LogConfig {
     #[serde(default = "level_default")]
     pub level: String,
+    #[serde(default)]
+    pub modules: HashMap<String, String>,
     #[serde(default = "console_time_format_default")]
     pub console_time_format: String,
     #[serde(default = "file_time_format_default")]

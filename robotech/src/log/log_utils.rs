@@ -3,6 +3,7 @@ use crate::cfg::{build_cfg, CfgError};
 use crate::env::{AppEnv, EnvError, APP_ENV};
 use crate::log::{LogConfig, LogError};
 use robotech_macros::watch_file;
+use std::collections::HashMap;
 use std::env;
 use std::path::Path;
 use std::sync::{Arc, RwLock};
@@ -75,6 +76,9 @@ where
         write!(writer, "{} ", time_str)?;
 
         write!(writer, "{:<5} ", *level)?;
+
+        // 输出 target（用于调试模块级别配置）
+        write!(writer, "[{}] ", metadata.target())?;
 
         // 格式化事件字段
         // 设置字体颜色
@@ -161,6 +165,7 @@ pub fn init_log() -> Result<(), LogError> {
     let (
         LogConfig {
             level,
+            modules,
             console_time_format,
             file_time_format,
             show_spans,
@@ -170,8 +175,8 @@ pub fn init_log() -> Result<(), LogError> {
     ) = build_log_cfg()?;
     let files = Arc::new(files);
 
-    // 创建环境过滤器，支持 RUST_LOG 环境变量
-    let env_filter = create_env_filter(level);
+    // 创建环境过滤器，支持 RUST_LOG 环境变量和模块级别配置
+    let env_filter = create_env_filter(level.clone(), &modules);
     let (env_filter_layer, env_layer_reload_handle) = reload::Layer::new(env_filter);
 
     // 控制台输出层
@@ -212,6 +217,7 @@ pub fn init_log() -> Result<(), LogError> {
         let (
             LogConfig {
                 level,
+                modules,
                 console_time_format,
                 show_spans,
                 file_time_format,
@@ -223,7 +229,7 @@ pub fn init_log() -> Result<(), LogError> {
         // 应用新配置
         env_layer_reload_handle
             .modify(|filter| {
-                *filter = create_env_filter(level);
+                *filter = create_env_filter(level, &modules);
             })
             .expect("reload log config error");
 
@@ -260,6 +266,13 @@ fn build_log_cfg() -> Result<(LogConfig, Vec<String>), CfgError> {
     build_cfg("LOG", Some("log"), None)
 }
 
-fn create_env_filter(level: String) -> EnvFilter {
-    EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new(level))
+fn create_env_filter(level: String, modules: &HashMap<String, String>) -> EnvFilter {
+    // 如果 RUST_LOG 存在就用它作为 base level,否则用配置文件里的 level
+    let mut filter_string = env::var("RUST_LOG").unwrap_or(level);
+
+    for (module, module_level) in modules {
+        filter_string.push_str(&format!(",{}={}", module, module_level));
+    }
+
+    EnvFilter::new(filter_string)
 }
