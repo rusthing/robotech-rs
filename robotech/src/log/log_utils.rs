@@ -77,9 +77,6 @@ where
 
         write!(writer, "{:<5} ", *level)?;
 
-        // 输出 target（用于调试模块级别配置）
-        write!(writer, "[{}] ", metadata.target())?;
-
         // 格式化事件字段
         // 设置字体颜色
         let visitor = DefaultFields::default();
@@ -87,6 +84,9 @@ where
 
         // 添加一个分隔符"-"
         write!(writer, " \x1B[1;93m-\x1B[0m ")?;
+
+        // 输出 target（用于调试模块级别配置）
+        write!(writer, "[{}] ", metadata.target())?;
 
         // 获取文件和行号信息
         // 设置字体颜色为蓝色
