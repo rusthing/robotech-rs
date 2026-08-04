@@ -39,7 +39,7 @@ serde_with = { workspace = true }
 tokio = { workspace = true, features = ["macros"] }
 nix = { workspace = true }
 utoipa = { workspace = true }
-utoipa-swagger-ui = { workspace = true, features = ["axum"] }
+utoipa-swagger-ui = { workspace = true, features = ["axum", "vendored"] }
 anyhow = { workspace = true, optional = true }
 config = { workspace = true, optional = true }
 linkme = { workspace = true }
