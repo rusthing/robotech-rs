@@ -263,7 +263,7 @@ pub fn init_log() -> Result<(), LogError> {
 }
 
 fn build_log_cfg() -> Result<(LogConfig, Vec<String>), CfgError> {
-    build_cfg("LOG", Some("log"), None)
+    build_cfg("LOG", "log", None)
 }
 
 fn create_env_filter(level: String, modules: &HashMap<String, String>) -> EnvFilter {

@@ -6,7 +6,7 @@ use std::path::Path;
 
 pub fn build_cfg<'a, T: serde::Deserialize<'a>>(
     env_var_prefix: &str,
-    cfg_file_name_without_ext: Option<&str>,
+    cfg_file_name_without_ext: &str,
     cfg_file_path: Option<String>,
 ) -> Result<(T, Vec<String>), CfgError> {
     // Add in `./xxx.toml`, `./xxx.yml`, `./xxx.json`, `./xxx.ini`, `./xxx.ron`
@@ -17,19 +17,9 @@ pub fn build_cfg<'a, T: serde::Deserialize<'a>>(
     config = if let Some(cfg_file_path) = cfg_file_path.clone() {
         add_source(config, cfg_file_path.as_str(), None, &mut files)
     } else {
-        let AppEnv {
-            app_dir,
-            app_file_name_without_ext,
-            ..
-        } = APP_ENV.get().ok_or(EnvError::GetAppEnv())?;
+        let AppEnv { app_dir, .. } = APP_ENV.get().ok_or(EnvError::GetAppEnv())?;
         let temp_path = app_dir
-            .join(
-                if let Some(cfg_file_name_without_ext) = cfg_file_name_without_ext {
-                    cfg_file_name_without_ext
-                } else {
-                    app_file_name_without_ext
-                },
-            )
+            .join(cfg_file_name_without_ext)
             .to_string_lossy()
             .to_string();
         config = add_source(config, temp_path.as_str(), Some("toml"), &mut files);

@@ -15,6 +15,7 @@ pub mod env;
 pub mod log;
 #[cfg(feature = "macros")]
 pub mod macros;
+pub mod micro_svc;
 pub mod mq;
 pub mod ro;
 #[cfg(feature = "app")]

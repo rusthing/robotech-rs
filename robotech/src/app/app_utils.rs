@@ -14,7 +14,11 @@ use tracing::{debug, warn};
 pub fn build_app_cfg<'a, T: serde::Deserialize<'a> + std::fmt::Debug>(
     path: Option<String>,
 ) -> Result<(T, Vec<String>), AppError> {
-    Ok(build_cfg("APP", None, path)?)
+    let AppEnv {
+        app_file_name_without_ext,
+        ..
+    } = APP_ENV.get().ok_or(EnvError::GetAppEnv())?;
+    Ok(build_cfg("APP", app_file_name_without_ext, path)?)
 }
 
 pub fn add_app_file_to_watch(files: &mut Vec<String>) -> Result<(), EnvError> {

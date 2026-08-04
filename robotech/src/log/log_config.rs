@@ -3,7 +3,7 @@ use std::collections::HashMap;
 use tracing_appender::rolling::Rotation;
 use wheel_rs::serde::rotation_serde;
 
-#[derive(Debug, Serialize, Deserialize, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "kebab-case")]
 pub struct LogConfig {
     #[serde(default = "level_default")]
