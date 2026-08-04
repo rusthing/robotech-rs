@@ -1,6 +1,6 @@
 [package]
 name = "robotech"
-version = "1.9.1"
+version = "1.10.0"
 edition = "2024"
 authors = ["zbz"]
 keywords = ["crud", "microservice", "service", "RESTful"]
@@ -15,6 +15,7 @@ readme = "README.md"
 api-client = ["dep:reqwest", "dep:http", "dep:jsonwebtoken"]
 app = ["dep:anyhow", "dep:config", "dep:validator", "dep:idworker"]
 web = ["app", "dep:ipnet", "dep:axum", "dep:tower", "dep:tower-http", "dep:tokio-rustls", "dep:hyper", "dep:hyper-util", "dep:rustls-pemfile", "dep:socket2", "dep:reqwest"]
+config-center = []
 db = ["app", "dep:sqlx", "dep:sea-orm", "dep:regex", "dep:once_cell"]
 mqtt = ["dep:rumqttc", "dep:bytes"]
 influxdb = ["dep:influxdb", "dep:reqwest"]
