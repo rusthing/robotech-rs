@@ -1,8 +1,8 @@
 use crate::web::{CorsConfig, WebServerError};
 use axum::http;
-use tracing::debug;
 use std::str::FromStr;
 use tower_http::cors::CorsLayer;
+use tracing::debug;
 
 pub fn build_cors(cors_config: &Option<CorsConfig>) -> Result<Option<CorsLayer>, WebServerError> {
     if let Some(cors_config) = cors_config

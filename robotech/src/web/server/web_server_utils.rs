@@ -5,7 +5,6 @@ use crate::web::middleware::{
 use crate::web::{HttpsConfig, WebServerConfig, WebServerError, build_cors, build_https};
 use axum::{Router, debug_handler, middleware, routing::get};
 use linkme::distributed_slice;
-use tracing::{debug, error, info};
 use robotech_macros::log_call;
 use socket2::{Domain, Socket, Type};
 use std::net::{IpAddr, SocketAddr, TcpListener};
@@ -15,6 +14,7 @@ use tokio::sync::broadcast;
 use tokio::task::JoinHandle;
 use tokio::time::timeout;
 use tower_http::trace::TraceLayer;
+use tracing::{debug, error, info};
 use utoipa::openapi::OpenApi;
 use utoipa_swagger_ui::{SwaggerUi, Url};
 use wheel_rs::process::terminate_process;

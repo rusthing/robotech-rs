@@ -1,8 +1,8 @@
 use crate::db::{DbConnConfig, DbError};
-use tracing::debug;
 use robotech_macros::log_call;
 use sea_orm::{ConnectOptions, Database, DbConn};
 use std::sync::{Arc, RwLock};
+use tracing::debug;
 
 /// 数据库连接
 static DB_CONN: RwLock<Option<Arc<DbConn>>> = RwLock::new(None);
