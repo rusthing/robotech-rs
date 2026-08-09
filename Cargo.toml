@@ -53,7 +53,7 @@ etcd-client = "0.19.0"
 nacos-sdk = "0.8.0"
 
 idworker = "1.1.2"
-wheel-rs = "1.9.3"
+wheel-rs = "1.9.4"
 robotech-macros = "1.10.0"
 
 # macro依赖
