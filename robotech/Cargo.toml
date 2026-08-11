@@ -31,6 +31,7 @@ tracing-appender = { workspace = true }
 tracing-subscriber = { workspace = true, features = ["env-filter", "json", "chrono", "tracing-log"] }
 async-trait = { workspace = true }
 thiserror = { workspace = true }
+arc-swap = { workspace = true }
 chrono = { workspace = true }
 derive_setters = { workspace = true }
 typed-builder = { workspace = true }

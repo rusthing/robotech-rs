@@ -9,6 +9,8 @@ pub enum LogError {
     Cfg(#[from] CfgError),
     #[error("{0}")]
     GetEnv(#[from] EnvError),
+    #[error("Fail to watch file: {0}")]
+    WatchFile(#[from] notify::Error),
     #[error("Fail to create file appender: {0}")]
     CreateFileAppender(InitError),
     #[error("Fail to set LOG_GUARD")]

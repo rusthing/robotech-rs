@@ -1,13 +1,14 @@
-use crate::app::watch_file;
-use crate::cfg::{build_cfg, CfgError};
+use crate::cfg::build_cfg;
+use crate::cfg::{deserialize_config, BaseConfig};
 use crate::env::{AppEnv, EnvError, APP_ENV};
 use crate::log::{LogConfig, LogError};
-use robotech_macros::watch_file;
+use config::Config;
 use std::collections::HashMap;
 use std::env;
-use std::path::Path;
-use std::sync::{Arc, RwLock};
-use tracing::debug;
+use std::path::{Path, PathBuf};
+use std::sync::RwLock;
+use tokio::sync::watch;
+use tracing::{debug, error, info};
 use tracing_appender::non_blocking::WorkerGuard;
 use tracing_appender::rolling::RollingFileAppender;
 use tracing_core::{Event, Level, Subscriber};
@@ -19,6 +20,7 @@ use tracing_subscriber::layer::SubscriberExt;
 use tracing_subscriber::registry::LookupSpan;
 use tracing_subscriber::util::SubscriberInitExt;
 use tracing_subscriber::{fmt, reload, EnvFilter};
+use wheel_rs::file_utils::{watch_file, FileWatcher};
 
 /// 日志文件输出锁
 /// 解决锁在初始化方法结束后被提前释放导致后续日志不能输出
@@ -160,110 +162,164 @@ macro_rules! creat_file_layer {
     };
 }
 
-/// 初始化日志
-pub fn init_log() -> Result<(), LogError> {
-    let (
-        LogConfig {
+pub type Result<T> = core::result::Result<T, LogError>;
+
+pub struct LogWatcher {
+    _file_watcher: FileWatcher,
+    reload_join_handle: tokio::task::JoinHandle<()>,
+    pub config_changed_tx: watch::Sender<LogConfig>,
+}
+
+impl Drop for LogWatcher {
+    fn drop(&mut self) {
+        self.reload_join_handle.abort();
+    }
+}
+
+impl LogWatcher {
+    pub async fn new() -> Result<Self> {
+        let AppEnv { app_dir, .. } = APP_ENV.get().ok_or(EnvError::GetAppEnv())?;
+        let (config_changed_tx, mut config_changed_rx) = watch::channel(LogConfig::default());
+        let (base_config, config, files) = build_log_cfg(app_dir).await?;
+        let watch_debounce_delay = base_config.watch_debounce_delay;
+        let LogConfig {
             level,
             modules,
             console_time_format,
             file_time_format,
             show_spans,
             rotation,
-        },
-        files,
-    ) = build_log_cfg()?;
-    let files = Arc::new(files);
+        } = deserialize_config(config).await?;
 
-    // 创建环境过滤器，支持 RUST_LOG 环境变量和模块级别配置
-    let env_filter = create_env_filter(level.clone(), &modules);
-    let (env_filter_layer, env_layer_reload_handle) = reload::Layer::new(env_filter);
+        // 创建环境过滤器，支持 RUST_LOG 环境变量和模块级别配置
+        let env_filter = create_env_filter(level.clone(), &modules);
+        let (env_filter_layer, env_layer_reload_handle) = reload::Layer::new(env_filter);
 
-    // 控制台输出层
-    let console_layer = creat_console_layer!(console_time_format, show_spans);
-    let (console_layer, console_layer_reload_handle) = reload::Layer::new(console_layer);
+        // 控制台输出层
+        let console_layer = creat_console_layer!(console_time_format, show_spans);
+        let (console_layer, console_layer_reload_handle) = reload::Layer::new(console_layer);
 
-    // 文件输出层
-    let AppEnv {
-        app_dir,
-        app_file_name,
-        ..
-    } = APP_ENV.get().ok_or(EnvError::GetAppEnv())?;
-    let log_dir_path = app_dir.join("log");
-    let log_dir = log_dir_path.to_string_lossy().to_string();
-    let file_appender = RollingFileAppender::builder()
-        .rotation(rotation.clone()) // 滚动策略
-        .filename_prefix(format!("{}.log", app_file_name)) // 文件名前缀
-        .filename_suffix("json") // 文件后缀，如 "log", "txt" 等
-        .build(log_dir_path) // 日志目录
-        .map_err(|e| LogError::CreateFileAppender(e))?;
-    let (non_blocking, log_guard) = tracing_appender::non_blocking(file_appender);
-    let file_layer = creat_file_layer!(file_time_format, non_blocking);
-    {
-        let mut log_guard_write_lock = LOG_GUARD.write().map_err(|_| LogError::SetLogGuard())?;
-        *log_guard_write_lock = Some(log_guard); // 解决锁在初始化方法结束后被提前释放导致后续日志不能输出
+        // 文件输出层
+        let AppEnv {
+            app_dir,
+            app_file_name,
+            ..
+        } = APP_ENV.get().ok_or(EnvError::GetAppEnv())?;
+        let log_dir_path = app_dir.join("log");
+        let log_dir = log_dir_path.to_string_lossy().to_string();
+        let file_appender = RollingFileAppender::builder()
+            .rotation(rotation.clone()) // 滚动策略
+            .filename_prefix(format!("{}.log", app_file_name)) // 文件名前缀
+            .filename_suffix("json") // 文件后缀，如 "log", "txt" 等
+            .build(log_dir_path) // 日志目录
+            .map_err(|e| LogError::CreateFileAppender(e))?;
+        let (non_blocking, log_guard) = tracing_appender::non_blocking(file_appender);
+        let file_layer = creat_file_layer!(file_time_format, non_blocking);
+        {
+            let mut log_guard_write_lock =
+                LOG_GUARD.write().map_err(|_| LogError::SetLogGuard())?;
+            *log_guard_write_lock = Some(log_guard); // 解决锁在初始化方法结束后被提前释放导致后续日志不能输出
+        }
+        let (file_layer, file_layer_reload_handle) = reload::Layer::new(file_layer);
+
+        tracing_subscriber::registry()
+            .with(env_filter_layer)
+            .with(console_layer) // 控制台输出层
+            .with(file_layer) // 文件输出层
+            .init();
+        debug!("初始化日志成功");
+
+        let files_clone = files.clone();
+        // 监听重新加载日志任务
+        let reload_join_handle = tokio::spawn(async move {
+            info!("watching log config: {:?}", files_clone);
+            loop {
+                match config_changed_rx.changed().await {
+                    Ok(_) => {
+                        info!("{} file changed: {:?} ...", "log", files_clone);
+                        let log_config = config_changed_rx.borrow().clone();
+                        let LogConfig {
+                            level,
+                            modules,
+                            console_time_format,
+                            show_spans,
+                            file_time_format,
+                            rotation,
+                        } = log_config;
+                        // 应用新配置
+                        env_layer_reload_handle
+                            .modify(|filter| {
+                                *filter = create_env_filter(level, &modules);
+                            })
+                            .expect("reload log config error");
+
+                        console_layer_reload_handle
+                            .modify(|layer| {
+                                *layer = creat_console_layer!(console_time_format, show_spans);
+                            })
+                            .expect("reload console config error");
+
+                        file_layer_reload_handle
+                            .modify(|layer| {
+                                // 重新创建文件appender
+                                let file_appender = RollingFileAppender::builder()
+                                    .rotation(rotation.clone())
+                                    .filename_prefix(format!("{}.log", app_file_name))
+                                    .filename_suffix("json")
+                                    .build(Path::new(log_dir.as_str()))
+                                    .expect("create file appender error");
+                                let (non_blocking, log_guard) =
+                                    tracing_appender::non_blocking(file_appender);
+
+                                *layer = creat_file_layer!(file_time_format, non_blocking);
+
+                                // 更新全局guard
+                                let mut guard = LOG_GUARD.write().expect("write log guard");
+                                *guard = Some(log_guard);
+                            })
+                            .expect("reload file config error");
+                    }
+                    Err(err) => {
+                        info!("watch log config error: {:?}", err);
+                        break;
+                    }
+                }
+            }
+            info!("exit watching log config: {:?}", files_clone);
+        });
+
+        // 监听日志配置文件变化
+        let config_changed_tx_clone = config_changed_tx.clone();
+        let file_watcher = watch_file(files.clone(), watch_debounce_delay, move |_| {
+            let config_changed_tx_clone = config_changed_tx_clone.clone();
+            async move {
+                match build_log_cfg(app_dir).await {
+                    Ok((_, config, _)) => match deserialize_config(config).await {
+                        Ok(log_config) => {
+                            config_changed_tx_clone.send(log_config)?;
+                        }
+                        Err(e) => {
+                            error!("deserialize log config error: {:?}", e);
+                        }
+                    },
+                    Err(e) => {
+                        error!("build log config error: {:?}", e);
+                    }
+                }
+                Ok(())
+            }
+        })?;
+
+        Ok(Self {
+            _file_watcher: file_watcher,
+            config_changed_tx,
+            reload_join_handle,
+        })
     }
-    let (file_layer, file_layer_reload_handle) = reload::Layer::new(file_layer);
-
-    tracing_subscriber::registry()
-        .with(env_filter_layer)
-        .with(console_layer) // 控制台输出层
-        .with(file_layer) // 文件输出层
-        .init();
-    debug!("初始化日志成功");
-
-    watch_file!("log", files.clone(), {
-        // 重新加载配置
-        let (
-            LogConfig {
-                level,
-                modules,
-                console_time_format,
-                show_spans,
-                file_time_format,
-                rotation,
-            },
-            _,
-        ) = build_log_cfg().expect("build log config error");
-
-        // 应用新配置
-        env_layer_reload_handle
-            .modify(|filter| {
-                *filter = create_env_filter(level, &modules);
-            })
-            .expect("reload log config error");
-
-        console_layer_reload_handle
-            .modify(|layer| {
-                *layer = creat_console_layer!(console_time_format, show_spans);
-            })
-            .expect("reload console config error");
-
-        file_layer_reload_handle
-            .modify(|layer| {
-                // 重新创建文件appender
-                let file_appender = RollingFileAppender::builder()
-                    .rotation(rotation.clone())
-                    .filename_prefix(format!("{}.log", app_file_name))
-                    .filename_suffix("json")
-                    .build(Path::new(log_dir.as_str()))
-                    .expect("create file appender error");
-                let (non_blocking, log_guard) = tracing_appender::non_blocking(file_appender);
-
-                *layer = creat_file_layer!(file_time_format, non_blocking);
-
-                // 更新全局guard
-                let mut guard = LOG_GUARD.write().expect("write log guard");
-                *guard = Some(log_guard);
-            })
-            .expect("reload file config error");
-    });
-
-    Ok(())
 }
 
-fn build_log_cfg() -> Result<(LogConfig, Vec<String>), CfgError> {
-    build_cfg("LOG", "log", None)
+async fn build_log_cfg(app_dir: &PathBuf) -> crate::cfg::Result<(BaseConfig, Config, Vec<String>)> {
+    build_cfg(app_dir, "LOG", "log", None).await
 }
 
 fn create_env_filter(level: String, modules: &HashMap<String, String>) -> EnvFilter {

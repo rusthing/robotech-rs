@@ -10,4 +10,6 @@ pub enum CfgError {
     Build(ConfigError),
     #[error("Fail to deserialize config: {0}")]
     Deserialize(ConfigError),
+    #[error("Fail to init config: {0}")]
+    Init(String),
 }

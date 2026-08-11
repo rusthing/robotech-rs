@@ -1,36 +1,60 @@
+use crate::cfg::base_config::BaseConfig;
 use crate::cfg::cfg_error::CfgError;
-use crate::env::{AppEnv, EnvError, APP_ENV};
 use config::builder::DefaultState;
 use config::{Config, ConfigBuilder};
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
-pub fn build_cfg<'a, T: serde::Deserialize<'a>>(
+pub type Result<T> = core::result::Result<T, CfgError>;
+
+pub async fn build_cfg(
+    app_dir: &PathBuf,
     env_var_prefix: &str,
     cfg_file_name_without_ext: &str,
     cfg_file_path: Option<String>,
-) -> Result<(T, Vec<String>), CfgError> {
-    // Add in `./xxx.toml`, `./xxx.yml`, `./xxx.json`, `./xxx.ini`, `./xxx.ron`
-    let mut config = Config::builder();
+) -> Result<(BaseConfig, Config, Vec<String>)> {
+    // 先加载基础配置文件获取profile，后续根据profile加载对应的配置文件
+    let config = Config::builder();
+    let (config, ..) = add_cfg_files(app_dir, cfg_file_name_without_ext, &cfg_file_path, config)?;
+    let base_config: BaseConfig = config
+        .build()
+        .map_err(CfgError::Build)?
+        .try_deserialize()
+        .map_err(CfgError::Deserialize)?;
 
-    let mut files = vec![];
-    // 如果已指定配置文件路径
-    config = if let Some(cfg_file_path) = cfg_file_path.clone() {
-        add_source(config, cfg_file_path.as_str(), None, &mut files)
+    let config = Config::builder();
+
+    // // 从配置中心获取配置文件内容并加载到config中
+    // #[cfg(any(feature = "config-center", feature = "registry-center"))]
+    // if let Some((content, format)) = init_hub_client(
+    //     app_dir,
+    //     app_file_name_without_ext,
+    //     cfg_file_name_without_ext,
+    //     &cfg_file_path,
+    //     &profile,
+    //     cfg_changed_tx,
+    // )
+    // .await?
+    // {
+    //     config = config.add_source(config::File::from_str(&content, format));
+    // }
+
+    // 加载配置文件
+    let (config, files) =
+        add_cfg_files(app_dir, cfg_file_name_without_ext, &cfg_file_path, config)?;
+
+    // 加载profile对应的配置文件
+    let (config, files) = if let Some(profile) = base_config.clone().profile {
+        add_cfg_files(
+            app_dir,
+            format!("{}-{}", cfg_file_name_without_ext, profile).as_str(),
+            &cfg_file_path,
+            config,
+        )?
     } else {
-        let AppEnv { app_dir, .. } = APP_ENV.get().ok_or(EnvError::GetAppEnv())?;
-        let temp_path = app_dir
-            .join(cfg_file_name_without_ext)
-            .to_string_lossy()
-            .to_string();
-        config = add_source(config, temp_path.as_str(), Some("toml"), &mut files);
-        config = add_source(config, temp_path.as_str(), Some("yml"), &mut files);
-        config = add_source(config, temp_path.as_str(), Some("json"), &mut files);
-        config = add_source(config, temp_path.as_str(), Some("ini"), &mut files);
-        config = add_source(config, temp_path.as_str(), Some("ron"), &mut files);
-        config
+        (config, files)
     };
 
-    // 后续添加环境变量，以覆盖配置文件中的设置
+    // 添加环境变量，以覆盖配置文件中的设置
     let config = config
         // Add in app from the environment (with a prefix of XXX)
         // E.g. `XXX_DEBUG=true ./target/app` would set the `debug` to `true`
@@ -38,10 +62,68 @@ pub fn build_cfg<'a, T: serde::Deserialize<'a>>(
         .build()
         .map_err(CfgError::Build)?;
 
-    Ok((
-        config.try_deserialize().map_err(CfgError::Deserialize)?,
-        files,
-    ))
+    Ok((base_config, config, files))
+}
+
+pub async fn deserialize_config<'a, T>(config: Config) -> Result<T>
+where
+    T: serde::Deserialize<'a>,
+{
+    config.try_deserialize().map_err(CfgError::Deserialize)
+}
+
+// #[cfg(any(feature = "config-center", feature = "registry-center"))]
+// async fn init_hub_client(
+//     app_dir: &PathBuf,
+//     app_name: &str,
+//     cfg_file_name_without_ext: &str,
+//     cfg_file_path: &Option<String>,
+//     profile: &Option<String>,
+//     cfg_changed_tx: watch::Sender<()>,
+// ) -> Result<Option<(String, config::FileFormat)>, CfgError> {
+//     let config = Config::builder();
+//     let (config, ..) = add_cfg_files(app_dir, cfg_file_name_without_ext, cfg_file_path, config)?;
+//     let config: MicroSvcConfig = config
+//         .build()
+//         .map_err(CfgError::Build)?
+//         .try_deserialize()
+//         .map_err(CfgError::Deserialize)?;
+//
+//     let (config_center_client, registry_center_client) =
+//         HubClient::init(app_name, profile, config).await?;
+//     let config_item = match config_center_client {
+//         Some(client) => Some(
+//             client
+//                 .fetch()
+//                 .await
+//                 .map_err(|e| CfgError::Init(e.to_string()))?,
+//         ),
+//         None => None,
+//     };
+//     Ok(config_item.map(|item| (item.content, item.format)))
+// }
+
+fn add_cfg_files(
+    app_dir: &PathBuf,
+    cfg_file_name_without_ext: &str,
+    cfg_file_path: &Option<String>,
+    mut config: ConfigBuilder<DefaultState>,
+) -> Result<(ConfigBuilder<DefaultState>, Vec<String>)> {
+    let mut files = vec![];
+    // 如果已指定配置文件路径
+    let config = if let Some(cfg_file_path) = cfg_file_path.clone() {
+        add_source(config, cfg_file_path.as_str(), None, &mut files)
+    } else {
+        let temp_path = app_dir
+            .join(cfg_file_name_without_ext)
+            .to_string_lossy()
+            .to_string();
+        for ext in ["toml", "json", "json5", "yml", "yaml", "ini", "ron"] {
+            config = add_source(config, temp_path.as_str(), Some(ext), &mut files);
+        }
+        config
+    };
+    Ok((config, files))
 }
 
 fn add_source(
@@ -60,6 +142,10 @@ fn add_source(
         return config;
     }
     files.push(file_path_string.clone());
-    let file = config::File::with_name(file_path_string.as_str());
+    let mut file = config::File::with_name(file_path_string.as_str());
+    // .json 后缀也用 Json5 格式
+    if file_path.ends_with(".json") {
+        file = file.format(config::FileFormat::Json5)
+    }
     config.add_source(file)
 }

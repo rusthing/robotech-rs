@@ -1,65 +1,153 @@
 use crate::app::AppError;
-use crate::cfg::build_cfg;
+use crate::cfg::{build_cfg, deserialize_config, BaseConfig};
 use crate::env::{AppEnv, EnvError, APP_ENV};
-use notify::{RecommendedWatcher, RecursiveMode};
-use notify_debouncer_mini::{new_debouncer, DebounceEventResult, Debouncer};
-use robotech_macros::log_call;
-use std::path::Path;
-use std::sync::{mpsc, Arc};
+use crate::log::LogConfig;
+use arc_swap::ArcSwap;
+use config::Config;
+use std::path::PathBuf;
+use std::sync::Arc;
 use std::time::Duration;
-use tokio::sync::broadcast;
-use tracing::{debug, warn};
+use tokio::sync::{broadcast, watch};
+use tracing::{debug, error, info, warn};
+use wheel_rs::file_utils::{watch_file, FileWatcher};
+use wheel_rs::process::{get_current_pid, send_signal_by_instruction};
 
-#[log_call]
-pub fn build_app_cfg<'a, T: serde::Deserialize<'a> + std::fmt::Debug>(
-    path: Option<String>,
-) -> Result<(T, Vec<String>), AppError> {
-    let AppEnv {
-        app_file_name_without_ext,
-        ..
-    } = APP_ENV.get().ok_or(EnvError::GetAppEnv())?;
-    Ok(build_cfg("APP", app_file_name_without_ext, path)?)
+pub type Result<T> = core::result::Result<T, AppError>;
+
+pub struct AppWatcher<T>
+where
+    T: serde::de::DeserializeOwned + Send + Sync + 'static,
+{
+    _cfg_file_watcher: FileWatcher,
+    _app_file_watcher: FileWatcher,
+    pub app_config: Arc<ArcSwap<T>>,
+    watch_join_handle: tokio::task::JoinHandle<()>,
 }
 
-pub fn add_app_file_to_watch(files: &mut Vec<String>) -> Result<(), EnvError> {
-    let AppEnv { app_file_path, .. } = APP_ENV.get().ok_or(EnvError::GetAppEnv())?;
-    files.push(app_file_path.to_string_lossy().to_string());
-    Ok(())
-}
-
-pub fn watch_file(
-    files: Arc<Vec<String>>,
-) -> Result<
-    (
-        Debouncer<RecommendedWatcher>,
-        mpsc::Receiver<DebounceEventResult>,
-    ),
-    notify::Error,
-> {
-    let (sender, receiver) = mpsc::channel();
-
-    let mut debouncer = new_debouncer(
-        Duration::from_millis(500), // 防抖延迟时间
-        sender,
-    )?;
-
-    let watcher = debouncer.watcher();
-
-    // 开始监控
-    for file in &*files {
-        watcher.watch(Path::new(&file), RecursiveMode::NonRecursive)?;
+impl<T> Drop for AppWatcher<T>
+where
+    T: serde::de::DeserializeOwned + Send + Sync + 'static,
+{
+    fn drop(&mut self) {
+        self.watch_join_handle.abort();
     }
+}
 
-    Ok((debouncer, receiver))
+impl<T> AppWatcher<T>
+where
+    T: serde::de::DeserializeOwned + Send + Sync + 'static,
+{
+    pub async fn new<F, Fut>(
+        config_file_path: Option<String>,
+        log_config_changed_tx: watch::Sender<LogConfig>,
+        mut on_change: F,
+    ) -> Result<Self>
+    where
+        F: FnMut(Arc<T>) -> Fut + Send + 'static,
+        Fut: Future<Output = anyhow::Result<()>> + Send + 'static,
+    {
+        let AppEnv {
+            app_dir,
+            app_file_path,
+            app_file_name_without_ext,
+            ..
+        } = APP_ENV.get().ok_or(EnvError::GetAppEnv())?;
+        let (base_config, config, files) =
+            build_app_cfg(config_file_path.clone(), app_dir, app_file_name_without_ext).await?;
+        if let Some(log_config) = base_config.clone().log {
+            log_config_changed_tx.send(log_config)?;
+        }
+        let app_config = Arc::new(ArcSwap::from_pointee(
+            deserialize_config::<T>(config).await?,
+        ));
+
+        let (config_changed_tx, mut config_changed_rx) = watch::channel(app_config.load().clone());
+        let app_config_clone = app_config.clone();
+        let watch_join_handle = tokio::spawn(async move {
+            info!("watching app config");
+            loop {
+                match config_changed_rx.changed().await {
+                    Ok(_) => {
+                        app_config_clone.store(config_changed_rx.borrow().clone());
+                        let app_config = app_config_clone.load().clone();
+                        if let Err(e) = on_change(app_config).await {
+                            error!("handle config change error: {e:?}");
+                            break;
+                        }
+                    }
+                    Err(err) => {
+                        info!("watch config error: {:?}", err);
+                        break;
+                    }
+                }
+            }
+            info!("exit watch app config");
+        });
+
+        let config_changed_tx_clone = config_changed_tx.clone();
+        let config_file_path_clone = config_file_path.clone();
+        let _cfg_file_watcher =
+            watch_file(files.clone(), base_config.watch_debounce_delay, move |_| {
+                let config_changed_tx_clone = config_changed_tx_clone.clone();
+                let config_file_path = config_file_path_clone.clone();
+                async move {
+                    match build_app_cfg(config_file_path, app_dir, app_file_name_without_ext).await
+                    {
+                        Ok((_, config, _)) => match deserialize_config::<T>(config).await {
+                            Ok(app_config) => {
+                                config_changed_tx_clone.send(Arc::new(app_config))?;
+                            }
+                            Err(e) => {
+                                error!("deserialize app config error: {:?}", e);
+                            }
+                        },
+                        Err(e) => {
+                            error!("build app config error: {:?}", e);
+                        }
+                    }
+                    Ok(())
+                }
+            })?;
+
+        // 监听应用程序的文件变化，当文件更新时优雅退出应用程序
+        let _app_file_watcher =
+            watch_app_file(&app_file_path.clone(), base_config.watch_debounce_delay)?;
+        Ok(Self {
+            app_config: app_config.clone(),
+            watch_join_handle,
+            _cfg_file_watcher,
+            _app_file_watcher,
+        })
+    }
+}
+
+pub async fn build_app_cfg(
+    config_file_path: Option<String>,
+    app_dir: &PathBuf,
+    app_file_name_without_ext: &str,
+) -> crate::cfg::Result<(BaseConfig, Config, Vec<String>)> {
+    let (base_config, config, files) =
+        build_cfg(app_dir, "APP", app_file_name_without_ext, config_file_path).await?;
+    Ok((base_config, config, files))
+}
+
+/// 监控应用程序的文件变化，当文件更新时优雅退出应用程序
+pub fn watch_app_file(app_file_path: &PathBuf, debounce_delay: Duration) -> Result<FileWatcher> {
+    let files = vec![app_file_path.to_string_lossy().to_string()];
+    Ok(watch_file(files, debounce_delay, |_| async {
+        info!("应用程序的文件已更新，优雅退出");
+        quit();
+        Ok(())
+    })?)
 }
 
 pub async fn wait_app_exit<F, Fut>(
     mut signal_receiver: broadcast::Receiver<nix::sys::signal::Signal>,
     graceful_shutdown: F,
-) -> Result<(), AppError>
+) -> Result<()>
 where
     F: Fn() -> Fut,
-    Fut: Future<Output = Result<(), AppError>>,
+    Fut: Future<Output = Result<()>>,
 {
     loop {
         match signal_receiver.recv().await {
@@ -84,4 +172,9 @@ where
     graceful_shutdown().await?;
     debug!("优雅退出完成.");
     Ok(())
+}
+
+/// 优雅退出
+fn quit() {
+    let _ = send_signal_by_instruction("quit", get_current_pid());
 }
