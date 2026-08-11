@@ -57,7 +57,7 @@ where
         if let Some(log_config) = base_config.clone().log {
             log_config_changed_tx.send(log_config)?;
         }
-        let app_config = Arc::new(ArcSwap::from_pointee(
+        let app_config: Arc<ArcSwap<T>> = Arc::new(ArcSwap::from_pointee(
             deserialize_config::<T>(config).await?,
         ));
 

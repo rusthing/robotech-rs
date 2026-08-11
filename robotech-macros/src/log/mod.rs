@@ -52,11 +52,14 @@ impl Parse for LogCallArgs {
     }
 }
 
-/// 判断类型字符串是否为 axum 的 extractor 包装器（Path<T> / Json<T> / Query<T>）
+/// 判断类型字符串是否为 axum 的 extractor 包装器（State<T> / Path<T> / Json<T> / Query<T>）
 /// 类型名后必须紧跟 '<'，避免误匹配 PathBuf 等类型
 fn is_axum_wrapper(type_str: &str) -> bool {
     let normalized = type_str.replace(' ', "");
-    normalized.contains("Path<") || normalized.contains("Json<") || normalized.contains("Query<")
+    normalized.contains("State<")
+        || normalized.contains("Path<")
+        || normalized.contains("Json<")
+        || normalized.contains("Query<")
 }
 
 /// 检查参数是否带有 #[skip_log] 属性
