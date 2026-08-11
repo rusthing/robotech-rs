@@ -1,12 +1,13 @@
 use crate::web::middleware::{
-    ForbiddenUrnsState, IpBanState, LocalOnlyUrnsState, forbidden_urns_middleware,
-    ip_ban_middleware, local_only_middleware, local_only_urns_middleware,
+    forbidden_urns_middleware, ip_ban_middleware, local_only_middleware, local_only_urns_middleware,
+    ForbiddenUrnsState, IpBanState, LocalOnlyUrnsState,
 };
-use crate::web::{HttpsConfig, WebServerConfig, WebServerError, build_cors, build_https};
-use axum::{Router, debug_handler, middleware, routing::get};
+use crate::web::{build_cors, build_https, HttpsConfig, WebServerConfig, WebServerError};
+use axum::{debug_handler, middleware, routing::get, Router};
 use linkme::distributed_slice;
 use robotech_macros::log_call;
 use socket2::{Domain, Socket, Type};
+use std::fmt::Debug;
 use std::net::{IpAddr, SocketAddr, TcpListener};
 use std::sync::{Arc, RwLock};
 use std::time::Duration;
@@ -71,11 +72,15 @@ pub async fn health() -> &'static str {
 }
 
 #[log_call]
-pub async fn start_web_server(
+pub async fn start_web_server<T>(
+    app_state: T,
     web_server_config: WebServerConfig,
     port_of_args: Option<u16>,
     old_pid: Option<u32>,
-) -> Result<(), WebServerError> {
+) -> Result<(), WebServerError>
+where
+    T: Debug + Clone + Send + Sync + 'static,
+{
     let WebServerConfig {
         bind: binds,
         port: port_option,
@@ -130,9 +135,9 @@ pub async fn start_web_server(
     }
 
     // 初始化路由
-    let mut router = Router::new();
+    let mut router = Router::<T>::new();
     for build_router in ROUTER_SLICE.iter() {
-        router = router.merge(build_router());
+        router = router.merge(build_router().with_state::<T>(()));
     }
     // 判断是否暴露健康检查
     if health_check.exposed {
@@ -149,7 +154,8 @@ pub async fn start_web_server(
         api_docs.push(init_api_doc());
     }
     if !api_docs.is_empty() {
-        router = router.merge(SwaggerUi::new("/swagger-ui").urls(api_docs));
+        let swagger_router: Router = SwaggerUi::new("/swagger-ui").urls(api_docs).into();
+        router = router.merge(swagger_router.with_state::<T>(()));
     }
 
     // 添加日志中间件
@@ -191,6 +197,8 @@ pub async fn start_web_server(
     if let Some(cors_layer) = build_cors(&cors_config)? {
         router = router.layer(cors_layer);
     }
+    // 最终注入状态
+    let final_router: Router = router.with_state(app_state);
 
     // 判断HTTP协议
     let http_protocol = if let Some(https_config) = https_config.clone()
@@ -204,7 +212,7 @@ pub async fn start_web_server(
     // 绑定地址及端口，并启动服务
     let (stop_web_service_sender, stop_web_service_receiver) = broadcast::channel::<()>(1);
     let (health_check_url_prefix, web_service_handles) = bind_and_start(
-        router,
+        final_router,
         reuse_port,
         listen_binds,
         http_protocol,
@@ -519,7 +527,7 @@ fn bind_and_start(
                 tokio_listener,
                 router
                     .clone()
-                    // 注意：必须调用 into_make_service_with_connect_info 才能获取客户端 IP
+                    // 注意：必须调用 into_make_service 才能获取客户端 IP
                     .into_make_service_with_connect_info::<SocketAddr>(),
             )
             .with_graceful_shutdown(async move {
