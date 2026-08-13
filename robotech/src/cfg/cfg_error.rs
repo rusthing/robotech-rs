@@ -12,4 +12,6 @@ pub enum CfgError {
     Deserialize(ConfigError),
     #[error("Fail to init config: {0}")]
     Init(String),
+    #[error("Config not initialized: {0}")]
+    NotInit(String),
 }

@@ -2,7 +2,6 @@ use crate::app::AppError;
 use crate::cfg::{build_cfg, deserialize_config, BaseConfig};
 use crate::env::{AppEnv, EnvError, APP_ENV};
 use crate::log::LogConfig;
-use arc_swap::ArcSwap;
 use config::Config;
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -20,7 +19,7 @@ where
 {
     _cfg_file_watcher: FileWatcher,
     _app_file_watcher: FileWatcher,
-    pub app_config: Arc<ArcSwap<T>>,
+    pub app_config: Arc<T>,
     watch_join_handle: tokio::task::JoinHandle<()>,
 }
 
@@ -57,20 +56,16 @@ where
         if let Some(log_config) = base_config.clone().log {
             log_config_changed_tx.send(log_config)?;
         }
-        let app_config: Arc<ArcSwap<T>> = Arc::new(ArcSwap::from_pointee(
-            deserialize_config::<T>(config).await?,
-        ));
+        let app_config: Arc<T> = Arc::new(deserialize_config::<T>(config).await?);
 
-        let (config_changed_tx, mut config_changed_rx) = watch::channel(app_config.load().clone());
+        let (config_changed_tx, mut config_changed_rx) = watch::channel(app_config.clone());
         let app_config_clone = app_config.clone();
         let watch_join_handle = tokio::spawn(async move {
             info!("watching app config");
             loop {
                 match config_changed_rx.changed().await {
                     Ok(_) => {
-                        app_config_clone.store(config_changed_rx.borrow().clone());
-                        let app_config = app_config_clone.load().clone();
-                        if let Err(e) = on_change(app_config).await {
+                        if let Err(e) = on_change(Arc::clone(&app_config_clone)).await {
                             error!("handle config change error: {e:?}");
                             break;
                         }
