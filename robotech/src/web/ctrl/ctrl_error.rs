@@ -1,8 +1,11 @@
 #[cfg(feature = "db")]
 use crate::dao::DaoError;
+use crate::ro::Ro;
 #[cfg(feature = "db")]
-use crate::ro::RO_CODE_WARNING_DELETE_VIOLATE_FK;
-use crate::ro::{Ro, RO_CODE_WARNING_DUPLICATE_KEY, RO_CODE_WARNING_INSERT_VIOLATE_FK};
+use crate::ro::{
+    RO_CODE_WARNING_DELETE_VIOLATE_FK, RO_CODE_WARNING_DUPLICATE_KEY,
+    RO_CODE_WARNING_INSERT_VIOLATE_FK,
+};
 use crate::svc::SvcError;
 use axum::http::header::InvalidHeaderValue;
 use axum::http::StatusCode;
