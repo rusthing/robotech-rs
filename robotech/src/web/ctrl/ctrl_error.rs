@@ -1,3 +1,4 @@
+#[cfg(feature = "db")]
 use crate::dao::DaoError;
 #[cfg(feature = "db")]
 use crate::ro::RO_CODE_WARNING_DELETE_VIOLATE_FK;

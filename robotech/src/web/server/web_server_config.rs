@@ -1,13 +1,13 @@
-use crate::web::HealthCheckConfig;
 use crate::web::cors::CorsConfig;
 use crate::web::https::HttpsConfig;
+use crate::web::HealthCheckConfig;
 use ipnet::IpNet;
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use std::time::Duration;
 use wheel_rs::serde::{duration_serde, vec_ipnet_serde, vec_serde};
 use wheel_rs::urn_utils::Urn;
 
-#[derive(Debug, Deserialize, Clone)]
+#[derive(Debug, Serialize, Deserialize, Clone)]
 #[serde(rename_all = "kebab-case")]
 pub struct WebServerConfig {
     /// 绑定的IP地址
