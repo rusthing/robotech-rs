@@ -13,7 +13,7 @@ readme = "README.md"
 
 [features]
 api-client = ["dep:reqwest", "dep:http", "dep:jsonwebtoken"]
-app = ["dep:anyhow", "dep:config", "dep:validator", "dep:idworker"]
+app = ["dep:config", "dep:validator", "dep:idworker"]
 web = ["app", "dep:ipnet", "dep:axum", "dep:tower", "dep:tower-http", "dep:tokio-rustls", "dep:hyper", "dep:hyper-util", "dep:rustls-pemfile", "dep:socket2", "dep:reqwest"]
 config-center = ["dep:base64", "dep:etcd-client", "dep:nacos-sdk"]
 registry-center = ["dep:base64", "dep:etcd-client", "dep:nacos-sdk"]
@@ -24,6 +24,7 @@ macros = ["dep:robotech-macros"]
 
 [dependencies]
 log = { workspace = true }
+anyhow = { workspace = true }
 tracing = { workspace = true }
 tracing-log = { workspace = true }
 tracing-core = { workspace = true }
@@ -44,7 +45,6 @@ notify = { workspace = true }
 notify-debouncer-mini = { workspace = true }
 utoipa = { workspace = true }
 utoipa-swagger-ui = { workspace = true, features = ["axum", "vendored"] }
-anyhow = { workspace = true, optional = true }
 config = { workspace = true, optional = true }
 linkme = { workspace = true }
 regex = { workspace = true, optional = true }

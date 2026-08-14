@@ -15,6 +15,8 @@ use thiserror::Error;
 /// - `BytesParseError`: 字节流格式响应解析失败
 #[derive(Error, Debug)]
 pub enum ApiClientError {
+    #[error("运行时错误: {0}")]
+    Runtime(#[from] anyhow::Error),
     #[error("文件读取错误: {0}")]
     ReadFile(String, #[source] std::io::Error),
     #[error("请求失败:{0}")]
@@ -36,4 +38,8 @@ pub enum ApiClientError {
     ParseBytes(String, #[source] reqwest::Error),
     #[error("设置API客户端失败: {0}")]
     SetApiClient(String),
+    #[error("获取API客户端失败: {0}")]
+    GetApiClient(String),
+    #[error("API客户端未初始化: {0}")]
+    NotInit(String),
 }
