@@ -1,6 +1,7 @@
 #[cfg(feature = "api-client")]
 use crate::api_client::ApiClientError;
 use crate::app::AppError;
+use crate::cfg;
 #[cfg(feature = "db")]
 use crate::dao::DaoError;
 #[cfg(feature = "db")]
@@ -28,6 +29,8 @@ pub enum SvcError {
     Runtime(#[from] anyhow::Error),
     #[error("环境变量错误: {0}")]
     GetAppEnv(#[from] EnvError),
+    #[error("配置错误: {0}")]
+    Config(#[from] cfg::CfgError),
     #[error("系统时钟错误: {0}")]
     SystemTime(#[from] SystemTimeError),
     #[error("ID工作者错误: {0}")]
