@@ -238,7 +238,6 @@ impl LogWatcher {
             loop {
                 match config_changed_rx.changed().await {
                     Ok(_) => {
-                        info!("log config changed: {files_clone:?}");
                         let (log_config, _changed) = config_changed_rx.borrow().clone();
                         let LogConfig {
                             level,
@@ -302,7 +301,7 @@ impl LogWatcher {
                     Ok((_, new_config, _)) => {
                         let changed = diff_config(&old_config, &new_config);
                         if !changed.is_empty() {
-                            debug!("log config changed: {:?}", changed);
+                            info!("log config changed: {:?}", changed);
                             last.store(Arc::new(new_config.clone()));
                             match deserialize_config::<LogConfig>(new_config).await {
                                 Ok(log_config) => {
