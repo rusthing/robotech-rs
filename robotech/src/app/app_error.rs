@@ -1,6 +1,8 @@
 use crate::cfg::CfgError;
 use crate::env::EnvError;
 use crate::log::LogConfig;
+use config::Value;
+use std::collections::HashMap;
 use thiserror::Error;
 use tokio::sync::watch;
 
@@ -17,5 +19,5 @@ pub enum AppError {
     #[error("{0}")]
     WatchFile(#[from] notify::Error),
     #[error("watch sender send error: {0}")]
-    WatchSend(#[from] watch::error::SendError<LogConfig>),
+    WatchSend(#[from] watch::error::SendError<(LogConfig, HashMap<String, Value>)>),
 }

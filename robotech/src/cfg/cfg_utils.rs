@@ -1,7 +1,7 @@
 use crate::cfg::base_config::BaseConfig;
 use crate::cfg::cfg_error::CfgError;
 use config::builder::DefaultState;
-use config::{Config, ConfigBuilder};
+use config::{Config, ConfigBuilder, Map, Value, ValueKind};
 use std::path::{Path, PathBuf};
 
 pub type Result<T> = core::result::Result<T, CfgError>;
@@ -70,6 +70,37 @@ where
     T: serde::Deserialize<'a>,
 {
     config.try_deserialize().map_err(CfgError::Deserialize)
+}
+
+/// Compare two `Config` values using the crate's own `Value` tree.
+/// Returns a map of changed top-level key -> new value.
+/// An empty map means the two configs are identical.
+/// Removed keys are represented with `ValueKind::Nil`.
+pub fn diff_config(old: &Config, new: &Config) -> Map<String, Value> {
+    let old_table = match &old.cache.kind {
+        ValueKind::Table(table) => table,
+        _ => return Map::new(),
+    };
+    let new_table = match &new.cache.kind {
+        ValueKind::Table(table) => table,
+        _ => return Map::new(),
+    };
+
+    let mut changed = Map::new();
+    for (key, new_val) in new_table {
+        match old_table.get(key) {
+            Some(old_val) if old_val == new_val => {}
+            _ => {
+                changed.insert(key.clone(), new_val.clone());
+            }
+        }
+    }
+    for key in old_table.keys() {
+        if !new_table.contains_key(key) && !changed.contains_key(key) {
+            changed.insert(key.clone(), Value::new(None, ValueKind::Nil));
+        }
+    }
+    changed
 }
 
 // #[cfg(any(feature = "config-center", feature = "registry-center"))]

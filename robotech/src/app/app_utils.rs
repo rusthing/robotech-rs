@@ -2,7 +2,8 @@ use crate::app::AppError;
 use crate::cfg::{build_cfg, deserialize_config, BaseConfig};
 use crate::env::{AppEnv, EnvError, APP_ENV};
 use crate::log::LogConfig;
-use config::Config;
+use config::{Config, Value};
+use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::Duration;
@@ -38,7 +39,7 @@ where
 {
     pub async fn new<F, Fut>(
         config_file_path: Option<String>,
-        log_config_changed_tx: watch::Sender<LogConfig>,
+        log_config_changed_tx: watch::Sender<(LogConfig, HashMap<String, Value>)>,
         mut on_change: F,
     ) -> Result<Self>
     where
@@ -54,7 +55,8 @@ where
         let (base_config, config, files) =
             build_app_cfg(config_file_path.clone(), app_dir, app_file_name_without_ext).await?;
         if let Some(log_config) = base_config.clone().log {
-            log_config_changed_tx.send(log_config)?;
+            let changed = HashMap::new();
+            log_config_changed_tx.send((log_config, changed))?;
         }
         let app_config: Arc<T> = Arc::new(deserialize_config::<T>(config).await?);
 
@@ -116,7 +118,7 @@ where
     }
 }
 
-pub async fn build_app_cfg(
+async fn build_app_cfg(
     config_file_path: Option<String>,
     app_dir: &PathBuf,
     app_file_name_without_ext: &str,

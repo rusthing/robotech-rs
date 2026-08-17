@@ -1,12 +1,13 @@
 use crate::cfg::build_cfg;
-use crate::cfg::{deserialize_config, BaseConfig};
+use crate::cfg::{deserialize_config, diff_config, BaseConfig};
 use crate::env::{AppEnv, EnvError, APP_ENV};
 use crate::log::{LogConfig, LogError};
-use config::Config;
+use arc_swap::ArcSwap;
+use config::{Config, Value};
 use std::collections::HashMap;
 use std::env;
 use std::path::{Path, PathBuf};
-use std::sync::RwLock;
+use std::sync::{Arc, RwLock};
 use tokio::sync::watch;
 use tracing::{debug, error, info};
 use tracing_appender::non_blocking::WorkerGuard;
@@ -166,8 +167,8 @@ pub type Result<T> = core::result::Result<T, LogError>;
 
 pub struct LogWatcher {
     _file_watcher: FileWatcher,
+    pub config_changed_tx: watch::Sender<(LogConfig, HashMap<String, Value>)>,
     reload_join_handle: tokio::task::JoinHandle<()>,
-    pub config_changed_tx: watch::Sender<LogConfig>,
 }
 
 impl Drop for LogWatcher {
@@ -179,7 +180,8 @@ impl Drop for LogWatcher {
 impl LogWatcher {
     pub async fn new() -> Result<Self> {
         let AppEnv { app_dir, .. } = APP_ENV.get().ok_or(EnvError::GetAppEnv())?;
-        let (config_changed_tx, mut config_changed_rx) = watch::channel(LogConfig::default());
+        let (config_changed_tx, mut config_changed_rx) =
+            watch::channel((LogConfig::default(), HashMap::new()));
         let (base_config, config, files) = build_log_cfg(app_dir).await?;
         let watch_debounce_delay = base_config.watch_debounce_delay;
         let LogConfig {
@@ -189,7 +191,7 @@ impl LogWatcher {
             file_time_format,
             show_spans,
             rotation,
-        } = deserialize_config(config).await?;
+        } = deserialize_config(config.clone()).await?;
 
         // 创建环境过滤器，支持 RUST_LOG 环境变量和模块级别配置
         let env_filter = create_env_filter(level.clone(), &modules);
@@ -236,8 +238,8 @@ impl LogWatcher {
             loop {
                 match config_changed_rx.changed().await {
                     Ok(_) => {
-                        info!("{} file changed: {:?} ...", "log", files_clone);
-                        let log_config = config_changed_rx.borrow().clone();
+                        info!("log config changed: {files_clone:?}");
+                        let (log_config, _changed) = config_changed_rx.borrow().clone();
                         let LogConfig {
                             level,
                             modules,
@@ -289,19 +291,33 @@ impl LogWatcher {
         });
 
         // 监听日志配置文件变化
+        let last_config = Arc::new(ArcSwap::from_pointee(config.clone()));
         let config_changed_tx_clone = config_changed_tx.clone();
         let file_watcher = watch_file(files.clone(), watch_debounce_delay, move |_| {
             let config_changed_tx_clone = config_changed_tx_clone.clone();
+            let last = Arc::clone(&last_config);
+            let old_config = last.load_full();
             async move {
                 match build_log_cfg(app_dir).await {
-                    Ok((_, config, _)) => match deserialize_config(config).await {
-                        Ok(log_config) => {
-                            config_changed_tx_clone.send(log_config)?;
+                    Ok((_, new_config, _)) => {
+                        let changed = diff_config(&old_config, &new_config);
+                        if !changed.is_empty() {
+                            debug!("log config changed: {:?}", changed);
+                            last.store(Arc::new(new_config.clone()));
+                            match deserialize_config::<LogConfig>(new_config).await {
+                                Ok(log_config) => {
+                                    if let Err(e) =
+                                        config_changed_tx_clone.send((log_config, changed))
+                                    {
+                                        error!("send log config error: {:?}", e);
+                                    }
+                                }
+                                Err(e) => {
+                                    error!("deserialize log config error: {:?}", e);
+                                }
+                            }
                         }
-                        Err(e) => {
-                            error!("deserialize log config error: {:?}", e);
-                        }
-                    },
+                    }
                     Err(e) => {
                         error!("build log config error: {:?}", e);
                     }
