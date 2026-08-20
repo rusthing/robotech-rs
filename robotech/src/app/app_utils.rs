@@ -1,7 +1,8 @@
 use crate::app::AppError;
-use crate::cfg::{build_cfg, deserialize_config, BaseConfig};
+use crate::cfg::{build_cfg, deserialize_config, diff_config, BaseConfig};
 use crate::env::{AppEnv, EnvError, APP_ENV};
 use crate::log::LogConfig;
+use arc_swap::ArcSwap;
 use config::{Config, Value};
 use std::collections::HashMap;
 use std::path::PathBuf;
@@ -16,7 +17,7 @@ pub type Result<T> = core::result::Result<T, AppError>;
 
 pub struct AppWatcher<T>
 where
-    T: serde::de::DeserializeOwned + Send + Sync + 'static,
+    T: Clone + serde::de::DeserializeOwned + Send + Sync + 'static,
 {
     _cfg_file_watcher: FileWatcher,
     _app_file_watcher: FileWatcher,
@@ -26,7 +27,7 @@ where
 
 impl<T> Drop for AppWatcher<T>
 where
-    T: serde::de::DeserializeOwned + Send + Sync + 'static,
+    T: Clone + serde::de::DeserializeOwned + Send + Sync + 'static,
 {
     fn drop(&mut self) {
         self.watch_join_handle.abort();
@@ -35,7 +36,7 @@ where
 
 impl<T> AppWatcher<T>
 where
-    T: serde::de::DeserializeOwned + Send + Sync + 'static,
+    T: Clone + serde::de::DeserializeOwned + Send + Sync + 'static,
 {
     pub async fn new<F, Fut>(
         config_file_path: Option<String>,
@@ -43,7 +44,7 @@ where
         mut on_change: F,
     ) -> Result<Self>
     where
-        F: FnMut(Arc<T>) -> Fut + Send + 'static,
+        F: FnMut(Arc<T>, HashMap<String, Value>) -> Fut + Send + 'static,
         Fut: Future<Output = anyhow::Result<()>> + Send + 'static,
     {
         let AppEnv {
@@ -58,16 +59,19 @@ where
             let changed = HashMap::new();
             log_config_changed_tx.send((log_config, changed))?;
         }
-        let app_config: Arc<T> = Arc::new(deserialize_config::<T>(config).await?);
+        let app_config: T = deserialize_config::<T>(config.clone()).await?;
 
-        let (config_changed_tx, mut config_changed_rx) = watch::channel(app_config.clone());
-        let app_config_clone = app_config.clone();
+        let last_config = Arc::new(ArcSwap::from_pointee(config.clone()));
+        let (config_changed_tx, mut config_changed_rx) =
+            watch::channel((app_config.clone(), HashMap::new()));
+        // let app_config_clone = app_config.clone();
         let watch_join_handle = tokio::spawn(async move {
             info!("watching app config");
             loop {
                 match config_changed_rx.changed().await {
                     Ok(_) => {
-                        if let Err(e) = on_change(Arc::clone(&app_config_clone)).await {
+                        let (app_config, changed) = config_changed_rx.borrow().clone();
+                        if let Err(e) = on_change(Arc::new(app_config), changed).await {
                             error!("handle config change error: {e:?}");
                             break;
                         }
@@ -87,17 +91,26 @@ where
             watch_file(files.clone(), base_config.watch_debounce_delay, move |_| {
                 let config_changed_tx_clone = config_changed_tx_clone.clone();
                 let config_file_path = config_file_path_clone.clone();
+                let last = Arc::clone(&last_config);
+                let old_config = last.load_full();
                 async move {
                     match build_app_cfg(config_file_path, app_dir, app_file_name_without_ext).await
                     {
-                        Ok((_, config, _)) => match deserialize_config::<T>(config).await {
-                            Ok(app_config) => {
-                                config_changed_tx_clone.send(Arc::new(app_config))?;
+                        Ok((_, new_config, _)) => {
+                            let changed = diff_config(&old_config, &new_config);
+                            if !changed.is_empty() {
+                                info!("log config changed: {:?}", changed);
+                                last.store(Arc::new(new_config.clone()));
+                                match deserialize_config::<T>(new_config).await {
+                                    Ok(app_config) => {
+                                        config_changed_tx_clone.send((app_config, changed))?;
+                                    }
+                                    Err(e) => {
+                                        error!("deserialize app config error: {:?}", e);
+                                    }
+                                }
                             }
-                            Err(e) => {
-                                error!("deserialize app config error: {:?}", e);
-                            }
-                        },
+                        }
                         Err(e) => {
                             error!("build app config error: {:?}", e);
                         }
@@ -110,7 +123,7 @@ where
         let _app_file_watcher =
             watch_app_file(&app_file_path.clone(), base_config.watch_debounce_delay)?;
         Ok(Self {
-            app_config: app_config.clone(),
+            app_config: Arc::new(app_config.clone()),
             watch_join_handle,
             _cfg_file_watcher,
             _app_file_watcher,
@@ -123,9 +136,7 @@ async fn build_app_cfg(
     app_dir: &PathBuf,
     app_file_name_without_ext: &str,
 ) -> crate::cfg::Result<(BaseConfig, Config, Vec<String>)> {
-    let (base_config, config, files) =
-        build_cfg(app_dir, "APP", app_file_name_without_ext, config_file_path).await?;
-    Ok((base_config, config, files))
+    build_cfg(app_dir, "APP", app_file_name_without_ext, config_file_path).await
 }
 
 /// 监控应用程序的文件变化，当文件更新时优雅退出应用程序
