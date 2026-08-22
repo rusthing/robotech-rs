@@ -295,7 +295,7 @@ pub(super) fn dao_macro(args: DaoArgs, input: ItemStruct) -> TokenStream {
         {
             // 当id为默认值(0)时生成ID
             if active_model.id == ActiveValue::NotSet {
-                active_model.id = ActiveValue::set(idworker::get_id_worker()?.next_id()? as i64);
+                active_model.id = ActiveValue::set(idworker::next_id()? as i64);
             }
             // 当创建时间未设置时，设置创建时间和修改时间
             if active_model.create_timestamp == ActiveValue::NotSet {
