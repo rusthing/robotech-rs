@@ -42,7 +42,6 @@ serde_with = { workspace = true }
 tokio = { workspace = true, features = ["macros"] }
 nix = { workspace = true }
 notify = { workspace = true }
-notify-debouncer-mini = { workspace = true }
 utoipa = { workspace = true }
 utoipa-swagger-ui = { workspace = true, features = ["axum", "vendored"] }
 config = { workspace = true, optional = true }
