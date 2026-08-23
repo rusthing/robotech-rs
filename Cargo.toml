@@ -4,7 +4,7 @@ resolver = "3"
 
 [workspace.dependencies]
 # rototech依赖
-log = "0.4.33"
+log = "0.4.34"
 tracing = "0.1.44"
 tracing-log = "0.2.0"
 tracing-core = "0.1.36"
@@ -54,13 +54,13 @@ etcd-client = "0.19.0"
 nacos-sdk = "0.8.0"
 
 idworker = "1.2.0"
-wheel-rs = "1.9.4"
+wheel-rs = "1.9.5"
 robotech-macros = "1.11.0"
 
 # macro依赖
 proc-macro2 = "1.0.107"             # 提供与标准库 proc_macro 兼容但更易测试的接口
 quote = "1.0.47"                    # 用于将语法树转换回代码
-syn = "3.0.0"                     # 用于解析 Rust 代码为语法树（AST）
+syn = "3.0.3"                     # 用于解析 Rust 代码为语法树（AST）
 
 [patch.crates-io]
 idworker = { path = "../idworker" }

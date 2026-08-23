@@ -36,19 +36,8 @@ pub fn set_db_conn(value: DbConn) -> Result<(), DbError> {
 #[log_call]
 pub async fn init_db_conn(db_conn_config: DbConnConfig) -> Result<(), DbError> {
     debug!("init database...");
-
-    if db_conn_config.url.is_empty() {
-        Err(DbError::Config(
-            "db.url (database connection string) item has not been configured yet".to_string(),
-        ))?;
-    }
-
     // 获取数据库配置
-    let mut opt = ConnectOptions::new(db_conn_config.url);
-
-    // 设置sql日志按什么级别输出
-    opt.sqlx_logging_level(db_conn_config.log_level);
-
+    let opt: ConnectOptions = db_conn_config.into();
     // 连接数据库
     let connection = Database::connect(opt).await.map_err(DbError::Connect)?;
     // 设置数据库连接到全局变量中
