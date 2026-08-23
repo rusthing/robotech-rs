@@ -1,8 +1,8 @@
 use proc_macro2::{Ident, Span, TokenStream};
 use quote::{format_ident, quote};
 use syn::parse::{Parse, ParseStream};
-use syn::{Expr, ItemStruct, Lit, LitStr, Token, bracketed, parenthesized};
-use wheel_rs::str_utils::{CamelFormat, split_camel_case};
+use syn::{bracketed, parenthesized, Expr, ItemStruct, Lit, LitStr, Token};
+use wheel_rs::str_utils::{split_camel_case, CamelFormat};
 
 /// 唯一键字段配置项
 #[derive(Debug)]
@@ -532,33 +532,10 @@ pub(super) fn dao_macro(args: DaoArgs, input: ItemStruct) -> TokenStream {
             })
             .collect();
 
-        // 生成 find_also_related 链式调用
-        let find_also_related_calls = entity_refs.iter().map(|entity_ref| {
-            quote! { .find_also_related(#entity_ref) }
+        // 生成 find_with_related_calls 链式调用
+        let find_with_related_calls = entity_refs.iter().map(|entity_ref| {
+            quote! { .with(#entity_ref) }
         });
-
-        // 使用实际表名作为模式匹配变量名（避免连字符等特殊字符）
-        let pattern_vars: Vec<Ident> = table_names
-            .iter()
-            .map(|table_name| {
-                // 将表名转换为合法的变量名（替换连字符等特殊字符）
-                let var_name = table_name.replace('-', "_");
-                Ident::new(&var_name, Span::call_site())
-            })
-            .collect();
-
-        let result_tuple_elements: Vec<TokenStream> = std::iter::once(quote! { Model })
-            .chain(pattern_vars.iter().map(|var| {
-                quote! { #var::Model }
-            }))
-            .collect();
-
-        let unwrap_calls: Vec<TokenStream> = pattern_vars
-            .iter()
-            .map(|var| {
-                quote! { #var.unwrap() }
-            })
-            .collect();
 
         generated_members.push(quote! {
             /// # 根据 ID 查询记录 (附带获取关联表的信息)
@@ -572,22 +549,17 @@ pub(super) fn dao_macro(args: DaoArgs, input: ItemStruct) -> TokenStream {
             /// ## 返回值
             /// 返回一个包含主记录和关联记录的元组的 Option，如果查询失败则返回相应的错误信息
             /// 如果未找到匹配记录，则返回 None
-            pub async fn get_by_id_also_related<C>(
+            pub async fn get_by_id_with_related<C>(
                 id: u64,
                 db: &C,
-            ) -> Result<Option<(#(#result_tuple_elements),*)>, DaoError>
+            ) -> Result<Option<ModelEx>, DaoError>
             where
                 C: ConnectionTrait,
             {
-                Entity::find_by_id(id as i64)
-                    #(#find_also_related_calls)*
+                Entity::load().filter_by_id(id as i64)
+                    #(#find_with_related_calls)*
                     .one(db)
                     .await
-                    .map(|model_option| {
-                        model_option.map(|(model, #(#pattern_vars),*)| {
-                            (model, #(#unwrap_calls),*)
-                        })
-                    })
                     .map_err(|e| DaoError::parse_db_err(e))
             }
         })
@@ -599,7 +571,7 @@ pub(super) fn dao_macro(args: DaoArgs, input: ItemStruct) -> TokenStream {
             ActiveModelTrait, ActiveValue, Condition, ConnectionTrait, EntityTrait, PaginatorTrait, QueryFilter, DeleteResult
         };
 
-        use crate::mo::#module::{ActiveModel, Column, Entity, Model};
+        use crate::mo::#module::{ActiveModel, Column, Entity, Model, ModelEx};
 
         #generated_use_linkme
 
