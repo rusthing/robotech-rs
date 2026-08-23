@@ -74,7 +74,7 @@ pub fn crud_dto_macro(input: ItemStruct) -> TokenStream {
         use sea_orm::{ActiveValue, ColumnTrait, Condition};
         use typed_builder::TypedBuilder;
         use wheel_rs::serde::{option_option_serde, u64_option_serde};
-        use crate::model::#module_name::{ActiveModel, Column};
+        use crate::mo::#module_name::{ActiveModel, Column};
 
         // AddDto
         #[derive(o2o::o2o, utoipa::ToSchema, Debug, Default, serde::Deserialize, validator::Validate, Setters, TypedBuilder)]

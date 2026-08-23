@@ -599,7 +599,7 @@ pub(super) fn dao_macro(args: DaoArgs, input: ItemStruct) -> TokenStream {
             ActiveModelTrait, ActiveValue, Condition, ConnectionTrait, EntityTrait, PaginatorTrait, QueryFilter, DeleteResult
         };
 
-        use crate::model::#module::{ActiveModel, Column, Entity, Model};
+        use crate::mo::#module::{ActiveModel, Column, Entity, Model};
 
         #generated_use_linkme
 

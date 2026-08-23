@@ -372,7 +372,7 @@ pub(crate) fn svc_macro(input: ItemStruct) -> TokenStream {
 
         use crate::dto::#dto_module::*;
         use crate::dao::#dao_name;
-        use crate::model::#module::ActiveModel;
+        use crate::mo::#module::ActiveModel;
         use crate::vo::#vo_name;
 
         #input
