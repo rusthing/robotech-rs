@@ -298,10 +298,10 @@ pub(super) fn dao_macro(args: DaoArgs, input: ItemStruct) -> TokenStream {
                 active_model.id = ActiveValue::set(idworker::next_id()? as i64);
             }
             // 当创建时间未设置时，设置创建时间和修改时间
-            if active_model.create_timestamp == ActiveValue::NotSet {
+            if active_model.create_ts == ActiveValue::NotSet {
                 let now = ActiveValue::set(wheel_rs::time_utils::now_ts()? as i64);
-                active_model.create_timestamp = now.clone();
-                active_model.update_timestamp = now;
+                active_model.create_ts = now.clone();
+                active_model.update_ts = now;
             }
             // 添加时修改者就是创建者
             active_model.updator_id = active_model.creator_id.clone();
@@ -333,11 +333,11 @@ pub(super) fn dao_macro(args: DaoArgs, input: ItemStruct) -> TokenStream {
         {
             // 保护创建者信息不能被修改
             active_model.creator_id = ActiveValue::NotSet;
-            active_model.create_timestamp = ActiveValue::NotSet;
+            active_model.create_ts = ActiveValue::NotSet;
             // 当修改时间未设置时，设置修改时间
-            if active_model.update_timestamp == ActiveValue::NotSet {
+            if active_model.update_ts == ActiveValue::NotSet {
                 let now = ActiveValue::set(wheel_rs::time_utils::now_ts()? as i64);
-                active_model.update_timestamp = now;
+                active_model.update_ts = now;
             }
             // 执行数据库更新操作
             active_model
@@ -409,11 +409,13 @@ pub(super) fn dao_macro(args: DaoArgs, input: ItemStruct) -> TokenStream {
         ///
         /// ## 返回值
         /// 查询成功，如果记录存在，返回查询到的完整 Model 实例，如果不存在返回None; 查询失败则返回相应的错误信息
-        pub async fn get_by_id<C>(id: u64, db: &C) -> Result<Option<Model>, DaoError>
+        pub async fn get_by_id<C, M>(id: u64, db: &C) -> Result<Option<M>, DaoError>
         where
             C: ConnectionTrait,
+            M: FromQueryResult,
         {
             Entity::find_by_id(id as i64)
+                .into_model::<M>()
                 .one(db)
                 .await
                 .map_err(|e| DaoError::parse_db_err(e))
@@ -432,12 +434,14 @@ pub(super) fn dao_macro(args: DaoArgs, input: ItemStruct) -> TokenStream {
         ///
         /// ## 返回值
         /// - `Result<Ro<Model>, DaoError>` - 查询结果封装为Model对象，如果查询成功则返回封装了Model的Ro对象，否则返回错误信息
-        pub async fn get_by_condition<C>(condition: Condition, db: &C) -> Result<Option<Model>, DaoError>
+        pub async fn get_by_condition<C, M>(condition: Condition, db: &C) -> Result<Option<M>, DaoError>
         where
             C: ConnectionTrait,
+            M: FromQueryResult,
         {
             Entity::find()
                 .filter(condition)
+                .into_model::<M>()
                 .one(db)
                 .await
                 .map_err(DaoError::from)
@@ -457,11 +461,13 @@ pub(super) fn dao_macro(args: DaoArgs, input: ItemStruct) -> TokenStream {
         ///
         /// ## 返回值
         /// - `Result<Option<Model>, DaoError>` - 查询结果封装为Model对象的列表，如果查询成功则返回封装了Model的列表，否则返回错误信息
-        pub async fn list_by_condition<C>(condition: Condition, order_by: &Option<String>, db: &C) -> Result<Vec<Model>, DaoError>
+        pub async fn list_by_condition<C, M>(condition: Condition, order_by: &Option<String>, db: &C) -> Result<Vec<M>, DaoError>
         where
             C: ConnectionTrait,
+            M: FromQueryResult,
         {
             add_order_by(Entity::find().filter(condition), order_by)?
+                .into_model::<M>()
                 .all(db)
                 .await
                 .map_err(DaoError::from)
@@ -483,20 +489,23 @@ pub(super) fn dao_macro(args: DaoArgs, input: ItemStruct) -> TokenStream {
         ///
         /// ## 返回值
         /// - `Result<Option<Model>, DaoError>` - 查询结果封装为Model对象的列表，如果查询成功则返回封装了Model的列表，否则返回错误信息
-        pub async fn page_by_condition<C>(
+        pub async fn page_by_condition<C, M>(
             condition: Condition,
             order_by: &Option<String>,
             mut page_num: u64,
             page_size: u64,
             db: &C
-        ) -> Result<(u64, u64, Vec<Model>), DaoError>
+        ) -> Result<(u64, u64, Vec<M>), DaoError>
         where
             C: ConnectionTrait,
+            M: FromQueryResult + Send + Sync,
         {
             if page_num < 1 {
                 page_num = 1;
             }
-            let paginator = add_order_by(Entity::find().filter(condition), order_by)?.paginate(db, page_size);
+            let paginator = add_order_by(Entity::find().filter(condition), order_by)?
+                .into_model::<M>()
+                .paginate(db, page_size);
             let total  = paginator.num_items().await.map_err(DaoError::from)?;
             if total == 0 {
                 return Ok((1, 0, vec![]));
@@ -537,8 +546,9 @@ pub(super) fn dao_macro(args: DaoArgs, input: ItemStruct) -> TokenStream {
             quote! { .with(#entity_ref) }
         });
 
+        // 生成get_ex_by_id方法
         generated_members.push(quote! {
-            /// # 根据 ID 查询记录 (附带获取关联表的信息)
+            /// # 根据 ID 查询记录(附带获取关联表的信息)
             ///
             /// 此函数通过给定的 ID 查询单条记录，并同时获取关联的存储桶和对象信息
             ///
@@ -549,7 +559,7 @@ pub(super) fn dao_macro(args: DaoArgs, input: ItemStruct) -> TokenStream {
             /// ## 返回值
             /// 返回一个包含主记录和关联记录的元组的 Option，如果查询失败则返回相应的错误信息
             /// 如果未找到匹配记录，则返回 None
-            pub async fn get_by_id_with_related<C>(
+            pub async fn get_ex_by_id<C>(
                 id: u64,
                 db: &C,
             ) -> Result<Option<ModelEx>, DaoError>
@@ -562,13 +572,13 @@ pub(super) fn dao_macro(args: DaoArgs, input: ItemStruct) -> TokenStream {
                     .await
                     .map_err(|e| DaoError::parse_db_err(e))
             }
-        })
+        });
     }
 
     let expanded = quote! {
         use robotech::dao::{add_order_by, DaoError};
         use sea_orm::{
-            ActiveModelTrait, ActiveValue, Condition, ConnectionTrait, EntityTrait, PaginatorTrait, QueryFilter, DeleteResult
+            ActiveModelTrait, ActiveValue, Condition, ConnectionTrait, EntityTrait, FromQueryResult, PaginatorTrait, QueryFilter, DeleteResult
         };
 
         use crate::mo::#module::{ActiveModel, Column, Entity, Model, ModelEx};

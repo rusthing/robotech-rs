@@ -1,6 +1,7 @@
 use proc_macro2::TokenStream;
-use quote::quote;
+use quote::{format_ident, quote};
 use syn::{Attribute, Data, DeriveInput, Field, Fields};
+use wheel_rs::str_utils::{split_camel_case, CamelFormat};
 
 /// 检查字段是否已经有某个属性
 fn has_attribute(attrs: &[Attribute], name: &str) -> bool {
@@ -12,8 +13,8 @@ fn generate_field_attrs(field: &Field) -> TokenStream {
     let ty = &field.ty;
 
     // 检查是否已经有 serde_as、from 或 builder 属性
-    let has_serde = has_attribute(&field.attrs, "serde");
     let has_from = has_attribute(&field.attrs, "from");
+    // let has_serde = has_attribute(&field.attrs, "serde");
     let has_builder = has_attribute(&field.attrs, "builder");
 
     let mut attrs = TokenStream::new();
@@ -25,12 +26,12 @@ fn generate_field_attrs(field: &Field) -> TokenStream {
         }
     }
 
-    if !has_serde {
-        // 添加 serde 属性
-        if let Some(serde_as_attr) = generate_serde_attr(ty) {
-            attrs.extend(serde_as_attr);
-        }
-    }
+    // if !has_serde {
+    //     // 添加 serde 属性
+    //     if let Some(serde_as_attr) = generate_serde_attr(ty) {
+    //         attrs.extend(serde_as_attr);
+    //     }
+    // }
 
     if !has_builder {
         // 添加 builder 属性（仅针对 Option<T> 类型）
@@ -52,10 +53,9 @@ fn generate_from_attr(ty: &syn::Type) -> Option<TokenStream> {
             if is_option_type(ty) {
                 if let Some(inner_ty) = extract_option_inner_type(type_path) {
                     return Some(match inner_ty.as_str() {
-                        "u8" => quote! { #[from(~.map(|v| v as u8))] },
-                        "u16" => quote! { #[from(~.map(|v| v as u16))] },
-                        "u32" => quote! { #[from(~.map(|v| v as u32))] },
-                        "u64" => quote! { #[from(~.map(|v| v as u64))] },
+                        "u8" | "u16" | "u32" | "u64" | "u128" => {
+                            quote! { #[from(~.map(|v|v.into()))] }
+                        }
                         _ => return None,
                     });
                 }
@@ -63,10 +63,7 @@ fn generate_from_attr(ty: &syn::Type) -> Option<TokenStream> {
 
             // 再处理普通类型
             Some(match path_str.as_str() {
-                "u8" => quote! { #[from(~ as u8)] },
-                "u16" => quote! { #[from(~ as u16)] },
-                "u32" => quote! { #[from(~ as u32)] },
-                "u64" => quote! { #[from(~ as u64)] },
+                "u8" | "u16" | "u32" | "u64" | "u128" => quote! { #[from(~.into())] },
                 _ => return None,
             })?
         }
@@ -121,6 +118,45 @@ fn generate_builder_attr(field: &Field) -> Option<TokenStream> {
     None
 }
 
+/// 将无符号整型映射为对应的U*类型，非无符号整型则保持原样
+/// 支持 Option<T> 类型，例如 Option<u64> -> Option<U64>
+fn map_unsigned_type(ty: &syn::Type) -> TokenStream {
+    match ty {
+        syn::Type::Path(type_path) => {
+            if let Some(segment) = type_path.path.segments.last() {
+                let ident_str = segment.ident.to_string();
+
+                // 处理 Option<T> 类型
+                if ident_str == "Option" {
+                    if let Some(inner) = extract_option_inner_type(type_path) {
+                        return match inner.as_str() {
+                            "u8" => quote! { Option<U8> },
+                            "u16" => quote! { Option<U16> },
+                            "u32" => quote! { Option<U32> },
+                            "u64" => quote! { Option<U64> },
+                            "u128" => quote! { Option<U128> },
+                            _ => quote! { #ty },
+                        };
+                    }
+                    return quote! { #ty };
+                }
+
+                // 处理普通类型
+                match ident_str.as_str() {
+                    "u8" => return quote! { U8 },
+                    "u16" => return quote! { U16 },
+                    "u32" => return quote! { U32 },
+                    "u64" => return quote! { U64 },
+                    "u128" => return quote! { U128 },
+                    _ => {}
+                }
+            }
+        }
+        _ => {}
+    }
+    quote! { #ty }
+}
+
 /// 检查类型是否是 Option<T>
 fn is_option_type(ty: &syn::Type) -> bool {
     match ty {
@@ -138,6 +174,26 @@ fn is_option_type(ty: &syn::Type) -> bool {
 pub fn vo_macro(input: DeriveInput) -> TokenStream {
     let struct_name = &input.ident;
     let vis = &input.vis;
+    let struct_name_str = struct_name.to_string();
+
+    // 验证结构体名称必须以Vo结尾
+    if !struct_name_str.ends_with("Vo") {
+        return syn::Error::new_spanned(struct_name, "Struct name must end with 'Vo'")
+            .to_compile_error()
+            .into();
+    }
+    let struct_name_split = split_camel_case(&struct_name_str, CamelFormat::Upper);
+    if struct_name_split.is_err() {
+        return syn::Error::new_spanned(
+            struct_name,
+            "Struct name must be a valid upper camel case",
+        )
+        .to_compile_error()
+        .into();
+    }
+    let mut struct_name_split = struct_name_split.unwrap();
+    struct_name_split.pop();
+    let module_name = format_ident!("{}", struct_name_split.join("_").to_lowercase());
 
     // 处理字段
     let fields = match input.data {
@@ -148,7 +204,7 @@ pub fn vo_macro(input: DeriveInput) -> TokenStream {
                     .iter()
                     .map(|field| {
                         let field_name = &field.ident;
-                        let field_ty = &field.ty;
+                        let field_ty = map_unsigned_type(&field.ty);
                         let attrs = generate_field_attrs(field);
 
                         // 保留原有的注释和其他属性（除了 from/builder/serde）
@@ -195,19 +251,24 @@ pub fn vo_macro(input: DeriveInput) -> TokenStream {
         use utoipa::ToSchema;
         use derive_setters::Setters;
         use typed_builder::TypedBuilder;
+        use sea_orm::DerivePartialModel;
         use wheel_rs::serde::{u64_serde, u64_option_serde};
+        use robotech::dao::{U8, U16, U32, U64, U128};
+        use crate::mo::#module_name::{Entity, Model, ModelEx};
 
         #[skip_serializing_none]            // 忽略空字段(好像必须放在#[derive(o2o, Serialize)]的上方才能起效)
-        #[derive(o2o, ToSchema, Debug, Serialize, Clone, Setters, TypedBuilder)]
+        #[derive(o2o, ToSchema, DerivePartialModel, Debug, Serialize, Clone, Setters, TypedBuilder)]
         #[from_owned(Model)]
+        #[from_owned(ModelEx)]
         #[serde(rename_all = "camelCase")]
         #[serde_as]
         #[builder]
+        #[sea_orm(entity = "Entity")]
         #vis struct #struct_name #fields
     };
 
     // 调试：打印完整展开的代码
-    // println!("Full expanded code:\n{expanded}");
+    println!("Full expanded code:\n{expanded}");
 
     TokenStream::from(expanded)
 }

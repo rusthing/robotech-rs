@@ -1,7 +1,7 @@
 use proc_macro2::TokenStream;
 use quote::{format_ident, quote};
 use syn::ItemStruct;
-use wheel_rs::str_utils::{CamelFormat, split_camel_case};
+use wheel_rs::str_utils::{split_camel_case, CamelFormat};
 
 pub(crate) fn svc_macro(input: ItemStruct) -> TokenStream {
     let struct_name = &input.ident;
@@ -65,7 +65,7 @@ pub(crate) fn svc_macro(input: ItemStruct) -> TokenStream {
 
             let active_model: ActiveModel = add_dto.into();
             let one = #vo_name::from(#dao_name::insert(active_model, db).await?);
-            Ok(Self::get_by_id(one.id as u64, Some(db))
+            Ok(Self::get_by_id(*one.id, Some(db))
                 .await?
                 .msg("添加成功".to_string()))
         }
@@ -100,7 +100,7 @@ pub(crate) fn svc_macro(input: ItemStruct) -> TokenStream {
             let id = modify_dto.id.unwrap();    // id经过校验，可以放心unwrap
             let active_model: ActiveModel = modify_dto.into();
             let one = #vo_name::from(#dao_name::update(active_model, db).await?);
-            Ok(Self::get_by_id(one.id, Some(db))
+            Ok(Self::get_by_id(*one.id, Some(db))
                 .await?
                 .msg("修改成功".to_string()))
         }
@@ -234,7 +234,7 @@ pub(crate) fn svc_macro(input: ItemStruct) -> TokenStream {
         where
             C: ConnectionTrait,
         {
-            let one = #dao_name::get_by_id(id, db).await?.map(|v| #vo_name::from(v));
+            let one = #dao_name::get_by_id::<_, #vo_name>(id, db).await?;
             Ok(Ro::success("查询成功".to_string()).extra(one))
         }
     });
@@ -266,9 +266,7 @@ pub(crate) fn svc_macro(input: ItemStruct) -> TokenStream {
                 condition = condition.add(build_like_condition(keyword, #dao_name::LIKE_COLUMNS));
             }
 
-            let one = #dao_name::get_by_condition(condition, db)
-                .await?
-                .map(#vo_name::from);
+            let one = #dao_name::get_by_condition::<_, #vo_name>(condition, db).await?;
             Ok(Ro::success("查询成功".to_string()).extra(one))
         }
     });
@@ -302,10 +300,9 @@ pub(crate) fn svc_macro(input: ItemStruct) -> TokenStream {
                 condition = condition.add(build_like_condition(keyword, #dao_name::LIKE_COLUMNS));
             }
 
-            let all = #dao_name::list_by_condition(condition, order_by, db)
+            let all = #dao_name::list_by_condition::<_, #vo_name>(condition, order_by, db)
                 .await?
                 .into_iter()
-                .map(#vo_name::from)
                 .collect();
             Ok(Ro::success("查询成功".to_string()).extra(Some(all)))
         }
@@ -343,14 +340,14 @@ pub(crate) fn svc_macro(input: ItemStruct) -> TokenStream {
                 condition = condition.add(build_like_condition(keyword, #dao_name::LIKE_COLUMNS));
             }
 
-            let (page_num, total, models) = #dao_name::page_by_condition(
+            let (page_num, total, models) = #dao_name::page_by_condition::<_, #vo_name>(
                 condition,
                 order_by,
                 page_num,
                 page_size,
                 db
             ).await?;
-            let list = models.into_iter().map(#vo_name::from).collect();
+            let list = models.into_iter().collect();
             Ok(Ro::success("查询成功".to_string()).extra(Some(PageRx::builder()
                 .total(total)
                 .page_num(page_num)

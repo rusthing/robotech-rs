@@ -82,8 +82,8 @@ pub fn crud_dto_macro(input: ItemStruct) -> TokenStream {
         #[owned_into(ActiveModel)]
         #[ghosts(
             updator_id: Default::default(),
-            create_timestamp: Default::default(),
-            update_timestamp: Default::default(),
+            create_ts: Default::default(),
+            update_ts: Default::default(),
         )]
         #[builder]
         #vis struct #add_dto_name {
@@ -103,8 +103,8 @@ pub fn crud_dto_macro(input: ItemStruct) -> TokenStream {
         #[owned_into(ActiveModel)]
         #[ghosts(
             creator_id: Default::default(),
-            create_timestamp: Default::default(),
-            update_timestamp: Default::default(),
+            create_ts: Default::default(),
+            update_ts: Default::default(),
         )]
         #[builder]
         #vis struct #modify_dto_name {
