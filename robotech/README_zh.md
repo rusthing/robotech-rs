@@ -502,7 +502,7 @@ tokio = { version = "1", features = ["full"] }
 // main.rs
 use robotech::app::AppConfig;
 use robotech::db::init_db_conn;
-use robotech::web::start_web_server;
+use robotech::web::setup_web_server;
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Deserialize, Serialize)]
@@ -523,7 +523,7 @@ async fn main() -> anyhow::Result<()> {
     init_db_conn(config.db.clone()).await?;
     
     // 4. 启动 Web 服务
-    start_web_server(config.web_server, None, None).await?;
+    setup_web_server(config.web_server, None, None).await?;
     
     Ok(())
 }

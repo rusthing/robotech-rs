@@ -4,9 +4,11 @@ use crate::web::middleware::{
 };
 use crate::web::{build_cors, build_https, HttpsConfig, WebServerConfig, WebServerError};
 use axum::{debug_handler, middleware, routing::get, Router};
+use config::Value;
 use linkme::distributed_slice;
 use robotech_macros::log_call;
 use socket2::{Domain, Socket, Type};
+use std::collections::HashMap;
 use std::net::{IpAddr, SocketAddr, TcpListener};
 use std::sync::{Arc, RwLock};
 use std::time::Duration;
@@ -71,186 +73,194 @@ pub async fn health() -> &'static str {
 }
 
 #[log_call]
-pub async fn start_web_server(
+pub async fn setup_web_server(
     web_server_config: WebServerConfig,
     port_of_args: Option<u16>,
     old_pid: Option<u32>,
+    changed: &Option<HashMap<String, Value>>,
 ) -> Result<(), WebServerError> {
-    let WebServerConfig {
-        bind: binds,
-        port: port_option,
-        listen: listens,
-        mut reuse_port,
-        https: https_config,
-        forbidden_urns,
-        local_only_urns,
-        ip_white_list,
-        ip_black_list,
-        log_enabled,
-        cors: cors_config,
-        health_check,
-        start_wait_timeout,
-        start_retry_interval,
-        terminate_old_app_wait_timeout,
-        terminate_old_app_retry_interval,
-    } = web_server_config;
-    let health_check_uri = &health_check.uri;
-
-    let (is_random_port, listen_binds) =
-        get_listen_binds(port_of_args, binds, port_option, listens)?;
-    if listen_binds.is_empty() {
-        Err(WebServerError::ParseListenBinds(
-            "没有配置监听绑定".to_string(),
-        ))?;
-    }
-
-    let mut old_web_service_handles = take_web_service_handles()?;
-    let stop_old_web_service_sender = take_stop_web_service_sender()?;
-
-    if is_random_port {
-        // 如果是随机端口，则不会开启复用端口(无意义)
-        reuse_port = false;
-    } else if !reuse_port {
-        // 如果不是随机端口，且不是复用端口，则先停止旧服务或应用，然后才能启动新的服务
-        if let Some(old_pid) = old_pid {
-            // 停止旧应用
-            terminate_old_app(
-                old_pid,
-                terminate_old_app_wait_timeout,
-                terminate_old_app_retry_interval,
-            )
-            .await?;
-        } else {
-            // 停止旧服务
-            if let Some(web_service_handles) = old_web_service_handles.take() {
-                stop_old_web_service(stop_old_web_service_sender.clone(), web_service_handles)
-                    .await?;
-            }
-        }
-    }
-
-    // 初始化路由
-    let mut router = Router::new();
-    for build_router in ROUTER_SLICE.iter() {
-        router = router.merge(build_router());
-    }
-    // 判断是否暴露健康检查
-    if health_check.exposed {
-        router = router.route(health_check_uri, get(health));
-    } else {
-        router = router.route(
-            health_check_uri,
-            get(health).layer(axum::middleware::from_fn(local_only_middleware)),
-        );
-    }
-    // 集成 Swagger UI，访问 /swagger-ui 即可查看文档
-    let mut api_docs = vec![];
-    for init_api_doc in API_DOC_SLICE.iter() {
-        api_docs.push(init_api_doc());
-    }
-    if !api_docs.is_empty() {
-        let swagger_router: Router = SwaggerUi::new("/swagger-ui").urls(api_docs).into();
-        router = router.merge(swagger_router);
-    }
-
-    // 添加日志中间件
-    if log_enabled {
-        router = router.layer(TraceLayer::new_for_http());
-    }
-    // 添加IP拦截中间件
-    if !ip_white_list.is_empty() || !ip_black_list.is_empty() {
-        let ip_ban_state = IpBanState {
-            ip_white_list: Arc::new(ip_white_list.clone()),
-            ip_black_list: Arc::new(ip_black_list.clone()),
-        };
-        router = router.layer(middleware::from_fn_with_state(
-            ip_ban_state.clone(),
-            ip_ban_middleware,
-        ));
-    }
-    // 添加禁止访问中间件
-    if !forbidden_urns.is_empty() {
-        let forbidden_urns_state = ForbiddenUrnsState {
-            forbidden_urns: Arc::new(forbidden_urns.clone()),
-        };
-        router = router.layer(middleware::from_fn_with_state(
-            forbidden_urns_state.clone(),
-            forbidden_urns_middleware,
-        ));
-    }
-    // 添加仅本地访问中间件
-    if !local_only_urns.is_empty() {
-        let local_only_urns_state = LocalOnlyUrnsState {
-            local_only_urns: Arc::new(local_only_urns.clone()),
-        };
-        router = router.layer(middleware::from_fn_with_state(
-            local_only_urns_state.clone(),
-            local_only_urns_middleware,
-        ));
-    }
-    // 添加CORS中间件
-    if let Some(cors_layer) = build_cors(&cors_config)? {
-        router = router.layer(cors_layer);
-    }
-
-    // 判断HTTP协议
-    let http_protocol = if let Some(https_config) = https_config.clone()
-        && https_config.enabled
+    info!("setup web server...");
+    if changed
+        .as_ref()
+        .map(|changed| changed.contains_key("web"))
+        .unwrap_or(true)
     {
-        "https"
-    } else {
-        "http"
-    };
-
-    // 绑定地址及端口，并启动服务
-    let (stop_web_service_sender, stop_web_service_receiver) = broadcast::channel::<()>(1);
-    let (health_check_url_prefix, web_service_handles) = bind_and_start(
-        router,
-        reuse_port,
-        listen_binds,
-        http_protocol,
-        https_config,
-        stop_web_service_receiver,
-    )?;
-
-    // 如果没有旧服务，则等待新服务器启动成功
-    if old_web_service_handles.is_none() {
-        let heath_check_url = format!("{health_check_url_prefix}{health_check_uri}");
-        wait_for_web_server_ready(
-            heath_check_url.as_str(),
+        let WebServerConfig {
+            bind: binds,
+            port: port_option,
+            listen: listens,
+            mut reuse_port,
+            https: https_config,
+            forbidden_urns,
+            local_only_urns,
+            ip_white_list,
+            ip_black_list,
+            log_enabled,
+            cors: cors_config,
+            health_check,
             start_wait_timeout,
             start_retry_interval,
-        )
-        .await?;
-    }
+            terminate_old_app_wait_timeout,
+            terminate_old_app_retry_interval,
+        } = web_server_config;
+        let health_check_uri = &health_check.uri;
 
-    // 如果是随机端口或复用端口，则可以在前面先启动新的服务，后面这里再停止旧的服务或应用
-    if is_random_port || reuse_port {
-        if let Some(old_pid) = old_pid {
-            // 停止旧应用
-            terminate_old_app(
-                old_pid,
-                terminate_old_app_wait_timeout,
-                terminate_old_app_retry_interval,
-            )
-            .await?;
-        } else {
-            // 停止旧服务
-            if let Some(web_service_handles) = old_web_service_handles.take() {
-                tokio::spawn({
-                    let stop_old_web_service_sender = stop_old_web_service_sender.clone();
-                    async move {
-                        tokio::time::sleep(Duration::from_secs(5)).await;
-                        stop_old_web_service(stop_old_web_service_sender, web_service_handles).await
-                    }
-                });
+        let (is_random_port, listen_binds) =
+            get_listen_binds(port_of_args, binds, port_option, listens)?;
+        if listen_binds.is_empty() {
+            Err(WebServerError::ParseListenBinds(
+                "没有配置监听绑定".to_string(),
+            ))?;
+        }
+
+        let mut old_web_service_handles = take_web_service_handles()?;
+        let stop_old_web_service_sender = take_stop_web_service_sender()?;
+
+        if is_random_port {
+            // 如果是随机端口，则不会开启复用端口(无意义)
+            reuse_port = false;
+        } else if !reuse_port {
+            // 如果不是随机端口，且不是复用端口，则先停止旧服务或应用，然后才能启动新的服务
+            if let Some(old_pid) = old_pid {
+                // 停止旧应用
+                terminate_old_app(
+                    old_pid,
+                    terminate_old_app_wait_timeout,
+                    terminate_old_app_retry_interval,
+                )
+                .await?;
+            } else {
+                // 停止旧服务
+                if let Some(web_service_handles) = old_web_service_handles.take() {
+                    stop_old_web_service(stop_old_web_service_sender.clone(), web_service_handles)
+                        .await?;
+                }
             }
         }
+
+        // 初始化路由
+        let mut router = Router::new();
+        for build_router in ROUTER_SLICE.iter() {
+            router = router.merge(build_router());
+        }
+        // 判断是否暴露健康检查
+        if health_check.exposed {
+            router = router.route(health_check_uri, get(health));
+        } else {
+            router = router.route(
+                health_check_uri,
+                get(health).layer(axum::middleware::from_fn(local_only_middleware)),
+            );
+        }
+        // 集成 Swagger UI，访问 /swagger-ui 即可查看文档
+        let mut api_docs = vec![];
+        for init_api_doc in API_DOC_SLICE.iter() {
+            api_docs.push(init_api_doc());
+        }
+        if !api_docs.is_empty() {
+            let swagger_router: Router = SwaggerUi::new("/swagger-ui").urls(api_docs).into();
+            router = router.merge(swagger_router);
+        }
+
+        // 添加日志中间件
+        if log_enabled {
+            router = router.layer(TraceLayer::new_for_http());
+        }
+        // 添加IP拦截中间件
+        if !ip_white_list.is_empty() || !ip_black_list.is_empty() {
+            let ip_ban_state = IpBanState {
+                ip_white_list: Arc::new(ip_white_list.clone()),
+                ip_black_list: Arc::new(ip_black_list.clone()),
+            };
+            router = router.layer(middleware::from_fn_with_state(
+                ip_ban_state.clone(),
+                ip_ban_middleware,
+            ));
+        }
+        // 添加禁止访问中间件
+        if !forbidden_urns.is_empty() {
+            let forbidden_urns_state = ForbiddenUrnsState {
+                forbidden_urns: Arc::new(forbidden_urns.clone()),
+            };
+            router = router.layer(middleware::from_fn_with_state(
+                forbidden_urns_state.clone(),
+                forbidden_urns_middleware,
+            ));
+        }
+        // 添加仅本地访问中间件
+        if !local_only_urns.is_empty() {
+            let local_only_urns_state = LocalOnlyUrnsState {
+                local_only_urns: Arc::new(local_only_urns.clone()),
+            };
+            router = router.layer(middleware::from_fn_with_state(
+                local_only_urns_state.clone(),
+                local_only_urns_middleware,
+            ));
+        }
+        // 添加CORS中间件
+        if let Some(cors_layer) = build_cors(&cors_config)? {
+            router = router.layer(cors_layer);
+        }
+
+        // 判断HTTP协议
+        let http_protocol = if let Some(https_config) = https_config.clone()
+            && https_config.enabled
+        {
+            "https"
+        } else {
+            "http"
+        };
+
+        // 绑定地址及端口，并启动服务
+        let (stop_web_service_sender, stop_web_service_receiver) = broadcast::channel::<()>(1);
+        let (health_check_url_prefix, web_service_handles) = bind_and_start(
+            router,
+            reuse_port,
+            listen_binds,
+            http_protocol,
+            https_config,
+            stop_web_service_receiver,
+        )?;
+
+        // 如果没有旧服务，则等待新服务器启动成功
+        if old_web_service_handles.is_none() {
+            let heath_check_url = format!("{health_check_url_prefix}{health_check_uri}");
+            wait_for_web_server_ready(
+                heath_check_url.as_str(),
+                start_wait_timeout,
+                start_retry_interval,
+            )
+            .await?;
+        }
+
+        // 如果是随机端口或复用端口，则可以在前面先启动新的服务，后面这里再停止旧的服务或应用
+        if is_random_port || reuse_port {
+            if let Some(old_pid) = old_pid {
+                // 停止旧应用
+                terminate_old_app(
+                    old_pid,
+                    terminate_old_app_wait_timeout,
+                    terminate_old_app_retry_interval,
+                )
+                .await?;
+            } else {
+                // 停止旧服务
+                if let Some(web_service_handles) = old_web_service_handles.take() {
+                    tokio::spawn({
+                        let stop_old_web_service_sender = stop_old_web_service_sender.clone();
+                        async move {
+                            tokio::time::sleep(Duration::from_secs(5)).await;
+                            stop_old_web_service(stop_old_web_service_sender, web_service_handles)
+                                .await
+                        }
+                    });
+                }
+            }
+        }
+
+        set_web_service_handles(web_service_handles)?;
+        set_stop_web_service_sender(stop_web_service_sender)?;
     }
-
-    set_web_service_handles(web_service_handles)?;
-    set_stop_web_service_sender(stop_web_service_sender)?;
-
     Ok(())
 }
 
