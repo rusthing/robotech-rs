@@ -294,11 +294,11 @@ pub(super) fn dao_macro(args: DaoArgs, input: ItemStruct) -> TokenStream {
             C: ConnectionTrait,
         {
             // 当id为默认值(0)时生成ID
-            if active_model.id == ActiveValue::NotSet {
+            if active_model.id.is_not_set() {
                 active_model.id = ActiveValue::set(idworker::next_id()? as i64);
             }
             // 当创建时间未设置时，设置创建时间和修改时间
-            if active_model.create_ts == ActiveValue::NotSet {
+            if active_model.create_ts.is_not_set() {
                 let now = ActiveValue::set(wheel_rs::time_utils::now_ts()? as i64);
                 active_model.create_ts = now.clone();
                 active_model.update_ts = now;
@@ -335,7 +335,7 @@ pub(super) fn dao_macro(args: DaoArgs, input: ItemStruct) -> TokenStream {
             active_model.creator_id = ActiveValue::NotSet;
             active_model.create_ts = ActiveValue::NotSet;
             // 当修改时间未设置时，设置修改时间
-            if active_model.update_ts == ActiveValue::NotSet {
+            if active_model.update_ts.is_not_set() {
                 let now = ActiveValue::set(wheel_rs::time_utils::now_ts()? as i64);
                 active_model.update_ts = now;
             }
@@ -520,60 +520,58 @@ pub(super) fn dao_macro(args: DaoArgs, input: ItemStruct) -> TokenStream {
     });
 
     // 生成also_related相关方法
-    if !related_tables.is_empty() {
-        // 从 related_tables 中提取表名
-        let mut table_names = Vec::new();
-        for expr in &related_tables {
-            // 处理字符串字面量情况："oss_bucket"
-            if let Expr::Lit(expr_lit) = expr {
-                if let Lit::Str(lit_str) = &expr_lit.lit {
-                    table_names.push(lit_str.value());
-                }
+    // 从 related_tables 中提取表名
+    let mut table_names = Vec::new();
+    for expr in &related_tables {
+        // 处理字符串字面量情况："oss_bucket"
+        if let Expr::Lit(expr_lit) = expr {
+            if let Lit::Str(lit_str) = &expr_lit.lit {
+                table_names.push(lit_str.value());
             }
         }
-
-        // 生成 Entity 引用
-        let entity_refs: Vec<TokenStream> = table_names
-            .iter()
-            .map(|table_name| {
-                let module_ident = Ident::new(table_name, Span::call_site());
-                quote! { #module_ident::Entity }
-            })
-            .collect();
-
-        // 生成 find_with_related_calls 链式调用
-        let find_with_related_calls = entity_refs.iter().map(|entity_ref| {
-            quote! { .with(#entity_ref) }
-        });
-
-        // 生成get_ex_by_id方法
-        generated_members.push(quote! {
-            /// # 根据 ID 查询记录(附带获取关联表的信息)
-            ///
-            /// 此函数通过给定的 ID 查询单条记录，并同时获取关联的存储桶和对象信息
-            ///
-            /// ## 参数
-            /// * `id` - 要查询的记录的唯一标识符
-            /// * `db` - 数据库连接 trait 对象
-            ///
-            /// ## 返回值
-            /// 返回一个包含主记录和关联记录的元组的 Option，如果查询失败则返回相应的错误信息
-            /// 如果未找到匹配记录，则返回 None
-            pub async fn get_ex_by_id<C>(
-                id: u64,
-                db: &C,
-            ) -> Result<Option<ModelEx>, DaoError>
-            where
-                C: ConnectionTrait,
-            {
-                Entity::load().filter_by_id(id as i64)
-                    #(#find_with_related_calls)*
-                    .one(db)
-                    .await
-                    .map_err(|e| DaoError::parse_db_err(e))
-            }
-        });
     }
+
+    // 生成 Entity 引用
+    let entity_refs: Vec<TokenStream> = table_names
+        .iter()
+        .map(|table_name| {
+            let module_ident = Ident::new(table_name, Span::call_site());
+            quote! { #module_ident::Entity }
+        })
+        .collect();
+
+    // 生成 find_with_related_calls 链式调用
+    let find_with_related_calls = entity_refs.iter().map(|entity_ref| {
+        quote! { .with(#entity_ref) }
+    });
+
+    // 生成get_ex_by_id方法
+    generated_members.push(quote! {
+        /// # 根据 ID 查询记录(附带获取关联表的信息)
+        ///
+        /// 此函数通过给定的 ID 查询单条记录，并同时获取关联的存储桶和对象信息
+        ///
+        /// ## 参数
+        /// * `id` - 要查询的记录的唯一标识符
+        /// * `db` - 数据库连接 trait 对象
+        ///
+        /// ## 返回值
+        /// 返回一个包含主记录和关联记录的元组的 Option，如果查询失败则返回相应的错误信息
+        /// 如果未找到匹配记录，则返回 None
+        pub async fn get_ex_by_id<C>(
+            id: u64,
+            db: &C,
+        ) -> Result<Option<ModelEx>, DaoError>
+        where
+            C: ConnectionTrait,
+        {
+            Entity::load().filter_by_id(id as i64)
+                #(#find_with_related_calls)*
+                .one(db)
+                .await
+                .map_err(|e| DaoError::parse_db_err(e))
+        }
+    });
 
     let expanded = quote! {
         use robotech::dao::{add_order_by, DaoError};

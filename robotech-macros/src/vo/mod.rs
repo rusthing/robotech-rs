@@ -290,7 +290,7 @@ pub fn vo_macro(input: DeriveInput) -> TokenStream {
     };
 
     // 调试：打印完整展开的代码
-    println!("Full expanded code:\n{expanded}");
+    // println!("Full expanded code:\n{expanded}");
 
     TokenStream::from(expanded)
 }
