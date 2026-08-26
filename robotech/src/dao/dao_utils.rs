@@ -1,5 +1,6 @@
 use crate::dao::{init_foreign_keys, init_unique_keys, DaoError};
 use crate::db::get_db_conn;
+use anyhow::anyhow;
 use sea_orm::sea_query::{Expr, Func};
 use sea_orm::{
     ColumnTrait, Condition, ConnectionTrait, DatabaseConnection, DatabaseTransaction, DbConn,
@@ -53,12 +54,20 @@ where
     if let Some(order_by) = order_by {
         for order_by in order_by.split(",") {
             let (col, order) = if order_by.trim().to_lowercase().ends_with(":desc") {
-                (order_by.trim().replace(":desc$", ""), true)
+                (order_by.trim().replace(":desc", ""), false)
             } else {
-                (order_by.trim().replace(":asc", ""), false)
+                (order_by.trim().replace(":asc", ""), true)
             };
-
-            let col = Expr::col(col.to_string());
+            let col_parts: Vec<&str> = col.split(".").collect();
+            let col = if col_parts.len() == 1 {
+                Expr::col(col)
+            } else if col_parts.len() == 2 {
+                Expr::col((col_parts[0].to_string(), col_parts[1].to_string()))
+            } else {
+                return Err(DaoError::from(anyhow!(format!(
+                    "_order_by 参数的格式错误：{order_by}"
+                ))));
+            };
 
             if order {
                 query = query.order_by_asc(col);
