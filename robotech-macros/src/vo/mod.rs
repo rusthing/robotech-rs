@@ -14,7 +14,6 @@ fn generate_field_attrs(field: &Field) -> TokenStream {
 
     // 检查是否已经有 serde_as、from 或 builder 属性
     let has_from = has_attribute(&field.attrs, "from");
-    // let has_serde = has_attribute(&field.attrs, "serde");
     let has_builder = has_attribute(&field.attrs, "builder");
 
     let mut attrs = TokenStream::new();
@@ -25,13 +24,6 @@ fn generate_field_attrs(field: &Field) -> TokenStream {
             attrs.extend(from_attr);
         }
     }
-
-    // if !has_serde {
-    //     // 添加 serde 属性
-    //     if let Some(serde_as_attr) = generate_serde_attr(ty) {
-    //         attrs.extend(serde_as_attr);
-    //     }
-    // }
 
     if !has_builder {
         // 添加 builder 属性（仅针对 Option<T> 类型）
@@ -81,27 +73,6 @@ fn extract_option_inner_type(type_path: &syn::TypePath) -> Option<String> {
         }
     }
     None
-}
-/// 生成 serde_as 属性
-fn generate_serde_attr(ty: &syn::Type) -> Option<TokenStream> {
-    Some(match ty {
-        syn::Type::Path(type_path) => {
-            let path_str = type_path.path.segments.last().unwrap().ident.to_string();
-
-            match path_str.as_str() {
-                "u64" => {
-                    // 检查是否是 Option<T> 类型
-                    if is_option_type(ty) {
-                        quote! { #[serde(with = "u64_option_serde")] }
-                    } else {
-                        quote! { #[serde(with = "u64_serde")] }
-                    }
-                }
-                _ => return None,
-            }
-        }
-        _ => return None,
-    })
 }
 
 /// 生成 builder 属性（仅针对 Option<T> 类型）
@@ -268,7 +239,7 @@ pub fn vo_macro(input: DeriveInput) -> TokenStream {
     };
 
     // 调试：打印完整展开的代码
-    println!("Full expanded code:\n{expanded}");
+    // println!("Full expanded code:\n{expanded}");
 
     TokenStream::from(expanded)
 }

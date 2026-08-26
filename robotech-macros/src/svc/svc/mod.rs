@@ -207,7 +207,7 @@ pub(crate) fn svc_macro(input: ItemStruct) -> TokenStream {
             if rows_affected == 0 {
                 return Err(SvcError::NotFound(dto.to_string()));
             }
-            Ok(Ro::success("删除成功".to_string()))
+            Ok(Ro::success(format!("删除了{}条记录", rows_affected).to_string()))
         }
     });
 
