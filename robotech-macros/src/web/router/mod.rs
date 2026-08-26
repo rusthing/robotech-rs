@@ -97,6 +97,7 @@ pub(crate) fn router_macro(args: RouterArgs, input: ItemStruct) -> TokenStream {
     let del_by_id_path = format!("{crud_path}/{{id}}");
     let del_by_query_dto_path = crud_path.clone();
     let get_by_id_path = format!("{crud_path}/{{id}}");
+    let get_ex_by_id_path = format!("{crud_path}/ex/{{id}}");
     let get_by_query_dto_path = crud_path.clone();
     let list_by_query_dto_path = format!("{crud_path}/list");
     let page_by_query_dto_path = format!("{crud_path}/page");
@@ -113,6 +114,7 @@ pub(crate) fn router_macro(args: RouterArgs, input: ItemStruct) -> TokenStream {
         routes.push(quote! {#del_by_id_path, delete(del_by_id)});
         routes.push(quote! {#del_by_query_dto_path, delete(del_by_query_dto)});
         routes.push(quote! {#get_by_query_dto_path, get(get_by_query_dto)});
+        routes.push(quote! {#get_ex_by_id_path, get(get_ex_by_id)});
         routes.push(quote! {#list_by_query_dto_path, get(list_by_query_dto)});
         routes.push(quote! {#page_by_query_dto_path, get(page_by_query_dto)});
         routes.push(quote! {#get_by_id_path, get(get_by_id)}); // 这个放在后面，避免覆盖前面的list和page

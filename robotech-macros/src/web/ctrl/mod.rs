@@ -1,7 +1,7 @@
 use proc_macro2::TokenStream;
 use quote::{format_ident, quote};
 use syn::ItemStruct;
-use wheel_rs::str_utils::{CamelFormat, split_camel_case};
+use wheel_rs::str_utils::{split_camel_case, CamelFormat};
 
 pub(crate) fn ctrl_macro(input: ItemStruct) -> TokenStream {
     let struct_name = &input.ident;
@@ -33,12 +33,14 @@ pub(crate) fn ctrl_macro(input: ItemStruct) -> TokenStream {
     let del_by_id_path = format!("{crud_path}/{{id}}");
     let del_by_query_dto_path = crud_path.clone();
     let get_by_id_path = format!("{crud_path}/{{id}}");
+    let get_ex_by_id_path = format!("{crud_path}/ex/{{id}}");
     let get_by_query_dto_path = crud_path.clone();
     let list_by_query_dto_path = format!("{crud_path}/list");
     let page_by_query_dto_path = format!("{crud_path}/page");
     let dto_module = format_ident!("{module_name}_dto");
     let svc_name = format_ident!("{}Svc", entity_name);
     let vo_name = format_ident!("{}Vo", entity_name);
+    let ex_vo_name = format_ident!("{}ExVo", entity_name);
     let add_dto_name = format_ident!("{}AddDto", entity_name);
     let modify_dto_name = format_ident!("{}ModifyDto", entity_name);
     let save_dto_name = format_ident!("{}SaveDto", entity_name);
@@ -340,6 +342,41 @@ pub(crate) fn ctrl_macro(input: ItemStruct) -> TokenStream {
         }
     });
 
+    // 生成get_ex_by_id方法
+    generated_methods.push(quote! {
+        /// # 根据ID获取记录的信息(附带获取关联表的信息)
+        ///
+        /// 该接口通过查询参数中的ID获取对应记录的详细信息
+        ///
+        /// ## 查询参数
+        /// * `id` - 记录的唯一标识符，类型为u64
+        ///
+        /// ## 返回值
+        /// * 成功时返回对应的记录信息的JSON格式数据
+        /// * 失败时返回相应的错误信息
+        ///
+        /// ## 错误处理
+        /// * 当缺少参数`id`时，返回`ValidationError`错误
+        /// * 当参数`id`格式不正确时，返回`ValidationError`错误
+        /// * 当根据ID找不到对应记录时，返回相应的错误信息
+        #[utoipa::path(
+            get,
+            path = #get_ex_by_id_path,
+            params(
+                ("id" = u64, Path, description = "记录的唯一标识符")
+            ),
+            responses(
+                (status = OK, body = Ro<#ex_vo_name>)
+            )
+        )]
+        #[debug_handler]
+        #[log_call]
+        pub async fn get_ex_by_id(Path(id): Path<u64>) -> Result<Json<Ro<#ex_vo_name>>, CtrlError> {
+            let ro = #svc_name::get_ex_by_id::<DatabaseConnection>(id, None).await?;
+            Ok(Json(ro))
+        }
+    });
+
     let expanded = quote! {
         use axum::debug_handler;
         use axum::extract::{Path, Query};
@@ -355,7 +392,7 @@ pub(crate) fn ctrl_macro(input: ItemStruct) -> TokenStream {
 
         use crate::dto::#dto_module::*;
         use crate::svc::#svc_name;
-        use crate::vo::#vo_name;
+        use crate::vo::{#vo_name, #ex_vo_name};
 
         #(#generated_methods)*
     };
