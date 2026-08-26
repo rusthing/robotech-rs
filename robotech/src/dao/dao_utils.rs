@@ -1,6 +1,5 @@
-use crate::dao::{DaoError, init_foreign_keys, init_unique_keys};
+use crate::dao::{init_foreign_keys, init_unique_keys, DaoError};
 use crate::db::get_db_conn;
-use anyhow::anyhow;
 use sea_orm::sea_query::{Expr, Func};
 use sea_orm::{
     ColumnTrait, Condition, ConnectionTrait, DatabaseConnection, DatabaseTransaction, DbConn,
@@ -47,32 +46,24 @@ where
     })
 }
 
-pub fn add_order_by<Q>(
-    mut query: Q,
-    order_by: &Option<String>,
-) -> Result<Q, DaoError>
+pub fn add_order_by<Q>(mut query: Q, order_by: &Option<String>) -> Result<Q, DaoError>
 where
     Q: QueryOrder,
 {
     if let Some(order_by) = order_by {
         for order_by in order_by.split(",") {
-            let order_by_split = order_by.split(":");
-            let mut parts = order_by_split.clone();
-            let col = parts.next().ok_or_else(|| {
-                DaoError::from(anyhow!(format!("_order_by 参数的格式错误：{order_by}")))
-            })?;
-            let order = parts.next().unwrap_or("asc");
+            let (col, order) = if order_by.trim().to_lowercase().ends_with(":desc") {
+                (order_by.trim().replace(":desc$", ""), true)
+            } else {
+                (order_by.trim().replace(":asc", ""), false)
+            };
 
             let col = Expr::col(col.to_string());
 
-            if order.eq_ignore_ascii_case("asc") {
+            if order {
                 query = query.order_by_asc(col);
-            } else if order.eq_ignore_ascii_case("desc") {
-                query = query.order_by_desc(col);
             } else {
-                return Err(DaoError::from(anyhow!(format!(
-                    "_order_by 参数的格式错误：{order_by}"
-                ))));
+                query = query.order_by_desc(col);
             }
         }
     }
