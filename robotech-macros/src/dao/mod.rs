@@ -444,7 +444,7 @@ pub(super) fn dao_macro(args: DaoArgs, input: ItemStruct) -> TokenStream {
                 .into_model::<M>()
                 .one(db)
                 .await
-                .map_err(DaoError::from)
+                .map_err(|e| DaoError::parse_db_err(e))
         }
     });
 
@@ -470,7 +470,7 @@ pub(super) fn dao_macro(args: DaoArgs, input: ItemStruct) -> TokenStream {
                 .into_model::<M>()
                 .all(db)
                 .await
-                .map_err(DaoError::from)
+                .map_err(|e| DaoError::parse_db_err(e))
         }
     });
 
@@ -514,7 +514,10 @@ pub(super) fn dao_macro(args: DaoArgs, input: ItemStruct) -> TokenStream {
             if page_num > total_pages {
                 page_num = total_pages;
             }
-            let models = paginator.fetch_page(page_num - 1).await.map_err(DaoError::from)?;
+            let models = paginator
+                .fetch_page(page_num - 1)
+                .await
+                .map_err(|e| DaoError::parse_db_err(e))?;
             Ok((page_num, total, models))
         }
     });
@@ -541,9 +544,12 @@ pub(super) fn dao_macro(args: DaoArgs, input: ItemStruct) -> TokenStream {
         .collect();
 
     // 生成 find_with_related_calls 链式调用
-    let find_with_related_calls = entity_refs.iter().map(|entity_ref| {
-        quote! { .with(#entity_ref) }
-    });
+    let find_with_related_calls: Vec<_> = entity_refs
+        .iter()
+        .map(|entity_ref| {
+            quote! { .with(#entity_ref) }
+        })
+        .collect();
 
     // 生成get_ex_by_id方法
     generated_members.push(quote! {
@@ -565,11 +571,109 @@ pub(super) fn dao_macro(args: DaoArgs, input: ItemStruct) -> TokenStream {
         where
             C: ConnectionTrait,
         {
-            Entity::load().filter_by_id(id as i64)
+            Entity::load()
+                .filter_by_id(id as i64)
                 #(#find_with_related_calls)*
                 .one(db)
                 .await
                 .map_err(|e| DaoError::parse_db_err(e))
+        }
+    });
+
+    // 生成get_ex_by_condition方法
+    generated_members.push(quote! {
+        /// # 获取记录(附带获取关联表的信息)
+        ///
+        /// 根据提供的查询条件获取数据库中的记录
+        ///
+        /// ## 参数
+        /// - `condition`: 查询条件
+        /// - `db`: 数据库连接，如果未提供则使用全局数据库连接
+        ///
+        /// ## 返回值
+        /// - `Result<Option<ModelEx>, DaoError>` - 查询结果封装为Model对象，如果查询成功则返回封装了ModelEx的Option，否则返回错误信息
+        pub async fn get_ex_by_condition<C>(condition: Condition, db: &C) -> Result<Option<ModelEx>, DaoError>
+        where
+            C: ConnectionTrait,
+        {
+            Entity::load()
+                .filter(condition)
+                #(#find_with_related_calls)*
+                .one(db)
+                .await
+                .map_err(|e| DaoError::parse_db_err(e))
+        }
+    });
+
+    // 生成list_ex_by_condition方法
+    generated_members.push(quote! {
+        /// # 查询记录列表(附带获取关联表的信息)
+        ///
+        /// 根据提供的查询条件查询数据库中的记录列表
+        ///
+        /// ## 参数
+        /// - `condition`: 查询条件
+        /// - `order_by`: 排序字段
+        /// - `db`: 数据库连接，如果未提供则使用全局数据库连接
+        ///
+        /// ## 返回值
+        /// - `Result<Option<ModelEx>, DaoError>` - 查询结果封装为Model对象的列表，如果查询成功则返回封装了ModelEx的列表，否则返回错误信息
+        pub async fn list_ex_by_condition<C>(condition: Condition, order_by: &Option<String>, db: &C) -> Result<Vec<ModelEx>, DaoError>
+        where
+            C: ConnectionTrait,
+        {
+            add_order_by(Entity::load().filter(condition), order_by)?
+                #(#find_with_related_calls)*
+                .all(db)
+                .await
+                .map_err(|e| DaoError::parse_db_err(e))
+        }
+    });
+
+    // 生成page_ex_by_condition方法
+    generated_members.push(quote! {
+        /// # 分页查询记录列表(附带获取关联表的信息)
+        ///
+        /// 根据提供的查询条件分页查询数据库中的记录列表
+        ///
+        /// ## 参数
+        /// - `condition`: 查询条件
+        /// - `order_by`: 排序字段
+        /// - `page_num`: 当前页码
+        /// - `page_size`: 每页大小
+        /// - `db`: 数据库连接，如果未提供则使用全局数据库连接
+        ///
+        /// ## 返回值
+        /// - `Result<(u64,u64,Vec<ModelEx>), DaoError>` - 查询结果封装为Model对象的列表，如果查询成功则返回封装了ModelEx的列表，否则返回错误信息
+        pub async fn page_ex_by_condition<C>(
+            condition: Condition,
+            order_by: &Option<String>,
+            mut page_num: u64,
+            page_size: u64,
+            db: &C
+        ) -> Result<(u64, u64, Vec<ModelEx>), DaoError>
+        where
+            C: ConnectionTrait,
+        {
+            if page_num < 1 {
+                page_num = 1;
+            }
+            let paginator = add_order_by(Entity::load().filter(condition), order_by)?
+                #(#find_with_related_calls)*
+                .paginate(db, page_size);
+            let total  = paginator.num_items().await.map_err(DaoError::from)?;
+            if total == 0 {
+                return Ok((1, 0, vec![]));
+            }
+            let total_pages = total / page_size + if total % page_size > 0 { 1 } else { 0 };
+            if page_num > total_pages {
+                page_num = total_pages;
+            }
+            let models = paginator
+                .fetch_page(page_num - 1)
+                .await
+                .map_err(|e| DaoError::parse_db_err(e))?;
+            Ok((page_num, total, models))
         }
     });
 
@@ -578,6 +682,7 @@ pub(super) fn dao_macro(args: DaoArgs, input: ItemStruct) -> TokenStream {
         use sea_orm::{
             ActiveModelTrait, ActiveValue, Condition, ConnectionTrait, EntityTrait, FromQueryResult, PaginatorTrait, QueryFilter, DeleteResult
         };
+        use sea_orm::entity::EntityLoaderTrait;
 
         use crate::mo::#module::{ActiveModel, Column, Entity, Model, ModelEx};
 

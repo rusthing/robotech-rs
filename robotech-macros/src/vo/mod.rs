@@ -270,6 +270,7 @@ pub fn vo_macro(input: DeriveInput) -> TokenStream {
         use wheel_rs::serde::{u64_serde, u64_option_serde};
         use robotech::dao::{belongs_to_owned, U8, U16, U32, U64, U128};
         use crate::mo::#module_name::{Entity, Model, ModelEx};
+        use crate::vo::*;
 
         #[skip_serializing_none]            // 忽略空字段(好像必须放在#[derive(o2o, Serialize)]的上方才能起效)
         #[derive(o2o, ToSchema, DerivePartialModel, Debug, Serialize, Clone, Setters, TypedBuilder)]

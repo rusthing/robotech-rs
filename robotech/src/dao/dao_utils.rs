@@ -4,7 +4,7 @@ use anyhow::anyhow;
 use sea_orm::sea_query::{Expr, Func};
 use sea_orm::{
     ColumnTrait, Condition, ConnectionTrait, DatabaseConnection, DatabaseTransaction, DbConn,
-    EntityTrait, ExprTrait, QueryOrder, Select, TransactionTrait,
+    ExprTrait, QueryOrder, TransactionTrait,
 };
 use std::sync::Arc;
 
@@ -47,12 +47,12 @@ where
     })
 }
 
-pub fn add_order_by<E>(
-    mut select: Select<E>,
+pub fn add_order_by<Q>(
+    mut query: Q,
     order_by: &Option<String>,
-) -> Result<Select<E>, DaoError>
+) -> Result<Q, DaoError>
 where
-    E: EntityTrait,
+    Q: QueryOrder,
 {
     if let Some(order_by) = order_by {
         for order_by in order_by.split(",") {
@@ -65,11 +65,10 @@ where
 
             let col = Expr::col(col.to_string());
 
-            // 根据列名和排序方式添加排序条件
             if order.eq_ignore_ascii_case("asc") {
-                select = select.order_by_asc(col);
+                query = query.order_by_asc(col);
             } else if order.eq_ignore_ascii_case("desc") {
-                select = select.order_by_desc(col);
+                query = query.order_by_desc(col);
             } else {
                 return Err(DaoError::from(anyhow!(format!(
                     "_order_by 参数的格式错误：{order_by}"
@@ -77,5 +76,5 @@ where
             }
         }
     }
-    Ok(select)
+    Ok(query)
 }

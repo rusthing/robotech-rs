@@ -30,6 +30,7 @@ pub(crate) fn svc_macro(input: ItemStruct) -> TokenStream {
     let entity_name = struct_name_split.join("");
     let dao_name = format_ident!("{}Dao", entity_name);
     let vo_name = format_ident!("{}Vo", entity_name);
+    let ex_vo_name = format_ident!("{}ExVo", entity_name);
     let add_dto_name = format_ident!("{}AddDto", entity_name);
     let modify_dto_name = format_ident!("{}ModifyDto", entity_name);
     let save_dto_name = format_ident!("{}SaveDto", entity_name);
@@ -65,9 +66,7 @@ pub(crate) fn svc_macro(input: ItemStruct) -> TokenStream {
 
             let active_model: ActiveModel = add_dto.into();
             let one = #vo_name::from(#dao_name::insert(active_model, db).await?);
-            Ok(Self::get_by_id(*one.id, Some(db))
-                .await?
-                .msg("添加成功".to_string()))
+            Ok(Ro::success("添加成功".to_string()).extra(Some(one)))
         }
     });
 
@@ -100,9 +99,7 @@ pub(crate) fn svc_macro(input: ItemStruct) -> TokenStream {
             let id = modify_dto.id.unwrap();    // id经过校验，可以放心unwrap
             let active_model: ActiveModel = modify_dto.into();
             let one = #vo_name::from(#dao_name::update(active_model, db).await?);
-            Ok(Self::get_by_id(*one.id, Some(db))
-                .await?
-                .msg("修改成功".to_string()))
+            Ok(Ro::success("修改成功".to_string()).extra(Some(one)))
         }
     });
 
@@ -234,8 +231,10 @@ pub(crate) fn svc_macro(input: ItemStruct) -> TokenStream {
         where
             C: ConnectionTrait,
         {
-            let one = #dao_name::get_by_id::<_, #vo_name>(id, db).await?;
-            Ok(Ro::success("查询成功".to_string()).extra(one))
+            let one = #dao_name::get_by_id::<_, #vo_name>(id, db)
+                .await?
+                .ok_or(SvcError::NotFound(format!("id: {}", id)))?;
+            Ok(Ro::success("查询成功".to_string()).extra(Some(one)))
         }
     });
 
@@ -266,8 +265,10 @@ pub(crate) fn svc_macro(input: ItemStruct) -> TokenStream {
                 condition = condition.add(build_like_condition(keyword, #dao_name::LIKE_COLUMNS));
             }
 
-            let one = #dao_name::get_by_condition::<_, #vo_name>(condition, db).await?;
-            Ok(Ro::success("查询成功".to_string()).extra(one))
+            let one = #dao_name::get_by_condition::<_, #vo_name>(condition, db)
+                .await?
+                .ok_or(SvcError::NotFound(format!("dto: {}", dto)))?;
+            Ok(Ro::success("查询成功".to_string()).extra(Some(one)))
         }
     });
 
@@ -357,6 +358,155 @@ pub(crate) fn svc_macro(input: ItemStruct) -> TokenStream {
         }
     });
 
+    // 生成get_ex_by_id方法
+    generated_methods.push(quote! {
+        /// # 根据id获取记录信息(附带获取关联表的信息)
+        ///
+        /// 通过提供的ID从数据库中查询相应的记录，如果找到则返回封装了ExVo的Ro对象，否则返回对象的extra为None
+        ///
+        /// ## 参数
+        /// * `id` - 要查询的桶的ID
+        /// * `db` - 数据库连接，如果未提供则使用全局数据库连接
+        ///
+        /// ## 返回值
+        /// * `Ok(Ro<ExVo>)` - 查询成功，如果记录存在，返回封装了Vo的Ro对象，如果不存在则返回对象的extra为None
+        /// * `Err(SvcError)` - 查询失败，可能是数据库错误
+        #[db_unwrap]
+        #[log_call]
+        pub async fn get_ex_by_id<C>(
+            id: u64,
+            #[skip_log]
+            db: Option<&C>
+        ) -> Result<Ro<#ex_vo_name>, SvcError>
+        where
+            C: ConnectionTrait,
+        {
+            let one: #ex_vo_name = #dao_name::get_ex_by_id(id, db)
+                .await?
+                .map(|m| m.into())
+                .ok_or(SvcError::NotFound(format!("id: {}", id)))?;
+            Ok(Ro::success("查询成功".to_string()).extra(Some(one)))
+        }
+    });
+
+    // // 生成get_by_query_dto方法
+    // generated_methods.push(quote! {
+    //     /// # 获取记录
+    //     ///
+    //     /// 根据提供的查询参数获取数据库中的记录
+    //     ///
+    //     /// ## 参数
+    //     /// * `dto` - 查询参数
+    //     /// * `db` - 数据库连接，如果未提供则使用全局数据库连接
+    //     ///
+    //     /// ## 返回值
+    //     /// * `Result<Ro<Vo>, SvcError>` - 查询结果封装为Ro对象，如果查询成功则返回封装了Vo的Ro对象，否则返回错误信息
+    //     #[db_unwrap]
+    //     #[log_call]
+    //     pub async fn get_by_query_dto<C>(
+    //         dto: #query_dto_name,
+    //         #[skip_log]
+    //         db: Option<&C>
+    //     ) -> Result<Ro<#vo_name>, SvcError>
+    //     where
+    //         C: ConnectionTrait,
+    //     {
+    //         let mut condition = dto.to_condition();
+    //         if let Some(keyword) = &dto._keyword {
+    //             condition = condition.add(build_like_condition(keyword, #dao_name::LIKE_COLUMNS));
+    //         }
+    //
+    //         let one = #dao_name::get_by_condition::<_, #vo_name>(condition, db).await?;
+    //         Ok(Ro::success("查询成功".to_string()).extra(one))
+    //     }
+    // });
+    //
+    // // 生成list_by_query_dto方法
+    // generated_methods.push(quote! {
+    //     /// # 查询记录列表
+    //     ///
+    //     /// 根据提供的查询参数获取数据库中的记录列表
+    //     ///
+    //     /// ## 参数
+    //     /// * `dto` - 查询参数
+    //     /// * `db` - 数据库连接，如果未提供则使用全局数据库连接
+    //     ///
+    //     /// ## 返回值
+    //     /// * `Result<Ro<Vec<Vo>>, SvcError>` - 查询结果封装为Ro对象，如果查询成功则返回封装了Vo的Ro对象，否则返回错误信息
+    //     #[db_unwrap]
+    //     #[log_call]
+    //     pub async fn list_by_query_dto<C>(
+    //         dto: #query_dto_name,
+    //         #[skip_log]
+    //         db: Option<&C>
+    //     ) -> Result<Ro<Vec<#vo_name>>, SvcError>
+    //     where
+    //         C: ConnectionTrait,
+    //     {
+    //         let keyword = &dto._keyword;
+    //         let order_by = &dto._order_by;
+    //         let mut condition = dto.to_condition();
+    //         if let Some(keyword) = keyword {
+    //             condition = condition.add(build_like_condition(keyword, #dao_name::LIKE_COLUMNS));
+    //         }
+    //
+    //         let all = #dao_name::list_by_condition::<_, #vo_name>(condition, order_by, db)
+    //             .await?
+    //             .into_iter()
+    //             .collect();
+    //         Ok(Ro::success("查询成功".to_string()).extra(Some(all)))
+    //     }
+    // });
+    //
+    // // 生成page_by_query_dto方法
+    // generated_methods.push(quote! {
+    //     /// # 查询记录列表
+    //     ///
+    //     /// 根据提供的查询参数获取数据库中的记录列表
+    //     ///
+    //     /// ## 参数
+    //     /// * `dto` - 查询参数
+    //     /// * `db` - 数据库连接，如果未提供则使用全局数据库连接
+    //     ///
+    //     /// ## 返回值
+    //     /// * `Result<Ro<Vec<Vo>>, SvcError>` - 查询结果封装为Ro对象，如果查询成功则返回封装了Vo的Ro对象，否则返回错误信息
+    //     #[db_unwrap]
+    //     #[log_call]
+    //     pub async fn page_by_query_dto<C>(
+    //         dto: #query_dto_name,
+    //         #[skip_log]
+    //         db: Option<&C>
+    //     ) -> Result<Ro<PageRx<#vo_name>>, SvcError>
+    //     where
+    //         C: ConnectionTrait,
+    //     {
+    //         let keyword = &dto._keyword;
+    //         let order_by = &dto._order_by;
+    //         let page_num = dto._page.unwrap_or(1);
+    //         let page_size = dto._size.unwrap_or(10);
+    //
+    //         let mut condition = dto.to_condition();
+    //         if let Some(keyword) = keyword {
+    //             condition = condition.add(build_like_condition(keyword, #dao_name::LIKE_COLUMNS));
+    //         }
+    //
+    //         let (page_num, total, models) = #dao_name::page_by_condition::<_, #vo_name>(
+    //             condition,
+    //             order_by,
+    //             page_num,
+    //             page_size,
+    //             db
+    //         ).await?;
+    //         let list = models.into_iter().collect();
+    //         Ok(Ro::success("查询成功".to_string()).extra(Some(PageRx::builder()
+    //             .total(total)
+    //             .page_num(page_num)
+    //             .list(list)
+    //             .build()
+    //         )))
+    //     }
+    // });
+
     let expanded = quote! {
         use robotech::dao::{begin_transaction, build_like_condition};
         use robotech::ro::Ro;
@@ -370,7 +520,7 @@ pub(crate) fn svc_macro(input: ItemStruct) -> TokenStream {
         use crate::dto::#dto_module::*;
         use crate::dao::#dao_name;
         use crate::mo::#module::ActiveModel;
-        use crate::vo::#vo_name;
+        use crate::vo::{#vo_name, #ex_vo_name};
 
         #input
 
