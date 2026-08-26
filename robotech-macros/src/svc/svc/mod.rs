@@ -301,10 +301,7 @@ pub(crate) fn svc_macro(input: ItemStruct) -> TokenStream {
                 condition = condition.add(build_like_condition(keyword, #dao_name::LIKE_COLUMNS));
             }
 
-            let all = #dao_name::list_by_condition::<_, #vo_name>(condition, order_by, db)
-                .await?
-                .into_iter()
-                .collect();
+            let all = #dao_name::list_by_condition::<_, #vo_name>(condition, order_by, db).await?;
             Ok(Ro::success("查询成功".to_string()).extra(Some(all)))
         }
     });
@@ -348,11 +345,10 @@ pub(crate) fn svc_macro(input: ItemStruct) -> TokenStream {
                 page_size,
                 db
             ).await?;
-            let list = models.into_iter().collect();
             Ok(Ro::success("查询成功".to_string()).extra(Some(PageRx::builder()
                 .total(total)
                 .page_num(page_num)
-                .list(list)
+                .list(models)
                 .build()
             )))
         }
@@ -389,123 +385,127 @@ pub(crate) fn svc_macro(input: ItemStruct) -> TokenStream {
         }
     });
 
-    // // 生成get_by_query_dto方法
-    // generated_methods.push(quote! {
-    //     /// # 获取记录
-    //     ///
-    //     /// 根据提供的查询参数获取数据库中的记录
-    //     ///
-    //     /// ## 参数
-    //     /// * `dto` - 查询参数
-    //     /// * `db` - 数据库连接，如果未提供则使用全局数据库连接
-    //     ///
-    //     /// ## 返回值
-    //     /// * `Result<Ro<Vo>, SvcError>` - 查询结果封装为Ro对象，如果查询成功则返回封装了Vo的Ro对象，否则返回错误信息
-    //     #[db_unwrap]
-    //     #[log_call]
-    //     pub async fn get_by_query_dto<C>(
-    //         dto: #query_dto_name,
-    //         #[skip_log]
-    //         db: Option<&C>
-    //     ) -> Result<Ro<#vo_name>, SvcError>
-    //     where
-    //         C: ConnectionTrait,
-    //     {
-    //         let mut condition = dto.to_condition();
-    //         if let Some(keyword) = &dto._keyword {
-    //             condition = condition.add(build_like_condition(keyword, #dao_name::LIKE_COLUMNS));
-    //         }
-    //
-    //         let one = #dao_name::get_by_condition::<_, #vo_name>(condition, db).await?;
-    //         Ok(Ro::success("查询成功".to_string()).extra(one))
-    //     }
-    // });
-    //
-    // // 生成list_by_query_dto方法
-    // generated_methods.push(quote! {
-    //     /// # 查询记录列表
-    //     ///
-    //     /// 根据提供的查询参数获取数据库中的记录列表
-    //     ///
-    //     /// ## 参数
-    //     /// * `dto` - 查询参数
-    //     /// * `db` - 数据库连接，如果未提供则使用全局数据库连接
-    //     ///
-    //     /// ## 返回值
-    //     /// * `Result<Ro<Vec<Vo>>, SvcError>` - 查询结果封装为Ro对象，如果查询成功则返回封装了Vo的Ro对象，否则返回错误信息
-    //     #[db_unwrap]
-    //     #[log_call]
-    //     pub async fn list_by_query_dto<C>(
-    //         dto: #query_dto_name,
-    //         #[skip_log]
-    //         db: Option<&C>
-    //     ) -> Result<Ro<Vec<#vo_name>>, SvcError>
-    //     where
-    //         C: ConnectionTrait,
-    //     {
-    //         let keyword = &dto._keyword;
-    //         let order_by = &dto._order_by;
-    //         let mut condition = dto.to_condition();
-    //         if let Some(keyword) = keyword {
-    //             condition = condition.add(build_like_condition(keyword, #dao_name::LIKE_COLUMNS));
-    //         }
-    //
-    //         let all = #dao_name::list_by_condition::<_, #vo_name>(condition, order_by, db)
-    //             .await?
-    //             .into_iter()
-    //             .collect();
-    //         Ok(Ro::success("查询成功".to_string()).extra(Some(all)))
-    //     }
-    // });
-    //
-    // // 生成page_by_query_dto方法
-    // generated_methods.push(quote! {
-    //     /// # 查询记录列表
-    //     ///
-    //     /// 根据提供的查询参数获取数据库中的记录列表
-    //     ///
-    //     /// ## 参数
-    //     /// * `dto` - 查询参数
-    //     /// * `db` - 数据库连接，如果未提供则使用全局数据库连接
-    //     ///
-    //     /// ## 返回值
-    //     /// * `Result<Ro<Vec<Vo>>, SvcError>` - 查询结果封装为Ro对象，如果查询成功则返回封装了Vo的Ro对象，否则返回错误信息
-    //     #[db_unwrap]
-    //     #[log_call]
-    //     pub async fn page_by_query_dto<C>(
-    //         dto: #query_dto_name,
-    //         #[skip_log]
-    //         db: Option<&C>
-    //     ) -> Result<Ro<PageRx<#vo_name>>, SvcError>
-    //     where
-    //         C: ConnectionTrait,
-    //     {
-    //         let keyword = &dto._keyword;
-    //         let order_by = &dto._order_by;
-    //         let page_num = dto._page.unwrap_or(1);
-    //         let page_size = dto._size.unwrap_or(10);
-    //
-    //         let mut condition = dto.to_condition();
-    //         if let Some(keyword) = keyword {
-    //             condition = condition.add(build_like_condition(keyword, #dao_name::LIKE_COLUMNS));
-    //         }
-    //
-    //         let (page_num, total, models) = #dao_name::page_by_condition::<_, #vo_name>(
-    //             condition,
-    //             order_by,
-    //             page_num,
-    //             page_size,
-    //             db
-    //         ).await?;
-    //         let list = models.into_iter().collect();
-    //         Ok(Ro::success("查询成功".to_string()).extra(Some(PageRx::builder()
-    //             .total(total)
-    //             .page_num(page_num)
-    //             .list(list)
-    //             .build()
-    //         )))
-    //     }
-    // });
+    // 生成get_ex_by_query_dto方法
+    generated_methods.push(quote! {
+        /// # 获取记录信息(附带获取关联表的信息)
+        ///
+        /// 根据提供的查询参数获取数据库中的记录
+        ///
+        /// ## 参数
+        /// * `dto` - 查询参数
+        /// * `db` - 数据库连接，如果未提供则使用全局数据库连接
+        ///
+        /// ## 返回值
+        /// * `Result<Ro<ExVo>, SvcError>` - 查询结果封装为Ro对象，如果查询成功则返回封装了ExVo的Ro对象，否则返回错误信息
+        #[db_unwrap]
+        #[log_call]
+        pub async fn get_ex_by_query_dto<C>(
+            dto: #query_dto_name,
+            #[skip_log]
+            db: Option<&C>
+        ) -> Result<Ro<#ex_vo_name>, SvcError>
+        where
+            C: ConnectionTrait,
+        {
+            let mut condition = dto.to_condition();
+            if let Some(keyword) = &dto._keyword {
+                condition = condition.add(build_like_condition(keyword, #dao_name::LIKE_COLUMNS));
+            }
+
+            let one: #ex_vo_name = #dao_name::get_ex_by_condition(condition, db)
+                .await?
+                .map(|m| m.into())
+                .ok_or(SvcError::NotFound(format!("dto: {:?}", dto)))?;
+            Ok(Ro::success("查询成功".to_string()).extra(Some(one)))
+        }
+    });
+
+    // 生成list_ex_by_query_dto方法
+    generated_methods.push(quote! {
+        /// # 查询记录列表(附带获取关联表的信息)
+        ///
+        /// 根据提供的查询参数获取数据库中的记录列表
+        ///
+        /// ## 参数
+        /// * `dto` - 查询参数
+        /// * `db` - 数据库连接，如果未提供则使用全局数据库连接
+        ///
+        /// ## 返回值
+        /// * `Result<Ro<Vec<ExVo>>, SvcError>` - 查询结果封装为Ro对象，如果查询成功则返回封装了ExVo的Ro对象，否则返回错误信息
+        #[db_unwrap]
+        #[log_call]
+        pub async fn list_ex_by_query_dto<C>(
+            dto: #query_dto_name,
+            #[skip_log]
+            db: Option<&C>
+        ) -> Result<Ro<Vec<#ex_vo_name>>, SvcError>
+        where
+            C: ConnectionTrait,
+        {
+            let keyword = &dto._keyword;
+            let order_by = &dto._order_by;
+            let mut condition = dto.to_condition();
+            if let Some(keyword) = keyword {
+                condition = condition.add(build_like_condition(keyword, #dao_name::LIKE_COLUMNS));
+            }
+
+            let all: Vec<#ex_vo_name> = #dao_name::list_ex_by_condition(condition, order_by, db)
+                .await?
+                .into_iter()
+                .map(|m| m.into())
+                .collect();
+            Ok(Ro::success("查询成功".to_string()).extra(Some(all)))
+        }
+    });
+
+    // 生成page_ex_by_query_dto方法
+    generated_methods.push(quote! {
+        /// # 查询记录列表(附带获取关联表的信息)
+        ///
+        /// 根据提供的查询参数获取数据库中的记录列表
+        ///
+        /// ## 参数
+        /// * `dto` - 查询参数
+        /// * `db` - 数据库连接，如果未提供则使用全局数据库连接
+        ///
+        /// ## 返回值
+        /// * `Result<Ro<PageRx<ExVo>>, SvcError>` - 查询结果封装为Ro对象，如果查询成功则返回封装了ExVo的Ro对象，否则返回错误信息
+        #[db_unwrap]
+        #[log_call]
+        pub async fn page_ex_by_query_dto<C>(
+            dto: #query_dto_name,
+            #[skip_log]
+            db: Option<&C>
+        ) -> Result<Ro<PageRx<#ex_vo_name>>, SvcError>
+        where
+            C: ConnectionTrait,
+        {
+            let keyword = &dto._keyword;
+            let order_by = &dto._order_by;
+            let page_num = dto._page.unwrap_or(1);
+            let page_size = dto._size.unwrap_or(10);
+
+            let mut condition = dto.to_condition();
+            if let Some(keyword) = keyword {
+                condition = condition.add(build_like_condition(keyword, #dao_name::LIKE_COLUMNS));
+            }
+
+            let (page_num, total, models) = #dao_name::page_ex_by_condition(
+                condition,
+                order_by,
+                page_num,
+                page_size,
+                db
+            ).await?;
+            let list: Vec<#ex_vo_name> = models.into_iter().map(|m| m.into()).collect();
+            Ok(Ro::success("查询成功".to_string()).extra(Some(PageRx::builder()
+                .total(total)
+                .page_num(page_num)
+                .list(list)
+                .build()
+            )))
+        }
+    });
 
     let expanded = quote! {
         use robotech::dao::{begin_transaction, build_like_condition};

@@ -35,8 +35,11 @@ pub(crate) fn ctrl_macro(input: ItemStruct) -> TokenStream {
     let get_by_id_path = format!("{crud_path}/{{id}}");
     let get_ex_by_id_path = format!("{crud_path}/ex/{{id}}");
     let get_by_query_dto_path = crud_path.clone();
+    let get_ex_by_query_dto_path = format!("{crud_path}/ex");
     let list_by_query_dto_path = format!("{crud_path}/list");
+    let list_ex_by_query_dto_path = format!("{crud_path}/list-ex");
     let page_by_query_dto_path = format!("{crud_path}/page");
+    let page_ex_by_query_dto_path = format!("{crud_path}/page-ex");
     let dto_module = format_ident!("{module_name}_dto");
     let svc_name = format_ident!("{}Svc", entity_name);
     let vo_name = format_ident!("{}Vo", entity_name);
@@ -373,6 +376,90 @@ pub(crate) fn ctrl_macro(input: ItemStruct) -> TokenStream {
         #[log_call]
         pub async fn get_ex_by_id(Path(id): Path<u64>) -> Result<Json<Ro<#ex_vo_name>>, CtrlError> {
             let ro = #svc_name::get_ex_by_id::<DatabaseConnection>(id, None).await?;
+            Ok(Json(ro))
+        }
+    });
+
+    // 生成get_ex_by_query_dto方法
+    generated_methods.push(quote! {
+        /// # 根据查询参数获取记录的信息(附带获取关联表的信息)
+        ///
+        /// 该接口通过查询参数获取对应记录的详细信息
+        ///
+        /// ## 查询参数
+        /// * `QueryDto` - 包含查询条件的结构体
+        ///
+        /// ## 返回值
+        /// * 成功时返回对应的记录信息的JSON格式数据
+        /// * 失败时返回相应的错误信息
+        #[utoipa::path(
+            get,
+            path = #get_ex_by_query_dto_path,
+            params(#query_dto_name),
+            responses(
+                (status = OK, body = Ro<#ex_vo_name>)
+            )
+        )]
+        #[debug_handler]
+        #[log_call]
+        pub async fn get_ex_by_query_dto(Query(dto): Query<#query_dto_name>) -> Result<Json<Ro<#ex_vo_name>>, CtrlError> {
+            let ro = #svc_name::get_ex_by_query_dto::<DatabaseConnection>(dto, None).await?;
+            Ok(Json(ro))
+        }
+    });
+
+    // 生list_ex_by_query_dto方法
+    generated_methods.push(quote! {
+        /// # 查询记录列表(附带获取关联表的信息)
+        ///
+        /// 该接口通过查询参数获取对应记录列表的详细信息
+        ///
+        /// ## 查询参数
+        /// * `QueryDto` - 包含查询条件的结构体
+        ///
+        /// ## 返回值
+        /// * 成功时返回对应的记录信息的JSON格式数据
+        /// * 失败时返回相应的错误信息
+        #[utoipa::path(
+            get,
+            path = #list_ex_by_query_dto_path,
+            params(#query_dto_name),
+            responses(
+                (status = OK, body = Ro<Vec<#ex_vo_name>>)
+            )
+        )]
+        #[debug_handler]
+        #[log_call]
+        pub async fn list_ex_by_query_dto(Query(dto): Query<#query_dto_name>) -> Result<Json<Ro<Vec<#ex_vo_name>>>, CtrlError> {
+            let ro = #svc_name::list_ex_by_query_dto::<DatabaseConnection>(dto, None).await?;
+            Ok(Json(ro))
+        }
+    });
+
+    // 生page_ex_by_query_dto方法
+    generated_methods.push(quote! {
+        /// # 查询记录列表(附带获取关联表的信息)
+        ///
+        /// 该接口通过查询参数获取对应记录列表的详细信息
+        ///
+        /// ## 查询参数
+        /// * `QueryDto` - 包含查询条件的结构体
+        ///
+        /// ## 返回值
+        /// * 成功时返回对应的记录信息的JSON格式数据
+        /// * 失败时返回相应的错误信息
+        #[utoipa::path(
+            get,
+            path = #page_ex_by_query_dto_path,
+            params(#query_dto_name),
+            responses(
+                (status = OK, body = Ro<PageRx<#ex_vo_name>>)
+            )
+        )]
+        #[debug_handler]
+        #[log_call]
+        pub async fn page_ex_by_query_dto(Query(dto): Query<#query_dto_name>) -> Result<Json<Ro<PageRx<#ex_vo_name>>>, CtrlError> {
+            let ro = #svc_name::page_ex_by_query_dto::<DatabaseConnection>(dto, None).await?;
             Ok(Json(ro))
         }
     });
