@@ -10,6 +10,8 @@ use wheel_rs::serde::{
     duration_option_option_serde, duration_option_serde, log_filter_option_serde,
 };
 
+pub const DB_CONN_CONFIG_KEY: &str = "db";
+
 /// # 数据库配置结构体
 ///
 /// 用于存储数据库连接所需的各种配置参数
@@ -23,30 +25,30 @@ pub struct DbConnConfig {
     /// Minimum number of connections for a pool
     pub(crate) min_connections: Option<u32>,
     /// The connection timeout for a packet connection
-    #[serde(default, with = "duration_option_serde")]                          // ← 加 default
+    #[serde(default, with = "duration_option_serde")] // ← 加 default
     pub(crate) connect_timeout: Option<Duration>,
     /// Maximum idle time for a particular connection to prevent
     /// network resource exhaustion
-    #[serde(default, with = "duration_option_option_serde")]                    // ← 加 default
+    #[serde(default, with = "duration_option_option_serde")] // ← 加 default
     pub(crate) idle_timeout: Option<Option<Duration>>,
     /// Set the maximum amount of time to spend waiting for acquiring a connection
-    #[serde(default, with = "duration_option_serde")]                          // ← 加 default
+    #[serde(default, with = "duration_option_serde")] // ← 加 default
     pub(crate) acquire_timeout: Option<Duration>,
     /// Set the maximum lifetime of individual connections
-    #[serde(default, with = "duration_option_option_serde")]                    // ← 加 default
+    #[serde(default, with = "duration_option_option_serde")] // ← 加 default
     pub(crate) max_lifetime: Option<Option<Duration>>,
     /// Enable SQLx statement logging
     pub(crate) sqlx_logging: Option<bool>,
     /// Record SQL statements in tracing spans
     pub(crate) record_stmt_in_spans: Option<bool>,
     /// SQLx statement logging level (ignored if `sqlx_logging` is false)
-    #[serde(default, with = "log_filter_option_serde")]                         // ← 加 default
+    #[serde(default, with = "log_filter_option_serde")] // ← 加 default
     pub(crate) sqlx_logging_level: Option<log::LevelFilter>,
     /// SQLx slow statements logging level (ignored if `sqlx_logging` is false)
-    #[serde(default, with = "log_filter_option_serde")]                         // ← 加 default
+    #[serde(default, with = "log_filter_option_serde")] // ← 加 default
     pub(crate) sqlx_slow_statements_logging_level: Option<log::LevelFilter>,
     /// SQLx slow statements duration threshold (ignored if `sqlx_logging` is false)
-    #[serde(default, with = "duration_option_serde")]                           // ← 加 default
+    #[serde(default, with = "duration_option_serde")] // ← 加 default
     pub(crate) sqlx_slow_statements_logging_threshold: Option<Duration>,
     /// set sqlcipher key
     pub(crate) sqlcipher_key: Option<Cow<'static, str>>,
@@ -55,7 +57,7 @@ pub struct DbConnConfig {
     /// Application name (PostgreSQL only)
     pub(crate) application_name: Option<String>,
     /// Statement timeout (PostgreSQL only)
-    #[serde(default, with = "duration_option_serde")]                           // ← 加 default
+    #[serde(default, with = "duration_option_serde")] // ← 加 default
     pub(crate) statement_timeout: Option<Duration>,
     pub(crate) test_before_acquire: Option<bool>,
     /// If set, a pooled connection is pinged before being handed out only when it has been

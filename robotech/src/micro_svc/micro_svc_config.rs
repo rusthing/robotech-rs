@@ -2,6 +2,8 @@
 use crate::micro_svc::{ConsulConfig, EtcdConfig, NacosConfig};
 use serde::{Deserialize, Serialize};
 
+pub const MICRO_SVC_CONFIG_KEY: &str = "micro-svc";
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "kebab-case")]
 pub struct MicroSvcConfig {

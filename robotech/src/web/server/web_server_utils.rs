@@ -2,7 +2,9 @@ use crate::web::middleware::{
     forbidden_urns_middleware, ip_ban_middleware, local_only_middleware, local_only_urns_middleware,
     ForbiddenUrnsState, IpBanState, LocalOnlyUrnsState,
 };
-use crate::web::{build_cors, build_https, HttpsConfig, WebServerConfig, WebServerError};
+use crate::web::{
+    build_cors, build_https, HttpsConfig, WebServerConfig, WebServerError, WEB_SERVER_CONFIG_KEY,
+};
 use axum::{debug_handler, middleware, routing::get, Router};
 use config::Value;
 use linkme::distributed_slice;
@@ -21,8 +23,6 @@ use utoipa::openapi::OpenApi;
 use utoipa_swagger_ui::{SwaggerUi, Url};
 use wheel_rs::config_utils::has_config_changed;
 use wheel_rs::process::terminate_process;
-
-const KEY: &str = "web";
 
 #[distributed_slice]
 pub static ROUTER_SLICE: [fn() -> Router];
@@ -85,7 +85,7 @@ pub async fn setup_web_server(
     info!("setup web server...");
     if changed
         .as_ref()
-        .map(|changed| has_config_changed(KEY, changed))
+        .map(|changed| has_config_changed(WEB_SERVER_CONFIG_KEY, changed))
         .unwrap_or(true)
     {
         let WebServerConfig {

@@ -7,6 +7,8 @@ use std::time::Duration;
 use wheel_rs::serde::{duration_serde, vec_ipnet_serde, vec_serde};
 use wheel_rs::urn_utils::Urn;
 
+pub const WEB_SERVER_CONFIG_KEY: &str = "web";
+
 #[derive(Debug, Serialize, Deserialize, Clone)]
 #[serde(rename_all = "kebab-case")]
 pub struct WebServerConfig {

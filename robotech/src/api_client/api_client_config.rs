@@ -5,6 +5,8 @@
 use serde::{Deserialize, Serialize};
 use std::time::Duration;
 
+pub const API_CLIENT_CONFIG_KEY: &str = "api";
+
 /// # API配置结构体
 ///
 /// 用于存储API所需的各种配置参数

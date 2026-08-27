@@ -1,3 +1,4 @@
+use crate::db::db_conn_config::DB_CONN_CONFIG_KEY;
 use crate::db::{DbConnConfig, DbError};
 use arc_swap::ArcSwapOption;
 use config::Value;
@@ -7,7 +8,6 @@ use std::sync::Arc;
 use tracing::info;
 use wheel_rs::config_utils::has_config_changed;
 
-const KEY: &str = "db";
 /// 数据库连接
 static DB_CONN: ArcSwapOption<DbConn> = ArcSwapOption::const_empty();
 
@@ -23,7 +23,7 @@ pub async fn setup_db_conn(
     info!("setup db connection...");
     if changed
         .as_ref()
-        .map(|changed| has_config_changed(KEY, changed))
+        .map(|changed| has_config_changed(DB_CONN_CONFIG_KEY, changed))
         .unwrap_or(true)
     {
         // 获取数据库配置
