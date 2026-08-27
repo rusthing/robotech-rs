@@ -1,5 +1,5 @@
 use crate::cfg::build_cfg;
-use crate::cfg::{deserialize_config, diff_config, BaseConfig};
+use crate::cfg::{deserialize_config, BaseConfig};
 use crate::env::{AppEnv, EnvError, APP_ENV};
 use crate::log::{LogConfig, LogError};
 use arc_swap::ArcSwap;
@@ -21,6 +21,7 @@ use tracing_subscriber::layer::SubscriberExt;
 use tracing_subscriber::registry::LookupSpan;
 use tracing_subscriber::util::SubscriberInitExt;
 use tracing_subscriber::{fmt, reload, EnvFilter};
+use wheel_rs::config_utils::diff_config;
 use wheel_rs::file_utils::{watch_file, FileWatcher};
 
 /// 日志文件输出锁

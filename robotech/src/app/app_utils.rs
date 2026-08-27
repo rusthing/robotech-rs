@@ -1,5 +1,5 @@
 use crate::app::AppError;
-use crate::cfg::{build_cfg, deserialize_config, diff_config, BaseConfig};
+use crate::cfg::{build_cfg, deserialize_config, BaseConfig};
 use crate::env::{AppEnv, EnvError, APP_ENV};
 use crate::log::LogConfig;
 use arc_swap::ArcSwap;
@@ -10,6 +10,7 @@ use std::sync::Arc;
 use std::time::Duration;
 use tokio::sync::{broadcast, watch};
 use tracing::{debug, error, info, warn};
+use wheel_rs::config_utils::diff_config;
 use wheel_rs::file_utils::{watch_file, FileWatcher};
 use wheel_rs::process::{get_current_pid, send_signal_by_instruction};
 
