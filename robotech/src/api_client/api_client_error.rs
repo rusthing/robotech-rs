@@ -1,3 +1,4 @@
+use crate::cfg::CfgError;
 use thiserror::Error;
 
 /// # 自定义API客户端错误枚举
@@ -17,6 +18,8 @@ use thiserror::Error;
 pub enum ApiClientError {
     #[error("运行时错误: {0}")]
     Runtime(#[from] anyhow::Error),
+    #[error("配置错误: {0}")]
+    Cfg(#[from] CfgError),
     #[error("文件读取错误: {0}")]
     ReadFile(String, #[source] std::io::Error),
     #[error("请求失败:{0}")]

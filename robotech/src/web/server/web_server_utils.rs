@@ -21,6 +21,8 @@ use utoipa::openapi::OpenApi;
 use utoipa_swagger_ui::{SwaggerUi, Url};
 use wheel_rs::process::terminate_process;
 
+static KEY: &str = "web";
+
 #[distributed_slice]
 pub static ROUTER_SLICE: [fn() -> Router];
 
@@ -82,7 +84,7 @@ pub async fn setup_web_server(
     info!("setup web server...");
     if changed
         .as_ref()
-        .map(|changed| changed.contains_key("web"))
+        .map(|changed| changed.contains_key(KEY))
         .unwrap_or(true)
     {
         let WebServerConfig {

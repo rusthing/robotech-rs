@@ -6,6 +6,7 @@ use std::collections::HashMap;
 use std::sync::Arc;
 use tracing::info;
 
+static KEY: &str = "db";
 /// 数据库连接
 static DB_CONN: ArcSwapOption<DbConn> = ArcSwapOption::const_empty();
 
@@ -21,7 +22,7 @@ pub async fn setup_db_conn(
     info!("setup db connection...");
     if changed
         .as_ref()
-        .map(|changed| changed.contains_key("db"))
+        .map(|changed| changed.contains_key(KEY))
         .unwrap_or(true)
     {
         // 获取数据库配置

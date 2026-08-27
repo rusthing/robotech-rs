@@ -2,16 +2,13 @@
 pub mod api_client;
 #[cfg(feature = "app")]
 pub mod app;
-#[cfg(feature = "app")]
 pub mod cfg;
 pub mod cst;
 #[cfg(feature = "db")]
 pub mod dao;
 #[cfg(feature = "db")]
 pub mod db;
-#[cfg(feature = "app")]
 pub mod env;
-#[cfg(feature = "app")]
 pub mod log;
 #[cfg(feature = "macros")]
 pub mod macros;

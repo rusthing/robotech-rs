@@ -13,7 +13,7 @@ readme = "README.md"
 
 [features]
 api-client = ["dep:reqwest", "dep:http", "dep:jsonwebtoken"]
-app = ["dep:config", "dep:validator", "dep:idworker"]
+app = ["dep:validator", "dep:idworker"]
 web = ["app", "dep:ipnet", "dep:axum", "dep:tower", "dep:tower-http", "dep:tokio-rustls", "dep:hyper", "dep:hyper-util", "dep:rustls-pemfile", "dep:socket2", "dep:reqwest"]
 config-center = ["dep:base64", "dep:etcd-client", "dep:nacos-sdk"]
 registry-center = ["dep:base64", "dep:etcd-client", "dep:nacos-sdk"]
@@ -30,6 +30,7 @@ tracing-log = { workspace = true }
 tracing-core = { workspace = true }
 tracing-appender = { workspace = true }
 tracing-subscriber = { workspace = true, features = ["env-filter", "json", "chrono", "tracing-log"] }
+config = { workspace = true }
 async-trait = { workspace = true }
 thiserror = { workspace = true }
 arc-swap = { workspace = true }
@@ -44,7 +45,6 @@ nix = { workspace = true }
 notify = { workspace = true }
 utoipa = { workspace = true }
 utoipa-swagger-ui = { workspace = true, features = ["axum", "vendored"] }
-config = { workspace = true, optional = true }
 linkme = { workspace = true }
 regex = { workspace = true, optional = true }
 ipnet = { workspace = true, optional = true }
