@@ -19,6 +19,7 @@ use tower_http::trace::TraceLayer;
 use tracing::{debug, error, info};
 use utoipa::openapi::OpenApi;
 use utoipa_swagger_ui::{SwaggerUi, Url};
+use wheel_rs::config_utils::has_config_changed;
 use wheel_rs::process::terminate_process;
 
 const KEY: &str = "web";
@@ -84,7 +85,7 @@ pub async fn setup_web_server(
     info!("setup web server...");
     if changed
         .as_ref()
-        .map(|changed| changed.contains_key(KEY))
+        .map(|changed| has_config_changed(KEY, changed))
         .unwrap_or(true)
     {
         let WebServerConfig {
