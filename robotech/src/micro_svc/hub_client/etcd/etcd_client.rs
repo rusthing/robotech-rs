@@ -29,7 +29,6 @@ impl EtcdClient {
     const CLIENT_NAME: &'static str = "etcd";
 
     pub async fn new(
-        app_name: String,
         profile: &Option<String>,
         micro_svc_config: MicroSvcConfig,
     ) -> Result<Self, HubClientError> {
@@ -52,7 +51,8 @@ impl EtcdClient {
             .config
             .clone()
             .map(|_| -> Result<ConfigKey, HubClientError> {
-                let data_id = svc_name.unwrap_or(app_name);
+                let data_id =
+                    svc_name.ok_or(HubClientError::Config("svc_name is required".to_string()))?;
                 let group = group.or_else(|| profile.clone());
                 Ok(ConfigKey::new(namespace, group, data_id))
             })

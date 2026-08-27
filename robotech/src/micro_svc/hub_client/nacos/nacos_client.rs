@@ -34,10 +34,7 @@ pub struct NacosClient {
 impl NacosClient {
     const CLIENT_NAME: &'static str = "nacos";
 
-    pub async fn new(
-        app_name: String,
-        micro_svc_config: MicroSvcConfig,
-    ) -> Result<Self, HubClientError> {
+    pub async fn new(micro_svc_config: MicroSvcConfig) -> Result<Self, HubClientError> {
         let MicroSvcConfig {
             svc_name,
             nacos: nacos_config,
@@ -60,7 +57,8 @@ impl NacosClient {
             .config
             .clone()
             .map(|_| -> Result<ConfigKey, HubClientError> {
-                let data_id = svc_name.unwrap_or(app_name);
+                let data_id =
+                    svc_name.ok_or(HubClientError::Config("svc_name is required".to_string()))?;
                 Ok(ConfigKey::new(
                     Some(namespace.clone()),
                     Some(group),

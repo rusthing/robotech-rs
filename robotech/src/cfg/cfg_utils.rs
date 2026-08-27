@@ -1,5 +1,8 @@
 use crate::cfg::base_config::BaseConfig;
 use crate::cfg::cfg_error::CfgError;
+use crate::micro_svc::{
+    get_hub_client, setup_hub_client, ConfigItem, MicroSvcConfig, MICRO_SVC_CONFIG_KEY,
+};
 use config::builder::DefaultState;
 use config::{Config, ConfigBuilder};
 use std::path::{Path, PathBuf};
@@ -9,6 +12,7 @@ pub type Result<T> = core::result::Result<T, CfgError>;
 pub async fn build_cfg(
     app_dir: &PathBuf,
     env_var_prefix: &str,
+    app_file_name_without_ext: &str,
     cfg_file_name_without_ext: &str,
     cfg_file_path: Option<String>,
 ) -> Result<(BaseConfig, Config, Vec<String>)> {
@@ -23,27 +27,12 @@ pub async fn build_cfg(
 
     let config = Config::builder();
 
-    // // 从配置中心获取配置文件内容并加载到config中
-    // #[cfg(any(feature = "config-center", feature = "registry-center"))]
-    // if let Some((content, format)) = init_hub_client(
-    //     app_dir,
-    //     app_file_name_without_ext,
-    //     cfg_file_name_without_ext,
-    //     &cfg_file_path,
-    //     &profile,
-    //     cfg_changed_tx,
-    // )
-    // .await?
-    // {
-    //     config = config.add_source(config::File::from_str(&content, format));
-    // }
-
     // 加载配置文件
     let (config, files) =
         add_cfg_files(app_dir, cfg_file_name_without_ext, &cfg_file_path, config)?;
 
     // 加载profile对应的配置文件
-    let (config, files) = if let Some(profile) = base_config.clone().profile {
+    let (mut config, files) = if let Some(profile) = &base_config.profile {
         add_cfg_files(
             app_dir,
             format!("{}-{}", cfg_file_name_without_ext, profile).as_str(),
@@ -53,6 +42,21 @@ pub async fn build_cfg(
     } else {
         (config, files)
     };
+
+    // 从配置中心获取配置文件内容并加载到config中
+    #[cfg(any(feature = "config-center", feature = "registry-center"))]
+    if let Some(config_item) = init_hub_client(
+        config.clone(),
+        app_file_name_without_ext,
+        &base_config.profile,
+    )
+    .await?
+    {
+        config = config.add_source(config::File::from_str(
+            &config_item.content,
+            config_item.format,
+        ));
+    }
 
     // 添加环境变量，以覆盖配置文件中的设置
     let config = config
@@ -72,37 +76,35 @@ where
     config.try_deserialize().map_err(CfgError::Deserialize)
 }
 
-// #[cfg(any(feature = "config-center", feature = "registry-center"))]
-// async fn init_hub_client(
-//     app_dir: &PathBuf,
-//     app_name: &str,
-//     cfg_file_name_without_ext: &str,
-//     cfg_file_path: &Option<String>,
-//     profile: &Option<String>,
-//     cfg_changed_tx: watch::Sender<()>,
-// ) -> Result<Option<(String, config::FileFormat)>, CfgError> {
-//     let config = Config::builder();
-//     let (config, ..) = add_cfg_files(app_dir, cfg_file_name_without_ext, cfg_file_path, config)?;
-//     let config: MicroSvcConfig = config
-//         .build()
-//         .map_err(CfgError::Build)?
-//         .try_deserialize()
-//         .map_err(CfgError::Deserialize)?;
-//
-//     let (config_center_client, registry_center_client) =
-//         HubClient::init(app_name, profile, config).await?;
-//     let config_item = match config_center_client {
-//         Some(client) => Some(
-//             client
-//                 .fetch()
-//                 .await
-//                 .map_err(|e| CfgError::Init(e.to_string()))?,
-//         ),
-//         None => None,
-//     };
-//     Ok(config_item.map(|item| (item.content, item.format)))
-// }
+#[cfg(any(feature = "config-center", feature = "registry-center"))]
+async fn init_hub_client(
+    config: ConfigBuilder<DefaultState>,
+    app_file_name_without_ext: &str,
+    profile: &Option<String>,
+) -> Result<Option<ConfigItem>> {
+    // 如果 micro-svc 没配置，直接返回 None，跳过 hub client 初始化
+    let mut micro_svc_config: MicroSvcConfig = match config
+        .build()
+        .map_err(CfgError::Build)?
+        .get(MICRO_SVC_CONFIG_KEY)
+    {
+        Ok(value) => value,
+        Err(_) => return Ok(None), // key 不存在直接返回
+    };
 
+    if micro_svc_config.svc_name.is_none() {
+        micro_svc_config.svc_name = Some(app_file_name_without_ext.to_string());
+    }
+    setup_hub_client(profile, micro_svc_config).await?;
+
+    get_hub_client()?.get_config().await
+}
+
+/// # 加载配置文件
+///
+/// 如果指定了配置文件路径，加载该文件；否则，根据应用目录和配置文件名加载默认配置文件。
+///
+/// 支持的配置文件格式：toml, json, json5, yml, yaml, ini, ron
 fn add_cfg_files(
     app_dir: &PathBuf,
     cfg_file_name_without_ext: &str,

@@ -137,7 +137,14 @@ async fn build_app_cfg(
     app_dir: &PathBuf,
     app_file_name_without_ext: &str,
 ) -> crate::cfg::Result<(BaseConfig, Config, Vec<String>)> {
-    build_cfg(app_dir, "APP", app_file_name_without_ext, config_file_path).await
+    build_cfg(
+        app_dir,
+        "APP",
+        app_file_name_without_ext,
+        app_file_name_without_ext,
+        config_file_path,
+    )
+    .await
 }
 
 /// 监控应用程序的文件变化，当文件更新时优雅退出应用程序
