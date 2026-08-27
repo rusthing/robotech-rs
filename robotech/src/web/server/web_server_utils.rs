@@ -21,7 +21,7 @@ use utoipa::openapi::OpenApi;
 use utoipa_swagger_ui::{SwaggerUi, Url};
 use wheel_rs::process::terminate_process;
 
-static KEY: &str = "web";
+const KEY: &str = "web";
 
 #[distributed_slice]
 pub static ROUTER_SLICE: [fn() -> Router];

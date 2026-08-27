@@ -6,7 +6,7 @@ use std::collections::HashMap;
 use std::sync::Arc;
 use tracing::info;
 
-static KEY: &str = "db";
+const KEY: &str = "db";
 /// 数据库连接
 static DB_CONN: ArcSwapOption<DbConn> = ArcSwapOption::const_empty();
 
