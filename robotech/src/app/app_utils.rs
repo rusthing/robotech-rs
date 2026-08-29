@@ -69,7 +69,7 @@ where
             watch::channel((app_config.clone(), HashMap::new()));
         // let app_config_clone = app_config.clone();
         let watch_join_handle = tokio::spawn(async move {
-            info!("watching app config");
+            info!("watching app config...");
             loop {
                 match config_changed_rx.changed().await {
                     Ok(_) => {

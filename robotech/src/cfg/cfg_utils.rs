@@ -1,5 +1,6 @@
 use crate::cfg::base_config::BaseConfig;
 use crate::cfg::cfg_error::CfgError;
+#[cfg(any(feature = "config-center", feature = "registry-center"))]
 use crate::micro_svc::{get_hub_client, setup_hub_client, MicroSvcConfig, MICRO_SVC_CONFIG_KEY};
 use config::builder::DefaultState;
 use config::{Config, ConfigBuilder};
@@ -27,17 +28,19 @@ pub async fn build_cfg(
     let config = Config::builder();
 
     // 加载配置文件
-    let (config, files) =
+    let (config, mut files) =
         add_cfg_files(app_dir, cfg_file_name_without_ext, &cfg_file_path, config)?;
 
     // 加载profile对应的配置文件
     let (mut config, files) = if let Some(profile) = &base_config.profile {
-        add_cfg_files(
+        let (config, profile_files) = add_cfg_files(
             app_dir,
             format!("{}-{}", cfg_file_name_without_ext, profile).as_str(),
             &cfg_file_path,
             config,
-        )?
+        )?;
+        files.extend(profile_files);
+        (config, files)
     } else {
         (config, files)
     };
@@ -102,7 +105,9 @@ async fn init_hub_client(
     if micro_svc_config.profile.is_none() {
         micro_svc_config.profile = profile.clone();
     }
-    setup_hub_client(micro_svc_config).await?;
+    if get_hub_client().is_err() {
+        setup_hub_client(micro_svc_config).await?;
+    }
     Ok(true)
 }
 
