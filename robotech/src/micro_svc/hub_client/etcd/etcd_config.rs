@@ -11,6 +11,7 @@ pub struct EtcdConfig {
     pub hub_client: HubClientConfig,
 
     /// etcd 连接选项
+    #[serde(default)]
     pub connect_options: EtcdConnectOptionsWrapper,
 
     /// 配置中心
