@@ -140,7 +140,7 @@ async fn build_app_cfg(
     build_cfg(
         app_dir,
         "APP",
-        app_file_name_without_ext,
+        Some(app_file_name_without_ext),
         app_file_name_without_ext,
         config_file_path,
     )

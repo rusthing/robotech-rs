@@ -180,15 +180,10 @@ impl Drop for LogWatcher {
 
 impl LogWatcher {
     pub async fn new() -> Result<Self> {
-        let AppEnv {
-            app_dir,
-            app_file_name_without_ext,
-            ..
-        } = APP_ENV.get().ok_or(EnvError::GetAppEnv())?;
+        let AppEnv { app_dir, .. } = APP_ENV.get().ok_or(EnvError::GetAppEnv())?;
         let (config_changed_tx, mut config_changed_rx) =
             watch::channel((LogConfig::default(), HashMap::new()));
-        let (base_config, config, files) =
-            build_log_cfg(app_dir, app_file_name_without_ext).await?;
+        let (base_config, config, files) = build_log_cfg(app_dir).await?;
         let watch_debounce_delay = base_config.watch_debounce_delay;
         let LogConfig {
             level,
@@ -303,7 +298,7 @@ impl LogWatcher {
             let last = Arc::clone(&last_config);
             let old_config = last.load_full();
             async move {
-                match build_log_cfg(app_dir, app_file_name_without_ext).await {
+                match build_log_cfg(app_dir).await {
                     Ok((_, new_config, _)) => {
                         let changed = diff_config(&old_config, &new_config);
                         if !changed.is_empty() {
@@ -339,11 +334,8 @@ impl LogWatcher {
     }
 }
 
-async fn build_log_cfg(
-    app_dir: &PathBuf,
-    app_file_name_without_ext: &str,
-) -> crate::cfg::Result<(BaseConfig, Config, Vec<String>)> {
-    build_cfg(app_dir, "LOG", app_file_name_without_ext, "log", None).await
+async fn build_log_cfg(app_dir: &PathBuf) -> crate::cfg::Result<(BaseConfig, Config, Vec<String>)> {
+    build_cfg(app_dir, "LOG", None, "log", None).await
 }
 
 fn create_env_filter(level: String, modules: &HashMap<String, String>) -> EnvFilter {

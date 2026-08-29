@@ -20,7 +20,7 @@ pub async fn setup_db_conn(
     db_conn_config: DbConnConfig,
     changed: &Option<HashMap<String, Value>>,
 ) -> Result<(), DbError> {
-    info!("setup db connection...");
+    info!("setup db connection...: {db_conn_config:?}");
     if changed
         .as_ref()
         .map(|changed| has_config_changed(DB_CONN_CONFIG_KEY, changed))

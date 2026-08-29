@@ -1,11 +1,11 @@
 use crate::web::middleware::{
-    forbidden_urns_middleware, ip_ban_middleware, local_only_middleware, local_only_urns_middleware,
-    ForbiddenUrnsState, IpBanState, LocalOnlyUrnsState,
+    ForbiddenUrnsState, IpBanState, LocalOnlyUrnsState, forbidden_urns_middleware,
+    ip_ban_middleware, local_only_middleware, local_only_urns_middleware,
 };
 use crate::web::{
-    build_cors, build_https, HttpsConfig, WebServerConfig, WebServerError, WEB_SERVER_CONFIG_KEY,
+    HttpsConfig, WEB_SERVER_CONFIG_KEY, WebServerConfig, WebServerError, build_cors, build_https,
 };
-use axum::{debug_handler, middleware, routing::get, Router};
+use axum::{Router, debug_handler, middleware, routing::get};
 use config::Value;
 use linkme::distributed_slice;
 use robotech_macros::log_call;
@@ -82,7 +82,7 @@ pub async fn setup_web_server(
     old_pid: Option<u32>,
     changed: &Option<HashMap<String, Value>>,
 ) -> Result<(), WebServerError> {
-    info!("setup web server...");
+    info!("setup web server...: {web_server_config:?}");
     if changed
         .as_ref()
         .map(|changed| has_config_changed(WEB_SERVER_CONFIG_KEY, changed))
