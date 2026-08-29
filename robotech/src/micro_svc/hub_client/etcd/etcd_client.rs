@@ -18,11 +18,23 @@ use crate::micro_svc::hub_client_config::HubClientConfig;
 use crate::micro_svc::{HubClientError, MicroSvcConfig, RegistryCenterClient};
 use async_trait::async_trait;
 use etcd_client::GetOptions;
+use std::sync::Mutex;
 use tokio::sync::watch;
+use tokio::task::JoinHandle;
+use tracing::info;
 
 pub struct EtcdClient {
     etcd_client: etcd_client::Client,
     config_key: Option<ConfigKey>,
+    config_watch_join_handle: Mutex<Option<JoinHandle<()>>>,
+}
+
+impl Drop for EtcdClient {
+    fn drop(&mut self) {
+        if let Some(handle) = self.config_watch_join_handle.lock().unwrap().take() {
+            handle.abort(); // 立即终止任务
+        }
+    }
 }
 
 impl EtcdClient {
@@ -60,6 +72,7 @@ impl EtcdClient {
         Ok(Self {
             etcd_client: client,
             config_key,
+            config_watch_join_handle: Mutex::new(None),
         })
     }
 }
@@ -119,7 +132,7 @@ impl ConfigCenterClient for EtcdClient {
         };
 
         // 2) 后台任务：消费 WatchStream，把 etcd 事件翻译成 crate 内部的 ConfigEvent。
-        tokio::spawn(async move {
+        let join_handle = tokio::spawn(async move {
             let mut stream = watch_stream;
 
             while let Ok(Some(resp)) = stream.message().await {
@@ -144,6 +157,9 @@ impl ConfigCenterClient for EtcdClient {
                 }
             }
         });
+
+        *self.config_watch_join_handle.lock().unwrap() = Some(join_handle);
+
         Ok(())
     }
 }

@@ -25,12 +25,42 @@ use crate::micro_svc::{
     RegistryCenterClient,
 };
 
+/// # 桥接器
+/// 把 Nacos SDK 的回调式监听，转换成本 crate 统一的 channel 事件流
+pub struct Bridge {
+    tx: watch::Sender<()>,
+    md5: String,
+}
+
+impl ConfigChangeListener for Bridge {
+    fn notify(&self, config_response: ConfigResponse) {
+        if *config_response.md5() != self.md5 {
+            if self.tx.send(()).is_err() {
+                return;
+            }
+        }
+    }
+}
+
 pub struct NacosClient {
     service: ConfigService,
     config_key: Option<ConfigKey>,
     md5: Mutex<Option<String>>,
+    config_listener: Mutex<Option<(String, String, Arc<Bridge>)>>,
 }
 
+impl Drop for NacosClient {
+    fn drop(&mut self) {
+        if let Some((data_id, group, listener)) = self.config_listener.lock().unwrap().take() {
+            if let Ok(handle) = tokio::runtime::Handle::try_current() {
+                let service = self.service.clone(); // ConfigService: Clone
+                handle.spawn(async move {
+                    let _ = service.remove_listener(data_id, group, listener).await;
+                });
+            }
+        }
+    }
+}
 impl NacosClient {
     const CLIENT_NAME: &'static str = "nacos";
 
@@ -76,6 +106,7 @@ impl NacosClient {
             service,
             config_key,
             md5: Mutex::new(None),
+            config_listener: Mutex::new(None),
         })
     }
 }
@@ -127,34 +158,19 @@ impl ConfigCenterClient for NacosClient {
         let key = self.key()?;
         let group = config_key.clone().group.unwrap(); // group在new时设置了默认值，不可能为None
 
-        // 桥接器：把 Nacos SDK 的回调式监听，转换成本 crate 统一的 channel 事件流。
-        struct Bridge {
-            tx: watch::Sender<()>,
-            md5: String,
-        }
-
-        impl ConfigChangeListener for Bridge {
-            fn notify(&self, config_response: ConfigResponse) {
-                if *config_response.md5() != self.md5 {
-                    if self.tx.send(()).is_err() {
-                        return;
-                    }
-                }
-            }
-        }
-
         let md5 = self.md5.lock().unwrap().clone();
+        let bridge = Arc::new(Bridge {
+            tx: config_changed_sender,
+            md5: md5.ok_or(ConfigCenterError::Parse("missing md5".to_string()))?,
+        });
+
         self.service
-            .add_listener(
-                key,
-                group,
-                Arc::new(Bridge {
-                    tx: config_changed_sender,
-                    md5: md5.ok_or(ConfigCenterError::Parse("missing md5".to_string()))?,
-                }),
-            )
+            .add_listener(key.clone(), group.clone(), bridge.clone())
             .await
             .map_err(|e| ConfigCenterError::Connection(e.to_string()))?;
+
+        // 保存，便于 Drop 时注销
+        *self.config_listener.lock().unwrap() = Some((key, group, bridge));
 
         Ok(())
     }

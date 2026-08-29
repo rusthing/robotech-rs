@@ -18,6 +18,7 @@ use std::sync::Mutex;
 use std::time::Duration;
 use tokio::sync::watch;
 use tokio::task::JoinHandle;
+use tracing::info;
 
 pub struct ConsulClient {
     reqwest_client: reqwest::Client,
@@ -36,6 +37,14 @@ struct ConsulKvEntry {
     /// Consul 返回的修改索引，用于 next request 的 blocking query
     #[serde(rename = "ModifyIndex")]
     modify_index: u64,
+}
+
+impl Drop for ConsulClient {
+    fn drop(&mut self) {
+        if let Some(handle) = self.config_watch_join_handle.lock().unwrap().take() {
+            handle.abort(); // 立即终止任务
+        }
+    }
 }
 
 impl ConsulClient {
