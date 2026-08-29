@@ -18,7 +18,6 @@ use std::sync::Mutex;
 use std::time::Duration;
 use tokio::sync::watch;
 use tokio::task::JoinHandle;
-use tracing::info;
 
 pub struct ConsulClient {
     reqwest_client: reqwest::Client,

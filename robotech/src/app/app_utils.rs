@@ -2,6 +2,8 @@ use crate::app::AppError;
 use crate::cfg::{build_cfg, deserialize_config, BaseConfig};
 use crate::env::{AppEnv, EnvError, APP_ENV};
 use crate::log::LogConfig;
+#[cfg(feature = "config-center")]
+use crate::micro_svc::get_hub_client;
 use arc_swap::ArcSwap;
 use config::{Config, Value};
 use std::collections::HashMap;
@@ -11,7 +13,7 @@ use std::time::Duration;
 use tokio::sync::{broadcast, watch};
 use tracing::{debug, error, info, warn};
 use wheel_rs::config_utils::diff_config;
-use wheel_rs::file_utils::{watch_file, FileWatcher};
+use wheel_rs::file_utils::{watch_file_changed, FileWatcher};
 use wheel_rs::process::{get_current_pid, send_signal_by_instruction};
 
 pub type Result<T> = core::result::Result<T, AppError>;
@@ -89,7 +91,7 @@ where
         let config_changed_tx_clone = config_changed_tx.clone();
         let config_file_path_clone = config_file_path.clone();
         let _cfg_file_watcher =
-            watch_file(files.clone(), base_config.watch_debounce_delay, move |_| {
+            watch_file_changed(files.clone(), base_config.watch_debounce_delay, move |_| {
                 let config_changed_tx_clone = config_changed_tx_clone.clone();
                 let config_file_path = config_file_path_clone.clone();
                 let last = Arc::clone(&last_config);
@@ -123,6 +125,15 @@ where
         // 监听应用程序的文件变化，当文件更新时优雅退出应用程序
         let _app_file_watcher =
             watch_app_file(&app_file_path.clone(), base_config.watch_debounce_delay)?;
+
+        #[cfg(feature = "config-center")]
+        get_hub_client()?
+            .watch_config_changed(move || async move {
+                info!("watching config center config");
+                Ok(())
+            })
+            .await?;
+
         Ok(Self {
             app_config: Arc::new(app_config.clone()),
             watch_join_handle,
@@ -150,7 +161,7 @@ async fn build_app_cfg(
 /// 监控应用程序的文件变化，当文件更新时优雅退出应用程序
 pub fn watch_app_file(app_file_path: &PathBuf, debounce_delay: Duration) -> Result<FileWatcher> {
     let files = vec![app_file_path.to_string_lossy().to_string()];
-    Ok(watch_file(files, debounce_delay, |_| async {
+    Ok(watch_file_changed(files, debounce_delay, |_| async {
         info!("应用程序的文件已更新，优雅退出");
         quit();
         Ok(())

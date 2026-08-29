@@ -4,8 +4,9 @@ use crate::micro_svc::{
     RegistryCenterClient,
 };
 use arc_swap::ArcSwapOption;
-use std::sync::Arc;
-use tracing::info;
+use std::sync::{Arc, Mutex};
+use tokio::sync::watch;
+use tracing::{error, info, warn};
 
 static HUB_CLIENT: ArcSwapOption<HubClient> = ArcSwapOption::const_empty();
 
@@ -23,8 +24,17 @@ pub fn get_hub_client() -> Result<Arc<HubClient>, CfgError> {
 }
 
 pub struct HubClient {
-    _config: Option<Arc<dyn ConfigCenterClient>>,
-    _registry: Option<Arc<dyn RegistryCenterClient>>,
+    config: Option<Arc<dyn ConfigCenterClient>>,
+    registry: Option<Arc<dyn RegistryCenterClient>>,
+    config_watch_join_handle: Mutex<Option<tokio::task::JoinHandle<()>>>,
+}
+
+impl Drop for HubClient {
+    fn drop(&mut self) {
+        if let Some(handle) = self.config_watch_join_handle.lock().unwrap().take() {
+            handle.abort();
+        }
+    }
 }
 
 impl HubClient {
@@ -78,13 +88,14 @@ impl HubClient {
             (None, None)
         };
         Ok(Self {
-            _config: config_center_client,
-            _registry: registry_center_client,
+            config: config_center_client,
+            registry: registry_center_client,
+            config_watch_join_handle: Mutex::new(None),
         })
     }
 
     pub async fn get_config(&self) -> Result<Option<ConfigItem>, CfgError> {
-        if let Some(config_center_client) = self._config.as_ref() {
+        if let Some(config_center_client) = self.config.as_ref() {
             Ok(Some(
                 config_center_client
                     .fetch()
@@ -96,4 +107,40 @@ impl HubClient {
         }
     }
 
+    pub async fn watch_config_changed<F, Fut>(&self, mut on_change: F) -> Result<(), CfgError>
+    where
+        F: FnMut() -> Fut + Send + 'static,
+        Fut: Future<Output = anyhow::Result<()>> + Send + 'static,
+    {
+        let config_center_client = self.config.as_ref().ok_or(CfgError::NotInit(
+            "config center not configured".to_string(),
+        ))?;
+
+        let (config_changed_tx, mut config_changed_rx) = watch::channel(());
+        config_center_client
+            .watch(config_changed_tx)
+            .await
+            .map_err(|e| CfgError::Init(e.to_string()))?;
+
+        let join_handle = tokio::spawn(async move {
+            info!("watch config changed...");
+            loop {
+                match config_changed_rx.changed().await {
+                    Ok(_) => {
+                        let _ = config_changed_rx.borrow().clone();
+                        if let Err(e) = on_change().await {
+                            warn!("handle config change error: {e:?}");
+                        }
+                    }
+                    Err(err) => {
+                        error!("watch config error: {:?}", err);
+                        break;
+                    }
+                }
+            }
+        });
+
+        *self.config_watch_join_handle.lock().unwrap() = Some(join_handle);
+        Ok(())
+    }
 }

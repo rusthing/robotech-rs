@@ -22,7 +22,7 @@ use tracing_subscriber::registry::LookupSpan;
 use tracing_subscriber::util::SubscriberInitExt;
 use tracing_subscriber::{fmt, reload, EnvFilter};
 use wheel_rs::config_utils::diff_config;
-use wheel_rs::file_utils::{watch_file, FileWatcher};
+use wheel_rs::file_utils::{watch_file_changed, FileWatcher};
 
 /// 日志文件输出锁
 /// 解决锁在初始化方法结束后被提前释放导致后续日志不能输出
@@ -293,7 +293,7 @@ impl LogWatcher {
         // 监听日志配置文件变化
         let last_config = Arc::new(ArcSwap::from_pointee(config.clone()));
         let config_changed_tx_clone = config_changed_tx.clone();
-        let file_watcher = watch_file(files.clone(), watch_debounce_delay, move |_| {
+        let file_watcher = watch_file_changed(files.clone(), watch_debounce_delay, move |_| {
             let config_changed_tx_clone = config_changed_tx_clone.clone();
             let last = Arc::clone(&last_config);
             let old_config = last.load_full();

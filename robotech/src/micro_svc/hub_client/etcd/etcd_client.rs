@@ -21,7 +21,6 @@ use etcd_client::GetOptions;
 use std::sync::Mutex;
 use tokio::sync::watch;
 use tokio::task::JoinHandle;
-use tracing::info;
 
 pub struct EtcdClient {
     etcd_client: etcd_client::Client,
