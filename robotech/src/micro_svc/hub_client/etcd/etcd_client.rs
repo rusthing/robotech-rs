@@ -28,12 +28,10 @@ pub struct EtcdClient {
 impl EtcdClient {
     const CLIENT_NAME: &'static str = "etcd";
 
-    pub async fn new(
-        profile: &Option<String>,
-        micro_svc_config: MicroSvcConfig,
-    ) -> Result<Self, HubClientError> {
+    pub async fn new(micro_svc_config: MicroSvcConfig) -> Result<Self, HubClientError> {
         let MicroSvcConfig {
             svc_name,
+            profile,
             etcd: etcd_config,
             ..
         } = micro_svc_config;
@@ -50,10 +48,11 @@ impl EtcdClient {
         let config_key = etcd_config
             .config
             .clone()
-            .map(|_| -> Result<ConfigKey, HubClientError> {
-                let data_id =
-                    svc_name.ok_or(HubClientError::Config("svc_name is required".to_string()))?;
+            .map(|config| -> Result<ConfigKey, HubClientError> {
                 let group = group.or_else(|| profile.clone());
+                let mut data_id =
+                    svc_name.ok_or(HubClientError::Config("svc_name is required".to_string()))?;
+                data_id = format!("{}.{}", data_id, config.file_format);
                 Ok(ConfigKey::new(namespace, group, data_id))
             })
             .transpose()?;

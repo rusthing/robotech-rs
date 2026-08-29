@@ -95,7 +95,10 @@ async fn init_hub_client(
     if micro_svc_config.svc_name.is_none() {
         micro_svc_config.svc_name = Some(app_name.to_string());
     }
-    setup_hub_client(profile, micro_svc_config).await?;
+    if micro_svc_config.profile.is_none() {
+        micro_svc_config.profile = profile.clone();
+    }
+    setup_hub_client(micro_svc_config).await?;
     Ok(true)
 }
 

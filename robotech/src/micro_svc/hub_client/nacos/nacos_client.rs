@@ -37,6 +37,7 @@ impl NacosClient {
     pub async fn new(micro_svc_config: MicroSvcConfig) -> Result<Self, HubClientError> {
         let MicroSvcConfig {
             svc_name,
+            profile,
             nacos: nacos_config,
             ..
         } = micro_svc_config;
@@ -56,9 +57,13 @@ impl NacosClient {
         let config_key = nacos_config
             .config
             .clone()
-            .map(|_| -> Result<ConfigKey, HubClientError> {
-                let data_id =
+            .map(|config| -> Result<ConfigKey, HubClientError> {
+                let mut data_id =
                     svc_name.ok_or(HubClientError::Config("svc_name is required".to_string()))?;
+                if let Some(profile) = profile {
+                    data_id = format!("{}-{}", data_id, profile);
+                }
+                data_id = format!("{}.{}", data_id, config.file_format);
                 Ok(ConfigKey::new(
                     Some(namespace.clone()),
                     Some(group),

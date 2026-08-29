@@ -41,12 +41,10 @@ struct ConsulKvEntry {
 impl ConsulClient {
     const CLIENT_NAME: &'static str = "consul";
 
-    pub fn new(
-        profile: &Option<String>,
-        micro_svc_config: MicroSvcConfig,
-    ) -> Result<Self, HubClientError> {
+    pub fn new(micro_svc_config: MicroSvcConfig) -> Result<Self, HubClientError> {
         let MicroSvcConfig {
             svc_name,
+            profile,
             consul: consul_config,
             ..
         } = micro_svc_config;
@@ -61,10 +59,11 @@ impl ConsulClient {
         let config_key = consul_config
             .config
             .clone()
-            .map(|_| -> Result<ConfigKey, HubClientError> {
+            .map(|config| -> Result<ConfigKey, HubClientError> {
                 let group = group.or_else(|| profile.clone());
-                let data_id =
+                let mut data_id =
                     svc_name.ok_or(HubClientError::Config("svc_name is required".to_string()))?;
+                data_id = format!("{}.{}", data_id, config.file_format);
                 Ok(ConfigKey::new(namespace, group, data_id))
             })
             .transpose()?;

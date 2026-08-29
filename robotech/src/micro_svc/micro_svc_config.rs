@@ -10,6 +10,9 @@ pub struct MicroSvcConfig {
     /// 服务名称
     #[serde(default)]
     pub svc_name: Option<String>,
+    /// 环境(dev/test/prod)
+    #[serde(default)]
+    pub profile: Option<String>,
     #[cfg(any(feature = "config-center", feature = "registry-center"))]
     #[serde(default)]
     pub consul: Option<ConsulConfig>,
