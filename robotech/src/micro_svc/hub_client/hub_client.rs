@@ -10,7 +10,7 @@ use tracing::info;
 static HUB_CLIENT: ArcSwapOption<HubClient> = ArcSwapOption::const_empty();
 
 pub async fn setup_hub_client(micro_svc_config: MicroSvcConfig) -> Result<(), CfgError> {
-    info!("setup hub client...");
+    info!("setup hub client...: {micro_svc_config:?}");
     let hub_client = HubClient::new(micro_svc_config).await?;
     HUB_CLIENT.store(Some(Arc::new(hub_client)));
     Ok(())

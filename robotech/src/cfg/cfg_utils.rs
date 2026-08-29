@@ -4,13 +4,14 @@ use crate::micro_svc::{get_hub_client, setup_hub_client, MicroSvcConfig, MICRO_S
 use config::builder::DefaultState;
 use config::{Config, ConfigBuilder};
 use std::path::{Path, PathBuf};
+use tracing::warn;
 
 pub type Result<T> = core::result::Result<T, CfgError>;
 
 pub async fn build_cfg(
     app_dir: &PathBuf,
     env_var_prefix: &str,
-    app_file_name_without_ext: &str,
+    app_file_name_without_ext: Option<&str>,
     cfg_file_name_without_ext: &str,
     cfg_file_path: Option<String>,
 ) -> Result<(BaseConfig, Config, Vec<String>)> {
@@ -42,20 +43,21 @@ pub async fn build_cfg(
     };
 
     // 初始化配置中心和注册中心的客户端
+    // 如果传入app_file_name_without_ext为None，说明是构建log配置，不需要通过配置中心初始化配置
     #[cfg(any(feature = "config-center", feature = "registry-center"))]
-    let has_hub_client = init_hub_client(
-        config.clone(),
-        app_file_name_without_ext,
-        &base_config.profile,
-    )
-    .await?;
-    // 从配置中心获取配置文件内容并加载到config中
-    #[cfg(feature = "config-center")]
-    if has_hub_client && let Some(config_item) = get_hub_client()?.get_config().await? {
-        config = config.add_source(config::File::from_str(
-            &config_item.content,
-            config_item.format,
-        ));
+    if let Some(app_name) = app_file_name_without_ext {
+        // 初始化配置中心和注册中心的客户端
+        #[cfg(any(feature = "config-center", feature = "registry-center"))]
+        let has_hub_client =
+            init_hub_client(config.clone(), app_name, &base_config.profile).await?;
+        // 从配置中心获取配置文件内容并加载到config中
+        #[cfg(feature = "config-center")]
+        if has_hub_client && let Some(config_item) = get_hub_client()?.get_config().await? {
+            config = config.add_source(config::File::from_str(
+                &config_item.content,
+                config_item.format,
+            ));
+        }
     }
 
     // 添加环境变量，以覆盖配置文件中的设置
@@ -89,9 +91,11 @@ async fn init_hub_client(
         .get(MICRO_SVC_CONFIG_KEY)
     {
         Ok(value) => value,
-        Err(_) => return Ok(false), // key 不存在直接返回 false
+        Err(e) => {
+            warn!("micro-svc config not found or deserialize failed: {:?}", e);
+            return Ok(false);
+        }
     };
-
     if micro_svc_config.svc_name.is_none() {
         micro_svc_config.svc_name = Some(app_name.to_string());
     }

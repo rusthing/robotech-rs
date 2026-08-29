@@ -35,7 +35,7 @@ struct ConsulKvEntry {
     value: Option<String>,
     /// Consul 返回的修改索引，用于 next request 的 blocking query
     #[serde(rename = "ModifyIndex")]
-    modify_index: String,
+    modify_index: u64,
 }
 
 impl ConsulClient {
@@ -192,11 +192,11 @@ impl ConfigCenterClient for ConsulClient {
                         // blocking query 超时也会返回同样的 index，这里靠 index 变化去重，
                         // 避免超时空返回被误当成一次真实变更推送出去。
                         if let Some(last_index) = last_index.clone() {
-                            if entry.modify_index == last_index {
+                            if entry.modify_index.to_string() == last_index.clone() {
                                 continue;
                             }
                         }
-                        last_index = Some(entry.modify_index);
+                        last_index = Some(entry.modify_index.to_string());
                         if config_changed_sender.send(()).is_err() {
                             return;
                         }
