@@ -1,8 +1,6 @@
 use crate::cfg::base_config::BaseConfig;
 use crate::cfg::cfg_error::CfgError;
-use crate::micro_svc::{
-    get_hub_client, setup_hub_client, ConfigItem, MicroSvcConfig, MICRO_SVC_CONFIG_KEY,
-};
+use crate::micro_svc::{get_hub_client, setup_hub_client, MicroSvcConfig, MICRO_SVC_CONFIG_KEY};
 use config::builder::DefaultState;
 use config::{Config, ConfigBuilder};
 use std::path::{Path, PathBuf};
@@ -43,15 +41,17 @@ pub async fn build_cfg(
         (config, files)
     };
 
-    // 从配置中心获取配置文件内容并加载到config中
+    // 初始化配置中心和注册中心的客户端
     #[cfg(any(feature = "config-center", feature = "registry-center"))]
-    if let Some(config_item) = init_hub_client(
+    let has_hub_client = init_hub_client(
         config.clone(),
         app_file_name_without_ext,
         &base_config.profile,
     )
-    .await?
-    {
+    .await?;
+    // 从配置中心获取配置文件内容并加载到config中
+    #[cfg(feature = "config-center")]
+    if has_hub_client && let Some(config_item) = get_hub_client()?.get_config().await? {
         config = config.add_source(config::File::from_str(
             &config_item.content,
             config_item.format,
@@ -79,9 +79,9 @@ where
 #[cfg(any(feature = "config-center", feature = "registry-center"))]
 async fn init_hub_client(
     config: ConfigBuilder<DefaultState>,
-    app_file_name_without_ext: &str,
+    app_name: &str,
     profile: &Option<String>,
-) -> Result<Option<ConfigItem>> {
+) -> Result<bool> {
     // 如果 micro-svc 没配置，直接返回 None，跳过 hub client 初始化
     let mut micro_svc_config: MicroSvcConfig = match config
         .build()
@@ -89,15 +89,14 @@ async fn init_hub_client(
         .get(MICRO_SVC_CONFIG_KEY)
     {
         Ok(value) => value,
-        Err(_) => return Ok(None), // key 不存在直接返回
+        Err(_) => return Ok(false), // key 不存在直接返回 false
     };
 
     if micro_svc_config.svc_name.is_none() {
-        micro_svc_config.svc_name = Some(app_file_name_without_ext.to_string());
+        micro_svc_config.svc_name = Some(app_name.to_string());
     }
     setup_hub_client(profile, micro_svc_config).await?;
-
-    get_hub_client()?.get_config().await
+    Ok(true)
 }
 
 /// # 加载配置文件
