@@ -52,7 +52,8 @@ impl NacosClient {
         } else {
             "public".to_string()
         };
-        let group = group.unwrap_or("DEFAULT_GROUP".to_string());
+        // 如果 group 和 profile 都为空，使用 DEFAULT_GROUP 作为默认group
+        let group = group.or_else(|| Some(profile.unwrap_or("DEFAULT_GROUP".to_string())));
         let server_addr = base_url[0].trim_end_matches('/').to_string();
         let config_key = nacos_config
             .config
@@ -60,15 +61,8 @@ impl NacosClient {
             .map(|config| -> Result<ConfigKey, HubClientError> {
                 let mut data_id =
                     svc_name.ok_or(HubClientError::Config("svc_name is required".to_string()))?;
-                if let Some(profile) = profile {
-                    data_id = format!("{}-{}", data_id, profile);
-                }
                 data_id = format!("{}.{}", data_id, config.file_format);
-                Ok(ConfigKey::new(
-                    Some(namespace.clone()),
-                    Some(group),
-                    data_id,
-                ))
+                Ok(ConfigKey::new(Some(namespace.clone()), group, data_id))
             })
             .transpose()?;
         let props = ClientProps::new()
@@ -101,7 +95,7 @@ impl ConfigCenterClient for NacosClient {
     fn key(&self) -> Result<String, ConfigCenterError> {
         let config_key = self.config_key()?;
         let data_id = config_key.data_id;
-        Ok(format!("{data_id}.*"))
+        Ok(data_id)
     }
 
     async fn fetch(&self) -> Result<ConfigItem, ConfigCenterError> {
