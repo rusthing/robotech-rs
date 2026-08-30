@@ -7,7 +7,9 @@ use crate::micro_svc::get_hub_client;
 use arc_swap::ArcSwap;
 use config::{Config, Value};
 use std::collections::HashMap;
+use std::future::Future;
 use std::path::PathBuf;
+use std::pin::Pin;
 use std::sync::Arc;
 use std::time::Duration;
 use tokio::sync::{broadcast, watch};
@@ -88,36 +90,52 @@ where
             info!("exit watch app config");
         });
 
-        let config_changed_tx_clone = config_changed_tx.clone();
-        let config_file_path_clone = config_file_path.clone();
-        let _cfg_file_watcher =
-            watch_file_changed(files.clone(), base_config.watch_debounce_delay, move |_| {
-                let config_changed_tx_clone = config_changed_tx_clone.clone();
-                let config_file_path = config_file_path_clone.clone();
-                let last = Arc::clone(&last_config);
-                let old_config = last.load_full();
-                async move {
-                    match build_app_cfg(config_file_path, app_dir, app_file_name_without_ext).await
-                    {
+        // 提取公共的配置重载逻辑
+        type ReloadFuture = Pin<Box<dyn Future<Output = ()> + Send>>;
+        let reload_config_fn: Arc<dyn Fn() -> ReloadFuture + Send + Sync> = {
+            let config_changed_tx = config_changed_tx.clone();
+            let last_config = Arc::clone(&last_config);
+            let config_file_path = config_file_path.clone();
+            let app_dir = app_dir.clone();
+            Arc::new(move || {
+                let config_changed_tx = config_changed_tx.clone();
+                let last_config = Arc::clone(&last_config);
+                let config_file_path = config_file_path.clone();
+                let app_dir = app_dir.clone();
+                let app_name = app_file_name_without_ext.clone();
+                Box::pin(async move {
+                    let old_config = last_config.load_full();
+                    match build_app_cfg(config_file_path, &app_dir, &app_name).await {
                         Ok((_, new_config, _)) => {
                             let changed = diff_config(&old_config, &new_config);
                             if !changed.is_empty() {
-                                info!("log config changed: {:?}", changed);
-                                last.store(Arc::new(new_config.clone()));
+                                info!("app config changed: {:?}", changed);
+                                last_config.store(Arc::new(new_config.clone()));
                                 match deserialize_config::<T>(new_config).await {
                                     Ok(app_config) => {
-                                        config_changed_tx_clone.send((app_config, changed))?;
+                                        if let Err(e) =
+                                            config_changed_tx.send((app_config, changed))
+                                        {
+                                            error!("send config changed error: {:?}", e);
+                                        }
                                     }
-                                    Err(e) => {
-                                        error!("deserialize app config error: {:?}", e);
-                                    }
+                                    Err(e) => error!("deserialize app config error: {:?}", e),
                                 }
                             }
                         }
-                        Err(e) => {
-                            error!("build app config error: {:?}", e);
-                        }
+                        Err(e) => error!("build app config error: {:?}", e),
                     }
+                })
+            })
+        };
+
+        // 文件变更回调
+        let reload = Arc::clone(&reload_config_fn);
+        let _cfg_file_watcher =
+            watch_file_changed(files.clone(), base_config.watch_debounce_delay, move |_| {
+                let reload = Arc::clone(&reload);
+                async move {
+                    reload().await;
                     Ok(())
                 }
             })?;
@@ -127,12 +145,23 @@ where
             watch_app_file(&app_file_path.clone(), base_config.watch_debounce_delay)?;
 
         #[cfg(feature = "config-center")]
-        get_hub_client()?
-            .watch_config_changed(move || async move {
-                info!("watching config center config");
-                Ok(())
-            })
-            .await?;
+        {
+            let reload = Arc::clone(&reload_config_fn);
+            if let Ok(hub_client) = get_hub_client() {
+                if let Err(e) = hub_client
+                    .watch_config_changed(move || {
+                        let reload = Arc::clone(&reload);
+                        async move {
+                            reload().await;
+                            Ok(())
+                        }
+                    })
+                    .await
+                {
+                    warn!("watch config center failed: {:?}", e);
+                }
+            }
+        }
 
         Ok(Self {
             app_config: Arc::new(app_config.clone()),
