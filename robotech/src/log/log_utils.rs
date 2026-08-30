@@ -1,4 +1,4 @@
-use crate::cfg::build_cfg;
+use crate::cfg::{build_cfg, CfgError};
 use crate::cfg::{deserialize_config, BaseConfig};
 use crate::env::{AppEnv, EnvError, APP_ENV};
 use crate::log::{LogConfig, LogError};
@@ -183,7 +183,11 @@ impl LogWatcher {
         let AppEnv { app_dir, .. } = APP_ENV.get().ok_or(EnvError::GetAppEnv())?;
         let (config_changed_tx, mut config_changed_rx) =
             watch::channel((LogConfig::default(), HashMap::new()));
-        let (base_config, config, files) = build_log_cfg(app_dir).await?;
+        let (config, files) = build_log_cfg(app_dir).await?;
+        let base_config: BaseConfig = config
+            .clone()
+            .try_deserialize()
+            .map_err(CfgError::Deserialize)?;
         let watch_debounce_delay = base_config.watch_debounce_delay;
         let LogConfig {
             level,
@@ -299,7 +303,7 @@ impl LogWatcher {
             let old_config = last.load_full();
             async move {
                 match build_log_cfg(app_dir).await {
-                    Ok((_, new_config, _)) => {
+                    Ok((new_config, _)) => {
                         let changed = diff_config(&old_config, &new_config);
                         if !changed.is_empty() {
                             info!("log config changed: {:?}", changed);
@@ -334,7 +338,7 @@ impl LogWatcher {
     }
 }
 
-async fn build_log_cfg(app_dir: &PathBuf) -> crate::cfg::Result<(BaseConfig, Config, Vec<String>)> {
+async fn build_log_cfg(app_dir: &PathBuf) -> crate::cfg::Result<(Config, Vec<String>)> {
     build_cfg(app_dir, "LOG", None, "log", None).await
 }
 

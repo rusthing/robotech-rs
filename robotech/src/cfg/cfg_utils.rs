@@ -16,7 +16,7 @@ pub async fn build_cfg(
     app_file_name_without_ext: Option<&str>,
     cfg_file_name_without_ext: &str,
     cfg_file_path: Option<String>,
-) -> Result<(BaseConfig, Config, Vec<String>)> {
+) -> Result<(Config, Vec<String>)> {
     // 先加载基础配置文件获取profile，后续根据profile加载对应的配置文件
     let config = Config::builder();
     let (config, ..) = add_cfg_files(app_dir, cfg_file_name_without_ext, &cfg_file_path, config)?;
@@ -71,7 +71,7 @@ pub async fn build_cfg(
         .build()
         .map_err(CfgError::Build)?;
 
-    Ok((base_config, config, files))
+    Ok((config, files))
 }
 
 pub async fn deserialize_config<'a, T>(config: Config) -> Result<T>

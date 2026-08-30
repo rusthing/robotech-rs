@@ -1,5 +1,5 @@
 use crate::app::AppError;
-use crate::cfg::{build_cfg, deserialize_config, BaseConfig};
+use crate::cfg::{build_cfg, deserialize_config, BaseConfig, CfgError};
 use crate::env::{AppEnv, EnvError, APP_ENV};
 use crate::log::LogConfig;
 #[cfg(feature = "config-center")]
@@ -58,8 +58,12 @@ where
             app_file_name_without_ext,
             ..
         } = APP_ENV.get().ok_or(EnvError::GetAppEnv())?;
-        let (base_config, config, files) =
+        let (config, files) =
             build_app_cfg(config_file_path.clone(), app_dir, app_file_name_without_ext).await?;
+        let base_config: BaseConfig = config
+            .clone()
+            .try_deserialize()
+            .map_err(CfgError::Deserialize)?;
         if let Some(log_config) = base_config.clone().log {
             let changed = HashMap::new();
             log_config_changed_tx.send((log_config, changed))?;
@@ -106,11 +110,29 @@ where
                 Box::pin(async move {
                     let old_config = last_config.load_full();
                     match build_app_cfg(config_file_path, &app_dir, &app_name).await {
-                        Ok((_, new_config, _)) => {
+                        Ok((new_config, _)) => {
                             let changed = diff_config(&old_config, &new_config);
                             if !changed.is_empty() {
                                 info!("app config changed: {:?}", changed);
                                 last_config.store(Arc::new(new_config.clone()));
+
+                                let base_config: BaseConfig = match config.clone().try_deserialize()
+                                {
+                                    Ok(base_config) => base_config,
+                                    Err(e) => {
+                                        error!("deserialize base config error: {:?}", e);
+                                        return;
+                                    }
+                                };
+                                if let Some(log_config) = base_config.clone().log {
+                                    let changed = HashMap::new();
+                                    if let Err(e) =
+                                        log_config_changed_tx.send((log_config, changed))
+                                    {
+                                        error!("send log config changed error: {:?}", e);
+                                    }
+                                }
+
                                 match deserialize_config::<T>(new_config).await {
                                     Ok(app_config) => {
                                         if let Err(e) =
@@ -162,7 +184,7 @@ async fn build_app_cfg(
     config_file_path: Option<String>,
     app_dir: &PathBuf,
     app_file_name_without_ext: &str,
-) -> crate::cfg::Result<(BaseConfig, Config, Vec<String>)> {
+) -> crate::cfg::Result<(Config, Vec<String>)> {
     build_cfg(
         app_dir,
         "APP",
