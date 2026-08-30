@@ -114,14 +114,37 @@ impl ConfigCenterClient for EtcdClient {
         })
     }
 
+    async fn fetch_by_key(&self, key: &ConfigKey) -> Result<ConfigItem, ConfigCenterError> {
+        let etcd_key = key.to_string();
+        let mut client = self.etcd_client.clone();
+        let resp = client
+            .get(etcd_key.clone(), Some(GetOptions::new().with_prefix()))
+            .await
+            .map_err(|e| ConfigCenterError::Connection(e.to_string()))?;
+        let kv = resp
+            .kvs()
+            .first()
+            .ok_or_else(|| ConfigCenterError::NotFound(key.clone()))?;
+        let content = kv
+            .value_str()
+            .map_err(|e| ConfigCenterError::Parse(e.to_string()))?
+            .to_string();
+        Ok(ConfigItem {
+            key: key.clone(),
+            format: key
+                .infer_file_format()
+                .ok_or(ConfigCenterError::UnknownFileFormat(etcd_key))?,
+            content,
+            version: Some(kv.mod_revision().to_string()),
+        })
+    }
+
     async fn watch(
         &self,
         config_changed_sender: watch::Sender<()>,
     ) -> Result<(), ConfigCenterError> {
         let key = self.key()?;
 
-        // 1) 先在持有锁的情况下创建 WatchStream，然后立即释放锁，
-        //    避免后续长连接流阻塞其它 get/publish。
         let watch_stream = {
             let mut etcd_client = self.etcd_client.clone();
             etcd_client
@@ -130,15 +153,10 @@ impl ConfigCenterClient for EtcdClient {
                 .map_err(|e| ConfigCenterError::Connection(e.to_string()))?
         };
 
-        // 2) 后台任务：消费 WatchStream，把 etcd 事件翻译成 crate 内部的 ConfigEvent。
         let join_handle = tokio::spawn(async move {
             let mut stream = watch_stream;
 
             while let Ok(Some(resp)) = stream.message().await {
-                // 0.19 的 WatchResponse 有三种形态：
-                //   * 创建回执：created() == true，events() 通常为空；
-                //   * 取消回执：canceled() == true，流到此结束，应当退出；
-                //   * 事件响应：events() 里装着本次变更的 KeyValue 列表。
                 if resp.canceled() {
                     tracing::warn!(
                         watch_id = resp.watch_id(),
@@ -149,7 +167,6 @@ impl ConfigCenterClient for EtcdClient {
                 }
 
                 if !resp.events().is_empty() {
-                    // 整批事件只发一次通知
                     if config_changed_sender.send(()).is_err() {
                         return;
                     }
@@ -158,6 +175,45 @@ impl ConfigCenterClient for EtcdClient {
         });
 
         *self.config_watch_join_handle.lock().unwrap() = Some(join_handle);
+
+        Ok(())
+    }
+
+    async fn watch_by_key(
+        &self,
+        key: &ConfigKey,
+        config_changed_sender: watch::Sender<()>,
+    ) -> Result<(), ConfigCenterError> {
+        let etcd_key = key.to_string();
+
+        let watch_stream = {
+            let mut etcd_client = self.etcd_client.clone();
+            etcd_client
+                .watch(etcd_key, None)
+                .await
+                .map_err(|e| ConfigCenterError::Connection(e.to_string()))?
+        };
+
+        tokio::spawn(async move {
+            let mut stream = watch_stream;
+
+            while let Ok(Some(resp)) = stream.message().await {
+                if resp.canceled() {
+                    tracing::warn!(
+                        watch_id = resp.watch_id(),
+                        reason = %resp.cancel_reason(),
+                        "etcd watch canceled"
+                    );
+                    break;
+                }
+
+                if !resp.events().is_empty() {
+                    if config_changed_sender.send(()).is_err() {
+                        return;
+                    }
+                }
+            }
+        });
 
         Ok(())
     }

@@ -29,7 +29,11 @@ pub fn get_hub_client() -> Result<Arc<HubClient>, CfgError> {
 
 pub async fn get_config() -> Result<Option<ConfigItem>, CfgError> {
     match get_hub_client() {
-        Ok(hub_client) => Ok(hub_client.get_config().await?),
+        Ok(hub_client) => {
+            let config = hub_client.get_config().await?;
+            info!("get config center config: {:?}", config);
+            Ok(config)
+        }
         Err(e) => {
             error!("get config failed: {:?}", e);
             Ok(None)
@@ -49,6 +53,7 @@ pub struct HubClient {
     registry: Option<Arc<dyn RegistryCenterClient>>,
     config_key: Option<ConfigKey>,
     snapshot_dir: Option<PathBuf>,
+    common_config_keys: Vec<ConfigKey>,
     config_watch_join_handle: Mutex<Option<tokio::task::JoinHandle<()>>>,
 }
 
@@ -62,152 +67,220 @@ impl Drop for HubClient {
 
 impl HubClient {
     pub async fn new(micro_svc_config: MicroSvcConfig) -> Result<Self, CfgError> {
-        let (config_center_client, registry_center_client, config_key, snapshot_dir) =
-            if let Some(consul_config) = micro_svc_config.clone().consul {
-                let snapshot_dir = consul_config
-                    .config
-                    .as_ref()
-                    .map(|c| c.snapshot_dir.clone());
-                let config_key = consul_config
-                    .config
-                    .as_ref()
-                    .and_then(|c| {
-                        build_config_key(
-                            &micro_svc_config.svc_name,
-                            &micro_svc_config.profile,
-                            &consul_config.hub_client.namespace,
-                            &consul_config.hub_client.group,
-                            &c.file_format,
-                        )
-                    });
-                let client = ConsulClient::new(micro_svc_config)
-                    .map(Arc::new)
-                    .map_err(|e| {
-                        warn!("failed to create consul client: {:?}, will use snapshot if available", e);
-                        e
-                    })
-                    .ok();
-                let config_center_client = client.as_ref().and_then(|c| {
-                    consul_config.config.map(|_| {
-                        let tmp: Arc<dyn ConfigCenterClient> = c.clone();
-                        tmp
-                    })
-                });
-                let registry_center_client = client.as_ref().and_then(|c| {
-                    consul_config.registry.map(|_| {
-                        let tmp: Arc<dyn RegistryCenterClient> = c.clone();
-                        tmp
-                    })
-                });
-                (
-                    config_center_client,
-                    registry_center_client,
-                    config_key,
-                    snapshot_dir,
+        let (
+            config_center_client,
+            registry_center_client,
+            config_key,
+            snapshot_dir,
+            common_config_keys,
+        ) = if let Some(consul_config) = micro_svc_config.clone().consul {
+            let snapshot_dir = consul_config
+                .config
+                .as_ref()
+                .map(|c| c.snapshot_dir.clone());
+            let config_key = consul_config.config.as_ref().and_then(|c| {
+                build_config_key(
+                    &micro_svc_config.svc_name,
+                    &micro_svc_config.profile,
+                    &consul_config.hub_client.namespace,
+                    &consul_config.hub_client.group,
+                    &c.file_format,
                 )
-            } else if let Some(etcd_config) = micro_svc_config.clone().etcd {
-                let snapshot_dir = etcd_config.config.as_ref().map(|c| c.snapshot_dir.clone());
-                let config_key = etcd_config.config.as_ref().and_then(|c| {
-                    build_config_key(
-                        &micro_svc_config.svc_name,
+            });
+            let common_config_keys = consul_config
+                .config
+                .as_ref()
+                .map(|c| {
+                    build_common_config_keys(
+                        &c.common_configs,
+                        &consul_config.hub_client.namespace,
+                        &consul_config.hub_client.group,
                         &micro_svc_config.profile,
+                    )
+                })
+                .unwrap_or_default();
+            let client = ConsulClient::new(micro_svc_config)
+                .map(Arc::new)
+                .map_err(|e| {
+                    warn!(
+                        "failed to create consul client: {:?}, will use snapshot if available",
+                        e
+                    );
+                    e
+                })
+                .ok();
+            let config_center_client = client.as_ref().and_then(|c| {
+                consul_config.config.map(|_| {
+                    let tmp: Arc<dyn ConfigCenterClient> = c.clone();
+                    tmp
+                })
+            });
+            let registry_center_client = client.as_ref().and_then(|c| {
+                consul_config.registry.map(|_| {
+                    let tmp: Arc<dyn RegistryCenterClient> = c.clone();
+                    tmp
+                })
+            });
+            (
+                config_center_client,
+                registry_center_client,
+                config_key,
+                snapshot_dir,
+                common_config_keys,
+            )
+        } else if let Some(etcd_config) = micro_svc_config.clone().etcd {
+            let snapshot_dir = etcd_config.config.as_ref().map(|c| c.snapshot_dir.clone());
+            let config_key = etcd_config.config.as_ref().and_then(|c| {
+                build_config_key(
+                    &micro_svc_config.svc_name,
+                    &micro_svc_config.profile,
+                    &etcd_config.hub_client.namespace,
+                    &etcd_config.hub_client.group,
+                    &c.file_format,
+                )
+            });
+            let common_config_keys = etcd_config
+                .config
+                .as_ref()
+                .map(|c| {
+                    build_common_config_keys(
+                        &c.common_configs,
                         &etcd_config.hub_client.namespace,
                         &etcd_config.hub_client.group,
-                        &c.file_format,
+                        &micro_svc_config.profile,
                     )
-                });
-                let client = EtcdClient::new(micro_svc_config).await
-                    .map(Arc::new)
-                    .map_err(|e| {
-                        warn!("failed to create etcd client: {:?}, will use snapshot if available", e);
+                })
+                .unwrap_or_default();
+            let client = EtcdClient::new(micro_svc_config)
+                .await
+                .map(Arc::new)
+                .map_err(|e| {
+                    warn!(
+                        "failed to create etcd client: {:?}, will use snapshot if available",
                         e
-                    })
-                    .ok();
-                let config_center_client = client.as_ref().and_then(|c| {
-                    etcd_config.config.map(|_| {
-                        let tmp: Arc<dyn ConfigCenterClient> = c.clone();
-                        tmp
-                    })
-                });
-                let registry_center_client = client.as_ref().and_then(|c| {
-                    etcd_config.registry.map(|_| {
-                        let tmp: Arc<dyn RegistryCenterClient> = c.clone();
-                        tmp
-                    })
-                });
-                (
-                    config_center_client,
-                    registry_center_client,
-                    config_key,
-                    snapshot_dir,
+                    );
+                    e
+                })
+                .ok();
+            let config_center_client = client.as_ref().and_then(|c| {
+                etcd_config.config.map(|_| {
+                    let tmp: Arc<dyn ConfigCenterClient> = c.clone();
+                    tmp
+                })
+            });
+            let registry_center_client = client.as_ref().and_then(|c| {
+                etcd_config.registry.map(|_| {
+                    let tmp: Arc<dyn RegistryCenterClient> = c.clone();
+                    tmp
+                })
+            });
+            (
+                config_center_client,
+                registry_center_client,
+                config_key,
+                snapshot_dir,
+                common_config_keys,
+            )
+        } else if let Some(nacos_config) = micro_svc_config.clone().nacos {
+            let snapshot_dir = nacos_config.config.as_ref().map(|c| c.snapshot_dir.clone());
+            let config_key = nacos_config.config.as_ref().and_then(|c| {
+                let namespace = nacos_config
+                    .hub_client
+                    .namespace
+                    .clone()
+                    .or(Some("public".to_string()));
+                let group = nacos_config
+                    .hub_client
+                    .group
+                    .clone()
+                    .or_else(|| micro_svc_config.profile.clone())
+                    .or(Some("DEFAULT_GROUP".to_string()));
+                build_config_key(
+                    &micro_svc_config.svc_name,
+                    &None,
+                    &namespace,
+                    &group,
+                    &c.file_format,
                 )
-            } else if let Some(nacos_config) = micro_svc_config.clone().nacos {
-                let snapshot_dir = nacos_config
-                    .config
-                    .as_ref()
-                    .map(|c| c.snapshot_dir.clone());
-                let config_key = nacos_config.config.as_ref().and_then(|c| {
-                    let namespace = nacos_config
-                        .hub_client
-                        .namespace
-                        .clone()
-                        .or(Some("public".to_string()));
-                    let group = nacos_config
-                        .hub_client
-                        .group
-                        .clone()
-                        .or_else(|| micro_svc_config.profile.clone())
-                        .or(Some("DEFAULT_GROUP".to_string()));
-                    build_config_key(
-                        &micro_svc_config.svc_name,
+            });
+            let nacos_namespace = nacos_config
+                .hub_client
+                .namespace
+                .clone()
+                .or(Some("public".to_string()));
+            let nacos_group = nacos_config
+                .hub_client
+                .group
+                .clone()
+                .or_else(|| micro_svc_config.profile.clone())
+                .or(Some("DEFAULT_GROUP".to_string()));
+            let common_config_keys = nacos_config
+                .config
+                .as_ref()
+                .map(|c| {
+                    build_common_config_keys(
+                        &c.common_configs,
+                        &nacos_namespace,
+                        &nacos_group,
                         &None,
-                        &namespace,
-                        &group,
-                        &c.file_format,
                     )
-                });
-                let client = NacosClient::new(micro_svc_config).await
-                    .map(Arc::new)
-                    .map_err(|e| {
-                        warn!("failed to create nacos client: {:?}, will use snapshot if available", e);
+                })
+                .unwrap_or_default();
+            let client = NacosClient::new(micro_svc_config)
+                .await
+                .map(Arc::new)
+                .map_err(|e| {
+                    warn!(
+                        "failed to create nacos client: {:?}, will use snapshot if available",
                         e
-                    })
-                    .ok();
-                let config_center_client = client.as_ref().and_then(|c| {
-                    nacos_config.config.map(|_| {
-                        let tmp: Arc<dyn ConfigCenterClient> = c.clone();
-                        tmp
-                    })
-                });
-                let registry_center_client = client.as_ref().and_then(|c| {
-                    nacos_config.registry.map(|_| {
-                        let tmp: Arc<dyn RegistryCenterClient> = c.clone();
-                        tmp
-                    })
-                });
-                (
-                    config_center_client,
-                    registry_center_client,
-                    config_key,
-                    snapshot_dir,
-                )
-            } else {
-                (None, None, None, None)
-            };
+                    );
+                    e
+                })
+                .ok();
+            let config_center_client = client.as_ref().and_then(|c| {
+                nacos_config.config.map(|_| {
+                    let tmp: Arc<dyn ConfigCenterClient> = c.clone();
+                    tmp
+                })
+            });
+            let registry_center_client = client.as_ref().and_then(|c| {
+                nacos_config.registry.map(|_| {
+                    let tmp: Arc<dyn RegistryCenterClient> = c.clone();
+                    tmp
+                })
+            });
+            (
+                config_center_client,
+                registry_center_client,
+                config_key,
+                snapshot_dir,
+                common_config_keys,
+            )
+        } else {
+            (None, None, None, None, Vec::new())
+        };
         Ok(Self {
             config: config_center_client,
             registry: registry_center_client,
             config_key,
             snapshot_dir,
+            common_config_keys,
             config_watch_join_handle: Mutex::new(None),
         })
     }
 
     pub async fn get_config(&self) -> Result<Option<ConfigItem>, CfgError> {
         if let Some(config_center_client) = self.config.as_ref() {
+            let common_configs = self
+                .fetch_common_configs(config_center_client)
+                .await;
+
             match config_center_client.fetch().await {
-                Ok(item) => {
+                Ok(mut item) => {
                     self.save_snapshot(&item);
+                    if !common_configs.is_empty() {
+                        item = merge_common_configs(item, &common_configs);
+                    }
                     Ok(Some(item))
                 }
                 Err(e) => {
@@ -215,8 +288,11 @@ impl HubClient {
                     let key = config_center_client
                         .config_key()
                         .map_err(|e| CfgError::Init(e.to_string()))?;
-                    if let Some(item) = self.load_snapshot(&key) {
+                    if let Some(mut item) = self.load_snapshot(&key) {
                         warn!("using snapshot config for key: {}", key);
+                        if !common_configs.is_empty() {
+                            item = merge_common_configs(item, &common_configs);
+                        }
                         return Ok(Some(item));
                     }
                     Err(CfgError::Init(e.to_string()))
@@ -235,6 +311,41 @@ impl HubClient {
         } else {
             Ok(None)
         }
+    }
+
+    async fn fetch_common_configs(
+        &self,
+        client: &Arc<dyn ConfigCenterClient>,
+    ) -> Vec<ConfigItem> {
+        if self.common_config_keys.is_empty() {
+            return Vec::new();
+        }
+        info!(
+            "fetching {} common configs: {:?}",
+            self.common_config_keys.len(),
+            self.common_config_keys
+        );
+        let mut common_configs = Vec::with_capacity(self.common_config_keys.len());
+        for key in &self.common_config_keys {
+            match client.fetch_by_key(key).await {
+                Ok(item) => {
+                    info!("loaded common config: {}", key);
+                    self.save_snapshot(&item);
+                    common_configs.push(item);
+                }
+                Err(e) => {
+                    warn!(
+                        "failed to fetch common config {}: {:?}, trying snapshot",
+                        key, e
+                    );
+                    if let Some(item) = self.load_snapshot(key) {
+                        warn!("using snapshot for common config: {}", key);
+                        common_configs.push(item);
+                    }
+                }
+            }
+        }
+        common_configs
     }
 
     fn snapshot_dir(&self) -> Option<PathBuf> {
@@ -309,13 +420,23 @@ impl HubClient {
         ))?;
 
         let (config_changed_tx, mut config_changed_rx) = watch::channel(());
+
         config_center_client
-            .watch(config_changed_tx)
+            .watch(config_changed_tx.clone())
             .await
             .map_err(|e| CfgError::Init(e.to_string()))?;
 
+        for key in &self.common_config_keys {
+            if let Err(e) = config_center_client
+                .watch_by_key(key, config_changed_tx.clone())
+                .await
+            {
+                warn!("failed to watch common config {}: {:?}", key, e);
+            }
+        }
+
         let join_handle = tokio::spawn(async move {
-            info!("watch config changed...");
+            info!("watch config changed (including common configs)...");
             loop {
                 match config_changed_rx.changed().await {
                     Ok(_) => {
@@ -360,4 +481,28 @@ fn build_config_key(
     let data_id = svc_name.clone()?;
     let data_id = format!("{}.{}", data_id, file_format);
     Some(ConfigKey::new(namespace.clone(), group, data_id))
+}
+
+fn build_common_config_keys(
+    common_configs: &[String],
+    namespace: &Option<String>,
+    group: &Option<String>,
+    profile: &Option<String>,
+) -> Vec<ConfigKey> {
+    let effective_group = group.clone().or_else(|| profile.clone());
+    common_configs
+        .iter()
+        .map(|data_id| ConfigKey::new(namespace.clone(), effective_group.clone(), data_id.clone()))
+        .collect()
+}
+
+fn merge_common_configs(mut service_item: ConfigItem, common_configs: &[ConfigItem]) -> ConfigItem {
+    let mut merged = String::new();
+    for common in common_configs {
+        merged.push_str(&common.content);
+        merged.push('\n');
+    }
+    merged.push_str(&service_item.content);
+    service_item.content = merged;
+    service_item
 }

@@ -46,16 +46,19 @@ pub struct NacosClient {
     service: ConfigService,
     config_key: Option<ConfigKey>,
     md5: Mutex<Option<String>>,
-    config_listener: Mutex<Option<(String, String, Arc<Bridge>)>>,
+    config_listener: Mutex<Vec<(String, String, Arc<Bridge>)>>,
 }
 
 impl Drop for NacosClient {
     fn drop(&mut self) {
-        if let Some((data_id, group, listener)) = self.config_listener.lock().unwrap().take() {
+        let listeners: Vec<_> = std::mem::take(&mut *self.config_listener.lock().unwrap());
+        if !listeners.is_empty() {
             if let Ok(handle) = tokio::runtime::Handle::try_current() {
-                let service = self.service.clone(); // ConfigService: Clone
+                let service = self.service.clone();
                 handle.spawn(async move {
-                    let _ = service.remove_listener(data_id, group, listener).await;
+                    for (data_id, group, listener) in listeners {
+                        let _ = service.remove_listener(data_id, group, listener).await;
+                    }
                 });
             }
         }
@@ -106,7 +109,7 @@ impl NacosClient {
             service,
             config_key,
             md5: Mutex::new(None),
-            config_listener: Mutex::new(None),
+            config_listener: Mutex::new(Vec::new()),
         })
     }
 }
@@ -150,13 +153,34 @@ impl ConfigCenterClient for NacosClient {
         })
     }
 
+    async fn fetch_by_key(&self, key: &ConfigKey) -> Result<ConfigItem, ConfigCenterError> {
+        let data_id = key.data_id.clone();
+        let group = key
+            .group
+            .clone()
+            .ok_or(ConfigCenterError::Parse("missing group".to_string()))?;
+        let resp = self
+            .service
+            .get_config(data_id.clone(), group.clone())
+            .await
+            .map_err(|e| ConfigCenterError::Connection(e.to_string()))?;
+        Ok(ConfigItem {
+            key: key.clone(),
+            format: key
+                .infer_file_format()
+                .ok_or(ConfigCenterError::UnknownFileFormat(data_id))?,
+            content: resp.content().to_string(),
+            version: Some(resp.md5().to_string()),
+        })
+    }
+
     async fn watch(
         &self,
         config_changed_sender: watch::Sender<()>,
     ) -> Result<(), ConfigCenterError> {
         let config_key = self.config_key()?;
         let key = self.key()?;
-        let group = config_key.clone().group.unwrap(); // group在new时设置了默认值，不可能为None
+        let group = config_key.clone().group.unwrap();
 
         let md5 = self.md5.lock().unwrap().clone();
         let bridge = Arc::new(Bridge {
@@ -169,8 +193,39 @@ impl ConfigCenterClient for NacosClient {
             .await
             .map_err(|e| ConfigCenterError::Connection(e.to_string()))?;
 
-        // 保存，便于 Drop 时注销
-        *self.config_listener.lock().unwrap() = Some((key, group, bridge));
+        self.config_listener
+            .lock()
+            .unwrap()
+            .push((key, group, bridge));
+
+        Ok(())
+    }
+
+    async fn watch_by_key(
+        &self,
+        key: &ConfigKey,
+        config_changed_sender: watch::Sender<()>,
+    ) -> Result<(), ConfigCenterError> {
+        let data_id = key.data_id.clone();
+        let group = key
+            .group
+            .clone()
+            .ok_or(ConfigCenterError::Parse("missing group".to_string()))?;
+
+        let bridge = Arc::new(Bridge {
+            tx: config_changed_sender,
+            md5: String::new(),
+        });
+
+        self.service
+            .add_listener(data_id.clone(), group.clone(), bridge.clone())
+            .await
+            .map_err(|e| ConfigCenterError::Connection(e.to_string()))?;
+
+        self.config_listener
+            .lock()
+            .unwrap()
+            .push((data_id, group, bridge));
 
         Ok(())
     }

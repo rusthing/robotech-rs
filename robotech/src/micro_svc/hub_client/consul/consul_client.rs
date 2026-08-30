@@ -176,6 +176,33 @@ impl ConfigCenterClient for ConsulClient {
         })
     }
 
+    async fn fetch_by_key(&self, key: &ConfigKey) -> Result<ConfigItem, ConfigCenterError> {
+        let consul_key = key.to_string();
+        let entry = Self::fetch_kv_raw(
+            &self.reqwest_client,
+            &self.base_url,
+            &consul_key,
+            &None,
+            &self.blocking_query_timeout,
+        )
+        .await
+        .map_err(|e| ConfigCenterError::Connection(e.to_string()))?
+        .ok_or(ConfigCenterError::NotFound(key.clone()))?;
+
+        let raw = entry
+            .value
+            .ok_or(ConfigCenterError::NotFound(key.clone()))?;
+        let content = decode_value(&raw).map_err(|e| ConfigCenterError::Parse(e.to_string()))?;
+        Ok(ConfigItem {
+            key: key.clone(),
+            format: key
+                .infer_file_format()
+                .ok_or(ConfigCenterError::UnknownFileFormat(consul_key.to_string()))?,
+            content,
+            version: Some(entry.modify_index.to_string()),
+        })
+    }
+
     async fn watch(
         &self,
         config_changed_sender: watch::Sender<()>,
@@ -184,7 +211,7 @@ impl ConfigCenterClient for ConsulClient {
         let base_url = self.base_url.to_string();
         let key = self.key()?;
         let mut last_index = self.last_index.lock().unwrap().clone();
-        let blocking_query_timeout = self.blocking_query_timeout.clone();
+        let blocking_query_timeout = self.blocking_query_timeout;
         let join_handle = tokio::spawn(async move {
             loop {
                 match Self::fetch_kv_raw(
@@ -197,10 +224,8 @@ impl ConfigCenterClient for ConsulClient {
                 .await
                 {
                     Ok(Some(entry)) => {
-                        // blocking query 超时也会返回同样的 index，这里靠 index 变化去重，
-                        // 避免超时空返回被误当成一次真实变更推送出去。
-                        if let Some(last_index) = last_index.clone() {
-                            if entry.modify_index.to_string() == last_index.clone() {
+                        if let Some(ref last_idx) = last_index {
+                            if entry.modify_index.to_string() == *last_idx {
                                 continue;
                             }
                         }
@@ -216,7 +241,6 @@ impl ConfigCenterClient for ConsulClient {
                         tokio::time::sleep(Duration::from_secs(3)).await;
                     }
                     Err(_) => {
-                        // 网络抖动，退避重试，不因为一次失败就终止整个订阅
                         tokio::time::sleep(Duration::from_secs(3)).await;
                     }
                 }
@@ -224,6 +248,55 @@ impl ConfigCenterClient for ConsulClient {
         });
 
         *self.config_watch_join_handle.lock().unwrap() = Some(join_handle);
+
+        Ok(())
+    }
+
+    async fn watch_by_key(
+        &self,
+        key: &ConfigKey,
+        config_changed_sender: watch::Sender<()>,
+    ) -> Result<(), ConfigCenterError> {
+        let reqwest_client = self.reqwest_client.clone();
+        let base_url = self.base_url.to_string();
+        let consul_key = key.to_string();
+        let blocking_query_timeout = self.blocking_query_timeout;
+
+        tokio::spawn(async move {
+            let mut last_index: Option<String> = None;
+            loop {
+                match Self::fetch_kv_raw(
+                    &reqwest_client,
+                    &base_url,
+                    &consul_key,
+                    &last_index,
+                    &blocking_query_timeout,
+                )
+                .await
+                {
+                    Ok(Some(entry)) => {
+                        if let Some(ref last_idx) = last_index {
+                            if entry.modify_index.to_string() == *last_idx {
+                                continue;
+                            }
+                        }
+                        last_index = Some(entry.modify_index.to_string());
+                        if config_changed_sender.send(()).is_err() {
+                            return;
+                        }
+                    }
+                    Ok(None) => {
+                        if config_changed_sender.send(()).is_err() {
+                            return;
+                        }
+                        tokio::time::sleep(Duration::from_secs(3)).await;
+                    }
+                    Err(_) => {
+                        tokio::time::sleep(Duration::from_secs(3)).await;
+                    }
+                }
+            }
+        });
 
         Ok(())
     }
