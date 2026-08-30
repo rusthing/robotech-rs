@@ -1,7 +1,8 @@
 use crate::cfg::base_config::BaseConfig;
 use crate::cfg::cfg_error::CfgError;
+use crate::micro_svc::get_config;
 #[cfg(any(feature = "config-center", feature = "registry-center"))]
-use crate::micro_svc::{get_hub_client, setup_hub_client, MicroSvcConfig, MICRO_SVC_CONFIG_KEY};
+use crate::micro_svc::{setup_hub_client, MicroSvcConfig, MICRO_SVC_CONFIG_KEY};
 use config::builder::DefaultState;
 use config::{Config, ConfigBuilder};
 use std::path::{Path, PathBuf};
@@ -51,11 +52,10 @@ pub async fn build_cfg(
     if let Some(app_name) = app_file_name_without_ext {
         // 初始化配置中心和注册中心的客户端
         #[cfg(any(feature = "config-center", feature = "registry-center"))]
-        let has_hub_client =
-            init_hub_client(config.clone(), app_name, &base_config.profile).await?;
+        init_hub_client(config.clone(), app_name, &base_config.profile).await?;
         // 从配置中心获取配置文件内容并加载到config中
         #[cfg(feature = "config-center")]
-        if has_hub_client && let Some(config_item) = get_hub_client()?.get_config().await? {
+        if let Some(config_item) = get_config().await? {
             config = config.add_source(config::File::from_str(
                 &config_item.content,
                 config_item.format,
@@ -86,7 +86,7 @@ async fn init_hub_client(
     config: ConfigBuilder<DefaultState>,
     app_name: &str,
     profile: &Option<String>,
-) -> Result<bool> {
+) -> Result<()> {
     // 如果 micro-svc 没配置，直接返回 None，跳过 hub client 初始化
     let mut micro_svc_config: MicroSvcConfig = match config
         .build()
@@ -96,7 +96,7 @@ async fn init_hub_client(
         Ok(value) => value,
         Err(e) => {
             warn!("micro-svc config not found or deserialize failed: {:?}", e);
-            return Ok(false);
+            return Ok(());
         }
     };
     if micro_svc_config.svc_name.is_none() {
@@ -106,7 +106,7 @@ async fn init_hub_client(
         micro_svc_config.profile = profile.clone();
     }
     setup_hub_client(micro_svc_config).await?;
-    Ok(true)
+    Ok(())
 }
 
 /// # 加载配置文件
