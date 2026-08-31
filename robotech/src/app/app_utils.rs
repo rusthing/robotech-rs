@@ -94,7 +94,7 @@ where
             info!("exit watch app config");
         });
 
-        // 提取公共的配置重载逻辑
+        // 公共的配置重载逻辑
         type ReloadFuture = Pin<Box<dyn Future<Output = ()> + Send>>;
         let reload_config_fn: Arc<dyn Fn() -> ReloadFuture + Send + Sync> = {
             let config_changed_tx = config_changed_tx.clone();
