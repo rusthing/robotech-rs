@@ -2,8 +2,8 @@ use crate::app::AppError;
 use crate::cfg::{build_cfg, deserialize_config, BaseConfig, CfgError};
 use crate::env::{AppEnv, EnvError, APP_ENV};
 use crate::log::LogConfig;
+use crate::micro_svc::watch_config_changed;
 #[cfg(feature = "config-center")]
-use crate::micro_svc::get_hub_client;
 use arc_swap::ArcSwap;
 use config::{Config, Value};
 use std::collections::HashMap;
@@ -202,25 +202,22 @@ fn register_config_center_watch(
     reload: Arc<dyn Fn() -> Pin<Box<dyn Future<Output = ()> + Send>> + Send + Sync>,
 ) -> Pin<Box<dyn Future<Output = ()> + Send>> {
     Box::pin(async move {
-        if let Ok(hub_client) = get_hub_client() {
-            let reload2 = Arc::clone(&reload);
-            if let Err(e) = hub_client
-                .watch_config_changed(move || {
-                    let reload = Arc::clone(&reload2);
-                    async move {
-                        // 用 tokio::spawn 避免旧 HubClient drop 时
-                        // abort 掉当前 watch task 导致回调被取消
-                        tokio::spawn(async move {
-                            reload().await;
-                            register_config_center_watch(reload).await;
-                        });
-                        Ok(())
-                    }
-                })
-                .await
-            {
-                warn!("watch config center failed: {:?}", e);
+        let reload_clone = Arc::clone(&reload);
+        if let Err(e) = watch_config_changed(move || {
+            let reload = Arc::clone(&reload_clone);
+            async move {
+                // 用 tokio::spawn 避免旧 HubClient drop 时
+                // abort 掉当前 watch task 导致回调被取消
+                tokio::spawn(async move {
+                    reload().await;
+                    register_config_center_watch(reload).await;
+                });
+                Ok(())
             }
+        })
+        .await
+        {
+            warn!("watch config center failed: {:?}", e);
         }
     })
 }

@@ -10,10 +10,13 @@ use crate::micro_svc::config_center::{
     ConfigCenterClient, ConfigCenterError, ConfigItem, ConfigKey,
 };
 use crate::micro_svc::hub_client_config::HubClientConfig;
-use crate::micro_svc::{HubClientError, MicroSvcConfig, RegistryCenterClient};
+use crate::micro_svc::{
+    HubClientError, MicroSvcConfig, RegistryCenterClient, RegistryCenterError, ServiceInstance,
+};
 use async_trait::async_trait;
 use base64::Engine;
 use serde::Deserialize;
+use std::collections::HashMap;
 use std::sync::Mutex;
 use std::time::Duration;
 use tokio::sync::watch;
@@ -243,5 +246,94 @@ impl ConfigCenterClient for ConsulClient {
 impl RegistryCenterClient for ConsulClient {
     fn name(&self) -> &'static str {
         Self::CLIENT_NAME
+    }
+
+    async fn register(&self, instance: &ServiceInstance) -> Result<(), RegistryCenterError> {
+        let url = format!("{}/v1/agent/service/register", self.base_url);
+        let body = serde_json::json!({
+            "ID": instance.instance_id,
+            "Name": instance.service_name,
+            "Address": instance.ip,
+            "Port": instance.port,
+            "Meta": instance.metadata,
+            "Check": instance.health_check_url.as_ref().map(|url| {
+                serde_json::json!({
+                    "HTTP": url,
+                    "Interval": "10s",
+                    "DeregisterCriticalServiceAfter": "30s"
+                })
+            }),
+        });
+        self.reqwest_client
+            .put(&url)
+            .json(&body)
+            .send()
+            .await
+            .map_err(|e| RegistryCenterError::Connection(e.to_string()))?;
+        Ok(())
+    }
+
+    async fn deregister(&self, instance_id: &str) -> Result<(), RegistryCenterError> {
+        let url = format!(
+            "{}/v1/agent/service/deregister/{}",
+            self.base_url, instance_id
+        );
+        self.reqwest_client
+            .put(&url)
+            .send()
+            .await
+            .map_err(|e| RegistryCenterError::Connection(e.to_string()))?;
+        Ok(())
+    }
+
+    async fn discover(
+        &self,
+        service_name: &str,
+    ) -> Result<Vec<ServiceInstance>, RegistryCenterError> {
+        #[derive(Deserialize)]
+        struct ConsulHealthEntry {
+            #[serde(rename = "Service")]
+            service: ConsulServiceEntry,
+        }
+
+        #[derive(Deserialize)]
+        struct ConsulServiceEntry {
+            #[serde(rename = "ID")]
+            id: String,
+            #[serde(rename = "Service")]
+            service: String,
+            #[serde(rename = "Address")]
+            address: String,
+            #[serde(rename = "Port")]
+            port: u16,
+            #[serde(default, rename = "Meta")]
+            meta: HashMap<String, String>,
+        }
+
+        let url = format!(
+            "{}/v1/health/service/{}?passing=true",
+            self.base_url, service_name
+        );
+        let resp = self
+            .reqwest_client
+            .get(&url)
+            .send()
+            .await
+            .map_err(|e| RegistryCenterError::Connection(e.to_string()))?;
+        let entries: Vec<ConsulHealthEntry> = resp
+            .json()
+            .await
+            .map_err(|e| RegistryCenterError::Parse(e.to_string()))?;
+        Ok(entries
+            .into_iter()
+            .map(|entry| ServiceInstance {
+                instance_id: entry.service.id,
+                service_name: entry.service.service,
+                ip: entry.service.address,
+                port: entry.service.port,
+                metadata: entry.service.meta,
+                health_check_url: None,
+            })
+            .collect())
     }
 }

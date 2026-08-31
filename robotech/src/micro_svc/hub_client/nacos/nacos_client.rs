@@ -16,13 +16,14 @@ use async_trait::async_trait;
 use nacos_sdk::api::config::{
     ConfigChangeListener, ConfigResponse, ConfigService, ConfigServiceBuilder,
 };
+use nacos_sdk::api::naming::{NamingService, NamingServiceBuilder, ServiceInstance as NacosInstance};
 use nacos_sdk::api::props::ClientProps;
 use tokio::sync::watch;
 
 use crate::micro_svc::hub_client_config::HubClientConfig;
 use crate::micro_svc::{
     ConfigCenterClient, ConfigCenterError, ConfigItem, ConfigKey, HubClientError, MicroSvcConfig,
-    RegistryCenterClient,
+    RegistryCenterClient, RegistryCenterError, ServiceInstance,
 };
 
 /// # 桥接器
@@ -44,6 +45,7 @@ impl ConfigChangeListener for Bridge {
 
 pub struct NacosClient {
     service: ConfigService,
+    naming_service: NamingService,
     config_key: Option<ConfigKey>,
     config_listener: Mutex<Vec<(String, String, Arc<Bridge>)>>,
 }
@@ -98,14 +100,19 @@ impl NacosClient {
             })
             .transpose()?;
         let props = ClientProps::new()
-            .server_addr(server_addr)
-            .namespace(namespace);
-        let service = ConfigServiceBuilder::new(props)
+            .server_addr(server_addr.clone())
+            .namespace(namespace.clone());
+        let service = ConfigServiceBuilder::new(props.clone())
+            .build()
+            .await
+            .map_err(|e| HubClientError::Connection(e.to_string()))?;
+        let naming_service = NamingServiceBuilder::new(props)
             .build()
             .await
             .map_err(|e| HubClientError::Connection(e.to_string()))?;
         Ok(Self {
             service,
+            naming_service,
             config_key,
             config_listener: Mutex::new(Vec::new()),
         })
@@ -180,5 +187,61 @@ impl ConfigCenterClient for NacosClient {
 impl RegistryCenterClient for NacosClient {
     fn name(&self) -> &'static str {
         Self::CLIENT_NAME
+    }
+
+    async fn register(&self, instance: &ServiceInstance) -> Result<(), RegistryCenterError> {
+        let nacos_instance = NacosInstance {
+            instance_id: Some(instance.instance_id.clone()),
+            ip: instance.ip.clone(),
+            port: instance.port as i32,
+            service_name: Some(instance.service_name.clone()),
+            metadata: instance.metadata.clone(),
+            ..Default::default()
+        };
+        self.naming_service
+            .register_instance(instance.service_name.clone(), None, nacos_instance)
+            .await
+            .map_err(|e| RegistryCenterError::Connection(e.to_string()))?;
+        Ok(())
+    }
+
+    async fn deregister(&self, instance_id: &str) -> Result<(), RegistryCenterError> {
+        let nacos_instance = NacosInstance {
+            instance_id: Some(instance_id.to_string()),
+            ..Default::default()
+        };
+        self.naming_service
+            .deregister_instance(String::new(), None, nacos_instance)
+            .await
+            .map_err(|e| RegistryCenterError::Connection(e.to_string()))?;
+        Ok(())
+    }
+
+    async fn discover(
+        &self,
+        service_name: &str,
+    ) -> Result<Vec<ServiceInstance>, RegistryCenterError> {
+        let instances = self
+            .naming_service
+            .select_instances(
+                service_name.to_string(),
+                None,
+                vec![],
+                false,
+                true,
+            )
+            .await
+            .map_err(|e| RegistryCenterError::Connection(e.to_string()))?;
+        Ok(instances
+            .into_iter()
+            .map(|i| ServiceInstance {
+                instance_id: i.instance_id.unwrap_or_default(),
+                service_name: i.service_name.unwrap_or_default(),
+                ip: i.ip,
+                port: i.port as u16,
+                metadata: i.metadata,
+                health_check_url: None,
+            })
+            .collect())
     }
 }

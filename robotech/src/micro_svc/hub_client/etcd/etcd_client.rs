@@ -15,7 +15,9 @@ use crate::micro_svc::config_center::{
     ConfigCenterClient, ConfigCenterError, ConfigItem, ConfigKey,
 };
 use crate::micro_svc::hub_client_config::HubClientConfig;
-use crate::micro_svc::{HubClientError, MicroSvcConfig, RegistryCenterClient};
+use crate::micro_svc::{
+    HubClientError, MicroSvcConfig, RegistryCenterClient, RegistryCenterError, ServiceInstance,
+};
 use async_trait::async_trait;
 use etcd_client::GetOptions;
 use std::sync::Mutex;
@@ -166,5 +168,67 @@ impl ConfigCenterClient for EtcdClient {
 impl RegistryCenterClient for EtcdClient {
     fn name(&self) -> &'static str {
         Self::CLIENT_NAME
+    }
+
+    async fn register(&self, instance: &ServiceInstance) -> Result<(), RegistryCenterError> {
+        let key = format!(
+            "{}/registry/{}/{}",
+            instance
+                .metadata
+                .get("namespace")
+                .cloned()
+                .unwrap_or_default(),
+            instance.service_name,
+            instance.instance_id
+        );
+        let value = serde_json::to_string(instance)
+            .map_err(|e| RegistryCenterError::Parse(e.to_string()))?;
+        let mut client = self.etcd_client.clone();
+        client
+            .put(key, value, None)
+            .await
+            .map_err(|e| RegistryCenterError::Connection(e.to_string()))?;
+        Ok(())
+    }
+
+    async fn deregister(&self, instance_id: &str) -> Result<(), RegistryCenterError> {
+        let prefix = format!("/registry/");
+        let mut client = self.etcd_client.clone();
+        let resp = client
+            .get(prefix, Some(GetOptions::new().with_prefix()))
+            .await
+            .map_err(|e| RegistryCenterError::Connection(e.to_string()))?;
+        for kv in resp.kvs() {
+            let key = kv.key_str().map_err(|e| RegistryCenterError::Parse(e.to_string()))?;
+            if key.ends_with(instance_id) {
+                client
+                    .delete(key, None)
+                    .await
+                    .map_err(|e| RegistryCenterError::Connection(e.to_string()))?;
+            }
+        }
+        Ok(())
+    }
+
+    async fn discover(
+        &self,
+        service_name: &str,
+    ) -> Result<Vec<ServiceInstance>, RegistryCenterError> {
+        let prefix = format!("/registry/{}", service_name);
+        let mut client = self.etcd_client.clone();
+        let resp = client
+            .get(prefix, Some(GetOptions::new().with_prefix()))
+            .await
+            .map_err(|e| RegistryCenterError::Connection(e.to_string()))?;
+        let mut instances = Vec::new();
+        for kv in resp.kvs() {
+            let value = kv
+                .value_str()
+                .map_err(|e| RegistryCenterError::Parse(e.to_string()))?;
+            let instance: ServiceInstance = serde_json::from_str(value)
+                .map_err(|e| RegistryCenterError::Parse(e.to_string()))?;
+            instances.push(instance);
+        }
+        Ok(instances)
     }
 }

@@ -2,7 +2,7 @@ use crate::cfg::CfgError;
 use crate::env::APP_ENV;
 use crate::micro_svc::{
     ConfigCenterClient, ConfigItem, ConfigKey, ConsulClient, EtcdClient, MicroSvcConfig,
-    NacosClient, RegistryCenterClient,
+    NacosClient, RegistryCenterClient, RegistryCenterError, ServiceInstance,
 };
 use arc_swap::ArcSwapOption;
 use config::FileFormat;
@@ -21,7 +21,7 @@ pub async fn setup_hub_client(micro_svc_config: MicroSvcConfig) -> Result<(), Cf
     Ok(())
 }
 
-pub fn get_hub_client() -> Result<Arc<HubClient>, CfgError> {
+fn get_hub_client() -> Result<Arc<HubClient>, CfgError> {
     HUB_CLIENT
         .load_full()
         .ok_or(CfgError::NotInit("HUB_CLIENT not initialized".to_string()))
@@ -39,6 +39,36 @@ pub async fn get_config() -> Result<Option<Vec<ConfigItem>>, CfgError> {
             Ok(None)
         }
     }
+}
+
+pub async fn watch_config_changed<F, Fut>(on_change: F) -> Result<(), CfgError>
+where
+    F: FnMut() -> Fut + Send + 'static,
+    Fut: Future<Output = anyhow::Result<()>> + Send + 'static,
+{
+    let hub_client = get_hub_client().map_err(|e| {
+        CfgError::NotInit(format!("hub client not initialized: {:?}", e).to_string())
+    })?;
+
+    hub_client.watch_config_changed(on_change).await
+}
+
+pub async fn register(instance: &ServiceInstance) -> Result<(), RegistryCenterError> {
+    let hub_client =
+        get_hub_client().map_err(|e| RegistryCenterError::Connection(e.to_string()))?;
+    hub_client.register(instance).await
+}
+
+pub async fn deregister(instance_id: &str) -> Result<(), RegistryCenterError> {
+    let hub_client =
+        get_hub_client().map_err(|e| RegistryCenterError::Connection(e.to_string()))?;
+    hub_client.deregister(instance_id).await
+}
+
+pub async fn discover(service_name: &str) -> Result<Vec<ServiceInstance>, RegistryCenterError> {
+    let hub_client =
+        get_hub_client().map_err(|e| RegistryCenterError::Connection(e.to_string()))?;
+    hub_client.discover(service_name).await
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -425,6 +455,30 @@ impl HubClient {
 
         *self.config_watch_join_handle.lock().unwrap() = Some(join_handle);
         Ok(())
+    }
+
+    pub async fn register(&self, instance: &ServiceInstance) -> Result<(), RegistryCenterError> {
+        let registry = self.registry.as_ref().ok_or_else(|| {
+            RegistryCenterError::Connection("registry center not configured".to_string())
+        })?;
+        registry.register(instance).await
+    }
+
+    pub async fn deregister(&self, instance_id: &str) -> Result<(), RegistryCenterError> {
+        let registry = self.registry.as_ref().ok_or_else(|| {
+            RegistryCenterError::Connection("registry center not configured".to_string())
+        })?;
+        registry.deregister(instance_id).await
+    }
+
+    pub async fn discover(
+        &self,
+        service_name: &str,
+    ) -> Result<Vec<ServiceInstance>, RegistryCenterError> {
+        let registry = self.registry.as_ref().ok_or_else(|| {
+            RegistryCenterError::Connection("registry center not configured".to_string())
+        })?;
+        registry.discover(service_name).await
     }
 }
 
