@@ -141,7 +141,6 @@ impl ConfigCenterClient for NacosClient {
                 .infer_file_format()
                 .ok_or(ConfigCenterError::UnknownFileFormat(data_id))?,
             content: resp.content().to_string(),
-            version: Some(resp.md5().to_string()),
         })
     }
 

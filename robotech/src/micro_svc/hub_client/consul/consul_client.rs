@@ -166,7 +166,6 @@ impl ConfigCenterClient for ConsulClient {
                 .infer_file_format()
                 .ok_or(ConfigCenterError::UnknownFileFormat(consul_key.to_string()))?,
             content,
-            version: Some(entry.modify_index.to_string()),
         })
     }
 

@@ -21,6 +21,7 @@ use etcd_client::GetOptions;
 use std::sync::Mutex;
 use tokio::sync::watch;
 use tokio::task::JoinHandle;
+use tracing::warn;
 
 pub struct EtcdClient {
     etcd_client: etcd_client::Client,
@@ -110,7 +111,6 @@ impl ConfigCenterClient for EtcdClient {
                 .infer_file_format()
                 .ok_or(ConfigCenterError::UnknownFileFormat(etcd_key))?,
             content,
-            version: Some(kv.mod_revision().to_string()),
         })
     }
 
@@ -134,7 +134,7 @@ impl ConfigCenterClient for EtcdClient {
 
             while let Ok(Some(resp)) = stream.message().await {
                 if resp.canceled() {
-                    tracing::warn!(
+                    warn!(
                         watch_id = resp.watch_id(),
                         reason = %resp.cancel_reason(),
                         "etcd watch canceled"
@@ -150,7 +150,10 @@ impl ConfigCenterClient for EtcdClient {
             }
         });
 
-        self.config_watch_join_handles.lock().unwrap().push(join_handle);
+        self.config_watch_join_handles
+            .lock()
+            .unwrap()
+            .push(join_handle);
 
         Ok(())
     }

@@ -70,8 +70,4 @@ pub struct ConfigItem {
     pub key: ConfigKey,
     pub format: FileFormat,
     pub content: String,
-    /// 部分后端有版本/修订号概念
-    /// etcd 的 mod_revision、Consul 的 ModifyIndex、Nacos 的 content md5）
-    /// 没有则为 None，仅用于日志/调试，不参与业务逻辑判断。
-    pub version: Option<String>,
 }

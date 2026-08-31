@@ -45,7 +45,6 @@ pub async fn get_config() -> Result<Option<Vec<ConfigItem>>, CfgError> {
 struct ConfigSnapshot {
     format: String,
     content: String,
-    version: Option<String>,
 }
 
 pub struct HubClient {
@@ -344,7 +343,6 @@ impl HubClient {
             let snapshot = ConfigSnapshot {
                 format: format!("{:?}", item.format),
                 content: item.content.clone(),
-                version: item.version.clone(),
             };
             if let Some(parent) = path.parent() {
                 if let Err(e) = std::fs::create_dir_all(parent) {
@@ -378,7 +376,6 @@ impl HubClient {
             key: key.clone(),
             format,
             content: snapshot.content,
-            version: snapshot.version,
         })
     }
 
