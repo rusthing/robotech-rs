@@ -55,11 +55,10 @@ pub async fn build_cfg(
         init_hub_client(config.clone(), app_name, &base_config.profile).await?;
         // 从配置中心获取配置文件内容并加载到config中
         #[cfg(feature = "config-center")]
-        if let Some(config_item) = get_config().await? {
-            config = config.add_source(config::File::from_str(
-                &config_item.content,
-                config_item.format,
-            ));
+        if let Some(config_items) = get_config().await? {
+            for item in config_items {
+                config = config.add_source(config::File::from_str(&item.content, item.format));
+            }
         }
     }
 

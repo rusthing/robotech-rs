@@ -103,6 +103,7 @@ where
             let app_dir = app_dir.clone();
             Arc::new(move || {
                 let config_changed_tx = config_changed_tx.clone();
+                let log_config_changed_tx_clone = log_config_changed_tx.clone();
                 let last_config = Arc::clone(&last_config);
                 let config_file_path = config_file_path.clone();
                 let app_dir = app_dir.clone();
@@ -116,18 +117,18 @@ where
                                 info!("app config changed: {:?}", changed);
                                 last_config.store(Arc::new(new_config.clone()));
 
-                                let base_config: BaseConfig = match config.clone().try_deserialize()
-                                {
-                                    Ok(base_config) => base_config,
-                                    Err(e) => {
-                                        error!("deserialize base config error: {:?}", e);
-                                        return;
-                                    }
-                                };
+                                let base_config: BaseConfig =
+                                    match new_config.clone().try_deserialize() {
+                                        Ok(base_config) => base_config,
+                                        Err(e) => {
+                                            error!("deserialize base config error: {:?}", e);
+                                            return;
+                                        }
+                                    };
                                 if let Some(log_config) = base_config.clone().log {
                                     let changed = HashMap::new();
                                     if let Err(e) =
-                                        log_config_changed_tx.send((log_config, changed))
+                                        log_config_changed_tx_clone.send((log_config, changed))
                                     {
                                         error!("send log config changed error: {:?}", e);
                                     }

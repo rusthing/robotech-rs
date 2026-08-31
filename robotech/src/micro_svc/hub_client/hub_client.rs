@@ -27,7 +27,7 @@ pub fn get_hub_client() -> Result<Arc<HubClient>, CfgError> {
         .ok_or(CfgError::NotInit("HUB_CLIENT not initialized".to_string()))
 }
 
-pub async fn get_config() -> Result<Option<ConfigItem>, CfgError> {
+pub async fn get_config() -> Result<Option<Vec<ConfigItem>>, CfgError> {
     match get_hub_client() {
         Ok(hub_client) => {
             let config = hub_client.get_config().await?;
@@ -269,31 +269,29 @@ impl HubClient {
         })
     }
 
-    pub async fn get_config(&self) -> Result<Option<ConfigItem>, CfgError> {
+    pub async fn get_config(&self) -> Result<Option<Vec<ConfigItem>>, CfgError> {
         if let Some(config_center_client) = self.config.as_ref() {
             let common_configs = self
                 .fetch_common_configs(config_center_client)
                 .await;
 
             match config_center_client.fetch().await {
-                Ok(mut item) => {
+                Ok(item) => {
                     self.save_snapshot(&item);
-                    if !common_configs.is_empty() {
-                        item = merge_common_configs(item, &common_configs);
-                    }
-                    Ok(Some(item))
+                    let mut all = common_configs;
+                    all.push(item);
+                    Ok(Some(all))
                 }
                 Err(e) => {
                     error!("fetch config failed: {:?}, trying snapshot", e);
                     let key = config_center_client
                         .config_key()
                         .map_err(|e| CfgError::Init(e.to_string()))?;
-                    if let Some(mut item) = self.load_snapshot(&key) {
+                    if let Some(item) = self.load_snapshot(&key) {
                         warn!("using snapshot config for key: {}", key);
-                        if !common_configs.is_empty() {
-                            item = merge_common_configs(item, &common_configs);
-                        }
-                        return Ok(Some(item));
+                        let mut all = common_configs;
+                        all.push(item);
+                        return Ok(Some(all));
                     }
                     Err(CfgError::Init(e.to_string()))
                 }
@@ -305,7 +303,7 @@ impl HubClient {
             );
             if let Some(item) = self.load_snapshot(key) {
                 warn!("using snapshot config (no backend connection)");
-                return Ok(Some(item));
+                return Ok(Some(vec![item]));
             }
             Ok(None)
         } else {
@@ -494,15 +492,4 @@ fn build_common_config_keys(
         .iter()
         .map(|data_id| ConfigKey::new(namespace.clone(), effective_group.clone(), data_id.clone()))
         .collect()
-}
-
-fn merge_common_configs(mut service_item: ConfigItem, common_configs: &[ConfigItem]) -> ConfigItem {
-    let mut merged = String::new();
-    for common in common_configs {
-        merged.push_str(&common.content);
-        merged.push('\n');
-    }
-    merged.push_str(&service_item.content);
-    service_item.content = merged;
-    service_item
 }
