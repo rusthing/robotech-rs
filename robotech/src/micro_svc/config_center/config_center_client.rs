@@ -23,7 +23,7 @@ pub trait ConfigCenterClient: Send + Sync {
     /// 变更感知机制，在各自的实现内部被吸收掉，对上层统一表现为同一种 channel 事件流。
     async fn watch(
         &self,
-        key: &ConfigKey,
+        keys: &[ConfigKey],
         config_changed_sender: watch::Sender<()>,
     ) -> Result<(), ConfigCenterError>;
 }

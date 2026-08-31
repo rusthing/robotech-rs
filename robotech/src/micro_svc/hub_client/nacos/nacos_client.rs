@@ -146,29 +146,31 @@ impl ConfigCenterClient for NacosClient {
 
     async fn watch(
         &self,
-        key: &ConfigKey,
+        keys: &[ConfigKey],
         config_changed_sender: watch::Sender<()>,
     ) -> Result<(), ConfigCenterError> {
-        let data_id = key.data_id.clone();
-        let group = key
-            .group
-            .clone()
-            .ok_or(ConfigCenterError::Parse("missing group".to_string()))?;
+        for key in keys {
+            let data_id = key.data_id.clone();
+            let group = key
+                .group
+                .clone()
+                .ok_or(ConfigCenterError::Parse("missing group".to_string()))?;
 
-        let bridge = Arc::new(Bridge {
-            tx: config_changed_sender,
-            md5: String::new(),
-        });
+            let bridge = Arc::new(Bridge {
+                tx: config_changed_sender.clone(),
+                md5: String::new(),
+            });
 
-        self.service
-            .add_listener(data_id.clone(), group.clone(), bridge.clone())
-            .await
-            .map_err(|e| ConfigCenterError::Connection(e.to_string()))?;
+            self.service
+                .add_listener(data_id.clone(), group.clone(), bridge.clone())
+                .await
+                .map_err(|e| ConfigCenterError::Connection(e.to_string()))?;
 
-        self.config_listener
-            .lock()
-            .unwrap()
-            .push((data_id, group, bridge));
+            self.config_listener
+                .lock()
+                .unwrap()
+                .push((data_id, group, bridge));
+        }
 
         Ok(())
     }

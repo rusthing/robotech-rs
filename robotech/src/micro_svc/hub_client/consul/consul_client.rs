@@ -171,45 +171,63 @@ impl ConfigCenterClient for ConsulClient {
 
     async fn watch(
         &self,
-        key: &ConfigKey,
+        keys: &[ConfigKey],
         config_changed_sender: watch::Sender<()>,
     ) -> Result<(), ConfigCenterError> {
         let reqwest_client = self.reqwest_client.clone();
         let base_url = self.base_url.to_string();
-        let consul_key = key.to_string();
         let blocking_query_timeout = self.blocking_query_timeout;
+        let consul_keys: Vec<String> = keys.iter().map(|k| k.to_string()).collect();
 
         let join_handle = tokio::spawn(async move {
-            let mut last_index: Option<String> = None;
+            let mut last_indices: Vec<Option<String>> = vec![None; consul_keys.len()];
+            let mut initialized = false;
+            let mut idx = 0usize;
             loop {
+                let consul_key = &consul_keys[idx];
+                let last_index = &last_indices[idx];
                 match Self::fetch_kv_raw(
                     &reqwest_client,
                     &base_url,
-                    &consul_key,
-                    &last_index,
+                    consul_key,
+                    last_index,
                     &blocking_query_timeout,
                 )
                 .await
                 {
                     Ok(Some(entry)) => {
-                        if let Some(ref last_idx) = last_index {
-                            if entry.modify_index.to_string() == *last_idx {
-                                continue;
+                        let new_idx = entry.modify_index.to_string();
+                        if last_index.as_deref() != Some(&new_idx) {
+                            last_indices[idx] = Some(new_idx);
+                            if initialized {
+                                if config_changed_sender.send(()).is_err() {
+                                    return;
+                                }
                             }
                         }
-                        last_index = Some(entry.modify_index.to_string());
-                        if config_changed_sender.send(()).is_err() {
-                            return;
+                        idx = (idx + 1) % consul_keys.len();
+                        if idx == 0 {
+                            initialized = true;
                         }
                     }
                     Ok(None) => {
-                        if config_changed_sender.send(()).is_err() {
-                            return;
+                        if initialized {
+                            if config_changed_sender.send(()).is_err() {
+                                return;
+                            }
                         }
                         tokio::time::sleep(Duration::from_secs(3)).await;
+                        idx = (idx + 1) % consul_keys.len();
+                        if idx == 0 {
+                            initialized = true;
+                        }
                     }
                     Err(_) => {
                         tokio::time::sleep(Duration::from_secs(3)).await;
+                        idx = (idx + 1) % consul_keys.len();
+                        if idx == 0 {
+                            initialized = true;
+                        }
                     }
                 }
             }

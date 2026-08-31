@@ -393,18 +393,17 @@ impl HubClient {
         let config_key = config_center_client
             .config_key()
             .map_err(|e| CfgError::Init(e.to_string()))?;
-        let all_keys: Vec<&ConfigKey> = self
+        let all_keys: Vec<ConfigKey> = self
             .common_config_keys
             .iter()
-            .chain(std::iter::once(&config_key))
+            .cloned()
+            .chain(std::iter::once(config_key))
             .collect();
 
-        for key in &all_keys {
-            config_center_client
-                .watch(key, config_changed_tx.clone())
-                .await
-                .map_err(|e| CfgError::Init(e.to_string()))?;
-        }
+        config_center_client
+            .watch(&all_keys, config_changed_tx.clone())
+            .await
+            .map_err(|e| CfgError::Init(e.to_string()))?;
 
         let join_handle = tokio::spawn(async move {
             info!("watch config changed (including common configs)...");

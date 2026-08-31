@@ -116,44 +116,47 @@ impl ConfigCenterClient for EtcdClient {
 
     async fn watch(
         &self,
-        key: &ConfigKey,
+        keys: &[ConfigKey],
         config_changed_sender: watch::Sender<()>,
     ) -> Result<(), ConfigCenterError> {
-        let etcd_key = key.to_string();
+        for key in keys {
+            let etcd_key = key.to_string();
 
-        let watch_stream = {
-            let mut etcd_client = self.etcd_client.clone();
-            etcd_client
-                .watch(etcd_key, None)
-                .await
-                .map_err(|e| ConfigCenterError::Connection(e.to_string()))?
-        };
+            let watch_stream = {
+                let mut etcd_client = self.etcd_client.clone();
+                etcd_client
+                    .watch(etcd_key, None)
+                    .await
+                    .map_err(|e| ConfigCenterError::Connection(e.to_string()))?
+            };
 
-        let join_handle = tokio::spawn(async move {
-            let mut stream = watch_stream;
+            let sender = config_changed_sender.clone();
+            let join_handle = tokio::spawn(async move {
+                let mut stream = watch_stream;
 
-            while let Ok(Some(resp)) = stream.message().await {
-                if resp.canceled() {
-                    warn!(
-                        watch_id = resp.watch_id(),
-                        reason = %resp.cancel_reason(),
-                        "etcd watch canceled"
-                    );
-                    break;
-                }
+                while let Ok(Some(resp)) = stream.message().await {
+                    if resp.canceled() {
+                        warn!(
+                            watch_id = resp.watch_id(),
+                            reason = %resp.cancel_reason(),
+                            "etcd watch canceled"
+                        );
+                        break;
+                    }
 
-                if !resp.events().is_empty() {
-                    if config_changed_sender.send(()).is_err() {
-                        return;
+                    if !resp.events().is_empty() {
+                        if sender.send(()).is_err() {
+                            return;
+                        }
                     }
                 }
-            }
-        });
+            });
 
-        self.config_watch_join_handles
-            .lock()
-            .unwrap()
-            .push(join_handle);
+            self.config_watch_join_handles
+                .lock()
+                .unwrap()
+                .push(join_handle);
+        }
 
         Ok(())
     }
