@@ -24,8 +24,7 @@ pub struct ConsulClient {
     base_url: String,
     blocking_query_timeout: Duration,
     config_key: Option<ConfigKey>,
-    last_index: Mutex<Option<String>>,
-    config_watch_join_handle: Mutex<Option<JoinHandle<()>>>,
+    config_watch_join_handles: Mutex<Vec<JoinHandle<()>>>,
 }
 
 #[derive(Deserialize)]
@@ -40,8 +39,9 @@ struct ConsulKvEntry {
 
 impl Drop for ConsulClient {
     fn drop(&mut self) {
-        if let Some(handle) = self.config_watch_join_handle.lock().unwrap().take() {
-            handle.abort(); // 立即终止任务
+        let handles: Vec<_> = std::mem::take(&mut *self.config_watch_join_handles.lock().unwrap());
+        for handle in handles {
+            handle.abort();
         }
     }
 }
@@ -80,8 +80,7 @@ impl ConsulClient {
             base_url,
             blocking_query_timeout,
             config_key,
-            last_index: Mutex::new(None),
-            config_watch_join_handle: Mutex::new(None),
+            config_watch_join_handles: Mutex::new(Vec::new()),
         })
     }
 
@@ -144,39 +143,7 @@ impl ConfigCenterClient for ConsulClient {
             .ok_or(ConfigCenterError::Parse("missing config_key".to_string()))
     }
 
-    async fn fetch(&self) -> Result<ConfigItem, ConfigCenterError> {
-        let config_key = self.config_key()?;
-        let key = self.key()?;
-        let last_index = self.last_index.lock().unwrap().clone();
-        let entry = Self::fetch_kv_raw(
-            &self.reqwest_client,
-            &self.base_url,
-            &key,
-            &last_index,
-            &self.blocking_query_timeout,
-        )
-        .await
-        .map_err(|e| ConfigCenterError::Connection(e.to_string()))?
-        .ok_or(ConfigCenterError::NotFound(config_key.clone()))?;
-
-        let raw = entry
-            .value
-            .ok_or(ConfigCenterError::NotFound(config_key.clone()))?;
-        let content = decode_value(&raw).map_err(|e| ConfigCenterError::Parse(e.to_string()))?;
-        let version = Some(entry.modify_index.to_string());
-        *self.last_index.lock().unwrap() = version.clone();
-        Ok(ConfigItem {
-            key: config_key.clone(),
-            format: config_key
-                .clone()
-                .infer_file_format()
-                .ok_or(ConfigCenterError::UnknownFileFormat(key.to_string()))?,
-            content,
-            version,
-        })
-    }
-
-    async fn fetch_by_key(&self, key: &ConfigKey) -> Result<ConfigItem, ConfigCenterError> {
+    async fn fetch(&self, key: &ConfigKey) -> Result<ConfigItem, ConfigCenterError> {
         let consul_key = key.to_string();
         let entry = Self::fetch_kv_raw(
             &self.reqwest_client,
@@ -205,55 +172,6 @@ impl ConfigCenterClient for ConsulClient {
 
     async fn watch(
         &self,
-        config_changed_sender: watch::Sender<()>,
-    ) -> Result<(), ConfigCenterError> {
-        let reqwest_client = self.reqwest_client.clone();
-        let base_url = self.base_url.to_string();
-        let key = self.key()?;
-        let mut last_index = self.last_index.lock().unwrap().clone();
-        let blocking_query_timeout = self.blocking_query_timeout;
-        let join_handle = tokio::spawn(async move {
-            loop {
-                match Self::fetch_kv_raw(
-                    &reqwest_client,
-                    &base_url,
-                    &key,
-                    &last_index,
-                    &blocking_query_timeout,
-                )
-                .await
-                {
-                    Ok(Some(entry)) => {
-                        if let Some(ref last_idx) = last_index {
-                            if entry.modify_index.to_string() == *last_idx {
-                                continue;
-                            }
-                        }
-                        last_index = Some(entry.modify_index.to_string());
-                        if config_changed_sender.send(()).is_err() {
-                            return;
-                        }
-                    }
-                    Ok(None) => {
-                        if config_changed_sender.send(()).is_err() {
-                            return;
-                        }
-                        tokio::time::sleep(Duration::from_secs(3)).await;
-                    }
-                    Err(_) => {
-                        tokio::time::sleep(Duration::from_secs(3)).await;
-                    }
-                }
-            }
-        });
-
-        *self.config_watch_join_handle.lock().unwrap() = Some(join_handle);
-
-        Ok(())
-    }
-
-    async fn watch_by_key(
-        &self,
         key: &ConfigKey,
         config_changed_sender: watch::Sender<()>,
     ) -> Result<(), ConfigCenterError> {
@@ -262,7 +180,7 @@ impl ConfigCenterClient for ConsulClient {
         let consul_key = key.to_string();
         let blocking_query_timeout = self.blocking_query_timeout;
 
-        tokio::spawn(async move {
+        let join_handle = tokio::spawn(async move {
             let mut last_index: Option<String> = None;
             loop {
                 match Self::fetch_kv_raw(
@@ -297,6 +215,8 @@ impl ConfigCenterClient for ConsulClient {
                 }
             }
         });
+
+        self.config_watch_join_handles.lock().unwrap().push(join_handle);
 
         Ok(())
     }

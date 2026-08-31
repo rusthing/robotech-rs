@@ -25,13 +25,14 @@ use tokio::task::JoinHandle;
 pub struct EtcdClient {
     etcd_client: etcd_client::Client,
     config_key: Option<ConfigKey>,
-    config_watch_join_handle: Mutex<Option<JoinHandle<()>>>,
+    config_watch_join_handles: Mutex<Vec<JoinHandle<()>>>,
 }
 
 impl Drop for EtcdClient {
     fn drop(&mut self) {
-        if let Some(handle) = self.config_watch_join_handle.lock().unwrap().take() {
-            handle.abort(); // 立即终止任务
+        let handles: Vec<_> = std::mem::take(&mut *self.config_watch_join_handles.lock().unwrap());
+        for handle in handles {
+            handle.abort();
         }
     }
 }
@@ -71,7 +72,7 @@ impl EtcdClient {
         Ok(Self {
             etcd_client: client,
             config_key,
-            config_watch_join_handle: Mutex::new(None),
+            config_watch_join_handles: Mutex::new(Vec::new()),
         })
     }
 }
@@ -88,33 +89,7 @@ impl ConfigCenterClient for EtcdClient {
             .ok_or(ConfigCenterError::Parse("missing config_key".to_string()))
     }
 
-    async fn fetch(&self) -> Result<ConfigItem, ConfigCenterError> {
-        let config_key = self.config_key()?;
-        let key = self.key()?;
-        let mut client = self.etcd_client.clone();
-        let resp = client
-            .get(key.to_string(), Some(GetOptions::new().with_prefix()))
-            .await
-            .map_err(|e| ConfigCenterError::Connection(e.to_string()))?;
-        let kv = resp
-            .kvs()
-            .first()
-            .ok_or_else(|| ConfigCenterError::NotFound(config_key.clone()))?;
-        let content = kv
-            .value_str()
-            .map_err(|e| ConfigCenterError::Parse(e.to_string()))?
-            .to_string();
-        Ok(ConfigItem {
-            key: config_key.clone(),
-            format: config_key
-                .infer_file_format()
-                .ok_or(ConfigCenterError::UnknownFileFormat(key))?,
-            content,
-            version: Some(kv.mod_revision().to_string()),
-        })
-    }
-
-    async fn fetch_by_key(&self, key: &ConfigKey) -> Result<ConfigItem, ConfigCenterError> {
+    async fn fetch(&self, key: &ConfigKey) -> Result<ConfigItem, ConfigCenterError> {
         let etcd_key = key.to_string();
         let mut client = self.etcd_client.clone();
         let resp = client
@@ -141,14 +116,15 @@ impl ConfigCenterClient for EtcdClient {
 
     async fn watch(
         &self,
+        key: &ConfigKey,
         config_changed_sender: watch::Sender<()>,
     ) -> Result<(), ConfigCenterError> {
-        let key = self.key()?;
+        let etcd_key = key.to_string();
 
         let watch_stream = {
             let mut etcd_client = self.etcd_client.clone();
             etcd_client
-                .watch(key, None)
+                .watch(etcd_key, None)
                 .await
                 .map_err(|e| ConfigCenterError::Connection(e.to_string()))?
         };
@@ -174,46 +150,7 @@ impl ConfigCenterClient for EtcdClient {
             }
         });
 
-        *self.config_watch_join_handle.lock().unwrap() = Some(join_handle);
-
-        Ok(())
-    }
-
-    async fn watch_by_key(
-        &self,
-        key: &ConfigKey,
-        config_changed_sender: watch::Sender<()>,
-    ) -> Result<(), ConfigCenterError> {
-        let etcd_key = key.to_string();
-
-        let watch_stream = {
-            let mut etcd_client = self.etcd_client.clone();
-            etcd_client
-                .watch(etcd_key, None)
-                .await
-                .map_err(|e| ConfigCenterError::Connection(e.to_string()))?
-        };
-
-        tokio::spawn(async move {
-            let mut stream = watch_stream;
-
-            while let Ok(Some(resp)) = stream.message().await {
-                if resp.canceled() {
-                    tracing::warn!(
-                        watch_id = resp.watch_id(),
-                        reason = %resp.cancel_reason(),
-                        "etcd watch canceled"
-                    );
-                    break;
-                }
-
-                if !resp.events().is_empty() {
-                    if config_changed_sender.send(()).is_err() {
-                        return;
-                    }
-                }
-            }
-        });
+        self.config_watch_join_handles.lock().unwrap().push(join_handle);
 
         Ok(())
     }

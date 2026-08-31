@@ -30,7 +30,7 @@ pub fn get_hub_client() -> Result<Arc<HubClient>, CfgError> {
 pub async fn get_config() -> Result<Option<Vec<ConfigItem>>, CfgError> {
     match get_hub_client() {
         Ok(hub_client) => {
-            let config = hub_client.get_config().await?;
+            let config = hub_client.get_configs().await?;
             info!("get config center config: {:?}", config);
             Ok(config)
         }
@@ -269,81 +269,55 @@ impl HubClient {
         })
     }
 
-    pub async fn get_config(&self) -> Result<Option<Vec<ConfigItem>>, CfgError> {
-        if let Some(config_center_client) = self.config.as_ref() {
-            let common_configs = self
-                .fetch_common_configs(config_center_client)
-                .await;
-
-            match config_center_client.fetch().await {
-                Ok(item) => {
-                    self.save_snapshot(&item);
-                    let mut all = common_configs;
-                    all.push(item);
-                    Ok(Some(all))
-                }
-                Err(e) => {
-                    error!("fetch config failed: {:?}, trying snapshot", e);
-                    let key = config_center_client
-                        .config_key()
-                        .map_err(|e| CfgError::Init(e.to_string()))?;
-                    if let Some(item) = self.load_snapshot(&key) {
-                        warn!("using snapshot config for key: {}", key);
-                        let mut all = common_configs;
-                        all.push(item);
-                        return Ok(Some(all));
-                    }
-                    Err(CfgError::Init(e.to_string()))
-                }
-            }
-        } else if let Some(key) = &self.config_key {
-            warn!(
-                "config center client not available, trying snapshot for key: {}",
-                key
-            );
-            if let Some(item) = self.load_snapshot(key) {
-                warn!("using snapshot config (no backend connection)");
-                return Ok(Some(vec![item]));
-            }
-            Ok(None)
-        } else {
-            Ok(None)
-        }
-    }
-
-    async fn fetch_common_configs(
-        &self,
-        client: &Arc<dyn ConfigCenterClient>,
-    ) -> Vec<ConfigItem> {
-        if self.common_config_keys.is_empty() {
-            return Vec::new();
-        }
-        info!(
-            "fetching {} common configs: {:?}",
-            self.common_config_keys.len(),
-            self.common_config_keys
-        );
-        let mut common_configs = Vec::with_capacity(self.common_config_keys.len());
-        for key in &self.common_config_keys {
-            match client.fetch_by_key(key).await {
-                Ok(item) => {
-                    info!("loaded common config: {}", key);
-                    self.save_snapshot(&item);
-                    common_configs.push(item);
-                }
-                Err(e) => {
+    pub async fn get_configs(&self) -> Result<Option<Vec<ConfigItem>>, CfgError> {
+        let config_center_client = match self.config.as_ref() {
+            Some(client) => client,
+            None => {
+                if let Some(key) = &self.config_key {
                     warn!(
-                        "failed to fetch common config {}: {:?}, trying snapshot",
-                        key, e
+                        "config center client not available, trying snapshot for key: {}",
+                        key
                     );
                     if let Some(item) = self.load_snapshot(key) {
-                        warn!("using snapshot for common config: {}", key);
-                        common_configs.push(item);
+                        warn!("using snapshot config (no backend connection)");
+                        return Ok(Some(vec![item]));
+                    }
+                }
+                return Ok(None);
+            }
+        };
+
+        let mut all = Vec::new();
+
+        let config_key = config_center_client
+            .config_key()
+            .map_err(|e| CfgError::Init(e.to_string()))?;
+        let all_keys: Vec<&ConfigKey> = self
+            .common_config_keys
+            .iter()
+            .chain(std::iter::once(&config_key))
+            .collect();
+
+        info!("fetching {} configs: {:?}", all_keys.len(), all_keys);
+        for key in &all_keys {
+            match config_center_client.fetch(key).await {
+                Ok(item) => {
+                    info!("loaded config: {}", key);
+                    self.save_snapshot(&item);
+                    all.push(item);
+                }
+                Err(e) => {
+                    warn!("failed to fetch config {}: {:?}, trying snapshot", key, e);
+                    if let Some(item) = self.load_snapshot(key) {
+                        warn!("using snapshot for config: {}", key);
+                        all.push(item);
+                    } else {
+                        return Err(CfgError::Init(e.to_string()));
                     }
                 }
             }
         }
-        common_configs
+        Ok(Some(all))
     }
 
     fn snapshot_dir(&self) -> Option<PathBuf> {
@@ -419,18 +393,20 @@ impl HubClient {
 
         let (config_changed_tx, mut config_changed_rx) = watch::channel(());
 
-        config_center_client
-            .watch(config_changed_tx.clone())
-            .await
+        let config_key = config_center_client
+            .config_key()
             .map_err(|e| CfgError::Init(e.to_string()))?;
+        let all_keys: Vec<&ConfigKey> = self
+            .common_config_keys
+            .iter()
+            .chain(std::iter::once(&config_key))
+            .collect();
 
-        for key in &self.common_config_keys {
-            if let Err(e) = config_center_client
-                .watch_by_key(key, config_changed_tx.clone())
+        for key in &all_keys {
+            config_center_client
+                .watch(key, config_changed_tx.clone())
                 .await
-            {
-                warn!("failed to watch common config {}: {:?}", key, e);
-            }
+                .map_err(|e| CfgError::Init(e.to_string()))?;
         }
 
         let join_handle = tokio::spawn(async move {

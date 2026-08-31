@@ -45,7 +45,6 @@ impl ConfigChangeListener for Bridge {
 pub struct NacosClient {
     service: ConfigService,
     config_key: Option<ConfigKey>,
-    md5: Mutex<Option<String>>,
     config_listener: Mutex<Vec<(String, String, Arc<Bridge>)>>,
 }
 
@@ -108,7 +107,6 @@ impl NacosClient {
         Ok(Self {
             service,
             config_key,
-            md5: Mutex::new(None),
             config_listener: Mutex::new(Vec::new()),
         })
     }
@@ -126,34 +124,7 @@ impl ConfigCenterClient for NacosClient {
             .ok_or(ConfigCenterError::Parse("missing config_key".to_string()))
     }
 
-    fn key(&self) -> Result<String, ConfigCenterError> {
-        let config_key = self.config_key()?;
-        let data_id = config_key.data_id;
-        Ok(data_id)
-    }
-
-    async fn fetch(&self) -> Result<ConfigItem, ConfigCenterError> {
-        let config_key = self.config_key()?;
-        let key = self.key()?;
-        let group = config_key.clone().group.unwrap(); // group在new时设置了默认值，不可能为None
-        let resp = self
-            .service
-            .get_config(key.to_string(), group)
-            .await
-            .map_err(|e| ConfigCenterError::Connection(e.to_string()))?;
-        let version = Some(resp.md5().to_string());
-        *self.md5.lock().unwrap() = version.clone();
-        Ok(ConfigItem {
-            key: config_key.clone(),
-            format: config_key
-                .infer_file_format()
-                .ok_or(ConfigCenterError::UnknownFileFormat(key.to_string()))?,
-            content: resp.content().to_string(),
-            version,
-        })
-    }
-
-    async fn fetch_by_key(&self, key: &ConfigKey) -> Result<ConfigItem, ConfigCenterError> {
+    async fn fetch(&self, key: &ConfigKey) -> Result<ConfigItem, ConfigCenterError> {
         let data_id = key.data_id.clone();
         let group = key
             .group
@@ -175,33 +146,6 @@ impl ConfigCenterClient for NacosClient {
     }
 
     async fn watch(
-        &self,
-        config_changed_sender: watch::Sender<()>,
-    ) -> Result<(), ConfigCenterError> {
-        let config_key = self.config_key()?;
-        let key = self.key()?;
-        let group = config_key.clone().group.unwrap();
-
-        let md5 = self.md5.lock().unwrap().clone();
-        let bridge = Arc::new(Bridge {
-            tx: config_changed_sender,
-            md5: md5.ok_or(ConfigCenterError::Parse("missing md5".to_string()))?,
-        });
-
-        self.service
-            .add_listener(key.clone(), group.clone(), bridge.clone())
-            .await
-            .map_err(|e| ConfigCenterError::Connection(e.to_string()))?;
-
-        self.config_listener
-            .lock()
-            .unwrap()
-            .push((key, group, bridge));
-
-        Ok(())
-    }
-
-    async fn watch_by_key(
         &self,
         key: &ConfigKey,
         config_changed_sender: watch::Sender<()>,
