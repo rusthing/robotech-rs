@@ -1,13 +1,18 @@
+use wheel_rs::ipnet_utils::get_local_ip;
+
 use crate::cfg::CfgError;
-use crate::env::APP_ENV;
+use crate::env::{AppEnv, EnvError, APP_ENV};
+use crate::micro_svc::hub_client_config::HubClientConfig;
 use crate::micro_svc::{
-    ConfigCenterClient, ConfigItem, ConfigKey, ConsulClient, EtcdClient, MicroSvcConfig,
-    NacosClient, RegistryCenterClient, RegistryCenterError, ServiceInstance,
+    ConfigCenterClient, ConfigCenterConfig, ConfigItem, ConfigKey, ConsulClient, EtcdClient,
+    MicroSvcConfig, NacosClient, RegistryCenterClient, RegistryCenterConfig, RegistryCenterError,
+    RegistryKey, ServiceInstance,
 };
 use arc_swap::ArcSwapOption;
 use config::FileFormat;
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
+use std::sync::atomic::{AtomicU16, Ordering};
 use std::sync::{Arc, Mutex};
 use tokio::sync::watch;
 use tracing::{error, info, warn};
@@ -27,18 +32,11 @@ fn get_hub_client() -> Result<Arc<HubClient>, CfgError> {
         .ok_or(CfgError::NotInit("HUB_CLIENT not initialized".to_string()))
 }
 
-pub async fn get_config() -> Result<Option<Vec<ConfigItem>>, CfgError> {
-    match get_hub_client() {
-        Ok(hub_client) => {
-            let config = hub_client.get_configs().await?;
-            info!("get config center config: {:?}", config);
-            Ok(config)
-        }
-        Err(e) => {
-            error!("get config failed: {:?}", e);
-            Ok(None)
-        }
-    }
+pub async fn get_configs() -> Result<Vec<ConfigItem>, CfgError> {
+    let hub_client = get_hub_client()?;
+    let config = hub_client.get_configs().await?;
+    info!("get config center config: {:?}", config);
+    Ok(config)
 }
 
 pub async fn watch_config_changed<F, Fut>(on_change: F) -> Result<(), CfgError>
@@ -53,16 +51,40 @@ where
     hub_client.watch_config_changed(on_change).await
 }
 
-pub async fn register(instance: &ServiceInstance) -> Result<(), RegistryCenterError> {
+static REGISTERED_INSTANCE_ID: Mutex<Option<String>> = Mutex::new(None);
+static REGISTERED_PORT: AtomicU16 = AtomicU16::new(0);
+
+pub async fn register() -> Result<(), RegistryCenterError> {
     let hub_client =
         get_hub_client().map_err(|e| RegistryCenterError::Connection(e.to_string()))?;
-    hub_client.register(instance).await
+    let instance = hub_client.build_service_instance()?;
+    let new_port = instance.port;
+    let old_port = REGISTERED_PORT.swap(new_port, Ordering::Relaxed);
+
+    if old_port == new_port && old_port != 0 {
+        return Ok(());
+    }
+
+    if old_port != 0 {
+        let old_instance_id = REGISTERED_INSTANCE_ID.lock().unwrap().clone();
+        if let Some(id) = old_instance_id {
+            let _ = hub_client.deregister(&id).await;
+        }
+    }
+
+    *REGISTERED_INSTANCE_ID.lock().unwrap() = Some(instance.instance_id.clone());
+    hub_client.register(&instance).await
 }
 
-pub async fn deregister(instance_id: &str) -> Result<(), RegistryCenterError> {
+pub async fn deregister() -> Result<(), RegistryCenterError> {
     let hub_client =
         get_hub_client().map_err(|e| RegistryCenterError::Connection(e.to_string()))?;
-    hub_client.deregister(instance_id).await
+    let instance_id = REGISTERED_INSTANCE_ID
+        .lock()
+        .unwrap()
+        .clone()
+        .ok_or_else(|| RegistryCenterError::Connection("not registered yet".to_string()))?;
+    hub_client.deregister(&instance_id).await
 }
 
 pub async fn discover(service_name: &str) -> Result<Vec<ServiceInstance>, RegistryCenterError> {
@@ -80,18 +102,114 @@ struct ConfigSnapshot {
 pub struct HubClient {
     config: Option<Arc<dyn ConfigCenterClient>>,
     registry: Option<Arc<dyn RegistryCenterClient>>,
-    config_key: Option<ConfigKey>,
+    config_keys: Option<Vec<ConfigKey>>,
     snapshot_dir: Option<PathBuf>,
-    common_config_keys: Vec<ConfigKey>,
-    config_watch_join_handle: Mutex<Option<tokio::task::JoinHandle<()>>>,
+    registry_key: Option<RegistryKey>,
+    config_watch_join_handle: Mutex<Option<Vec<tokio::task::JoinHandle<()>>>>,
 }
 
 impl Drop for HubClient {
     fn drop(&mut self) {
-        if let Some(handle) = self.config_watch_join_handle.lock().unwrap().take() {
-            handle.abort();
+        if let Some(handles) = self.config_watch_join_handle.lock().unwrap().take() {
+            for handle in handles {
+                handle.abort();
+            }
         }
     }
+}
+
+/// 根据后端配置分支，统一构建 HubClient 所需的各个组件。
+///
+/// 使用泛型 `C` 统一处理不同后端的客户端类型，避免为 Consul/Etcd/Nacos 各写一套重复逻辑。
+///
+/// # 参数
+/// - `hub_client`: 后端配置中的 HubClient 通用配置（base_url、namespace、group 等）
+/// - `micro_svc_config`: 微服务全局配置，用于提取 svc_name、profile 等字段
+/// - `config`: 配置中心相关配置（快照目录、文件格式、公共配置列表等）
+/// - `client`: 已创建的后端客户端实例，若创建失败则为 `None`
+///
+/// # 返回
+/// 返回一个元组，包含：
+/// - 配置中心客户端 trait object
+/// - 注册中心客户端 trait object
+/// - 配置项的 ConfigKey 列表
+/// - 快照目录路径
+/// - 注册中心使用的 RegistryKey
+fn build_branch<C: ConfigCenterClient + RegistryCenterClient + 'static>(
+    hub_client_config: &HubClientConfig,
+    micro_svc_config: &MicroSvcConfig,
+    config_center_config: &Option<ConfigCenterConfig>,
+    registry_center_config: &Option<RegistryCenterConfig>,
+    hub_client: Option<C>,
+) -> Result<
+    (
+        Option<Arc<dyn ConfigCenterClient>>,
+        Option<Arc<dyn RegistryCenterClient>>,
+        Option<Vec<ConfigKey>>,
+        Option<PathBuf>,
+        Option<RegistryKey>,
+    ),
+    CfgError,
+> {
+    let AppEnv { app_dir, .. } = APP_ENV.get().ok_or(EnvError::GetAppEnv())?;
+
+    let svc_name = &micro_svc_config.svc_name.clone().unwrap(); // 服务名如果配置为空，在前面传进来的就会是应用名，这里不可能为空
+    let profile = &micro_svc_config.profile;
+    let namespace = hub_client_config.namespace.clone();
+    let group = hub_client_config.group.clone().or_else(|| profile.clone());
+
+    let registry_key = if let Some(_registry_center_config) = registry_center_config {
+        Some(RegistryKey {
+            namespace: namespace.clone(),
+            group: group.clone(),
+            svc_name: svc_name.clone(),
+        })
+    } else {
+        None
+    };
+
+    let (snapshot_dir, config_keys) = if let Some(config_center_config) = config_center_config {
+        let mut snapshot_dir = config_center_config.snapshot_dir.clone();
+        // 如果是相对路径，相对的就是应用目录
+        if snapshot_dir.is_relative() {
+            snapshot_dir = app_dir.join(snapshot_dir);
+        }
+
+        let file_format = config_center_config.file_format.clone();
+        // 构建公共配置项的 ConfigKey 列表
+        let mut config_keys: Vec<ConfigKey> = config_center_config
+            .common_configs
+            .iter()
+            .map(|data_id| ConfigKey::new(namespace.clone(), group.clone(), data_id.clone()))
+            .collect();
+        // 添加应用配置项的 ConfigKey
+        let config_key = {
+            let data_id = format!("{}.{}", svc_name, file_format);
+            ConfigKey::new(namespace.clone(), group.clone(), data_id.clone())
+        };
+        config_keys.push(config_key);
+
+        (Some(snapshot_dir), Some(config_keys))
+    } else {
+        (None, None)
+    };
+
+    let hut_client = hub_client.map(Arc::new);
+    let config_center_client = hut_client.as_ref().map(|c| {
+        let tmp: Arc<dyn ConfigCenterClient> = c.clone();
+        tmp
+    });
+    let registry_center_client = hut_client.as_ref().map(|c| {
+        let tmp: Arc<dyn RegistryCenterClient> = c.clone();
+        tmp
+    });
+    Ok((
+        config_center_client,
+        registry_center_client,
+        config_keys,
+        snapshot_dir,
+        registry_key,
+    ))
 }
 
 impl HubClient {
@@ -99,273 +217,171 @@ impl HubClient {
         let (
             config_center_client,
             registry_center_client,
-            config_key,
+            config_keys,
             snapshot_dir,
-            common_config_keys,
-        ) = if let Some(consul_config) = micro_svc_config.clone().consul {
-            let snapshot_dir = consul_config
-                .config
-                .as_ref()
-                .map(|c| c.snapshot_dir.clone());
-            let config_key = consul_config.config.as_ref().and_then(|c| {
-                build_config_key(
-                    &micro_svc_config.svc_name,
-                    &micro_svc_config.profile,
-                    &consul_config.hub_client.namespace,
-                    &consul_config.hub_client.group,
-                    &c.file_format,
-                )
-            });
-            let common_config_keys = consul_config
-                .config
-                .as_ref()
-                .map(|c| {
-                    build_common_config_keys(
-                        &c.common_configs,
-                        &consul_config.hub_client.namespace,
-                        &consul_config.hub_client.group,
-                        &micro_svc_config.profile,
-                    )
-                })
-                .unwrap_or_default();
-            let client = ConsulClient::new(micro_svc_config)
-                .map(Arc::new)
-                .map_err(|e| {
-                    warn!(
-                        "failed to create consul client: {:?}, will use snapshot if available",
+            registry_group,
+        ) = {
+            if let Some(consul_config) = micro_svc_config.clone().consul {
+                let client = ConsulClient::new(micro_svc_config.clone())
+                    .map_err(|e| {
+                        warn!(
+                            "failed to create consul client: {:?}, will use snapshot if available",
+                            e
+                        );
                         e
-                    );
-                    e
-                })
-                .ok();
-            let config_center_client = client.as_ref().and_then(|c| {
-                consul_config.config.map(|_| {
-                    let tmp: Arc<dyn ConfigCenterClient> = c.clone();
-                    tmp
-                })
-            });
-            let registry_center_client = client.as_ref().and_then(|c| {
-                consul_config.registry.map(|_| {
-                    let tmp: Arc<dyn RegistryCenterClient> = c.clone();
-                    tmp
-                })
-            });
-            (
-                config_center_client,
-                registry_center_client,
-                config_key,
-                snapshot_dir,
-                common_config_keys,
-            )
-        } else if let Some(etcd_config) = micro_svc_config.clone().etcd {
-            let snapshot_dir = etcd_config.config.as_ref().map(|c| c.snapshot_dir.clone());
-            let config_key = etcd_config.config.as_ref().and_then(|c| {
-                build_config_key(
-                    &micro_svc_config.svc_name,
-                    &micro_svc_config.profile,
-                    &etcd_config.hub_client.namespace,
-                    &etcd_config.hub_client.group,
-                    &c.file_format,
-                )
-            });
-            let common_config_keys = etcd_config
-                .config
-                .as_ref()
-                .map(|c| {
-                    build_common_config_keys(
-                        &c.common_configs,
-                        &etcd_config.hub_client.namespace,
-                        &etcd_config.hub_client.group,
-                        &micro_svc_config.profile,
-                    )
-                })
-                .unwrap_or_default();
-            let client = EtcdClient::new(micro_svc_config)
-                .await
-                .map(Arc::new)
-                .map_err(|e| {
-                    warn!(
-                        "failed to create etcd client: {:?}, will use snapshot if available",
+                    })
+                    .ok();
+                build_branch(
+                    &consul_config.hub_client,
+                    &micro_svc_config,
+                    &consul_config.config,
+                    &consul_config.registry,
+                    client,
+                )?
+            } else if let Some(etcd_config) = micro_svc_config.clone().etcd {
+                let client = EtcdClient::new(micro_svc_config.clone())
+                    .await
+                    .map_err(|e| {
+                        warn!(
+                            "failed to create etcd client: {:?}, will use snapshot if available",
+                            e
+                        );
                         e
-                    );
-                    e
-                })
-                .ok();
-            let config_center_client = client.as_ref().and_then(|c| {
-                etcd_config.config.map(|_| {
-                    let tmp: Arc<dyn ConfigCenterClient> = c.clone();
-                    tmp
-                })
-            });
-            let registry_center_client = client.as_ref().and_then(|c| {
-                etcd_config.registry.map(|_| {
-                    let tmp: Arc<dyn RegistryCenterClient> = c.clone();
-                    tmp
-                })
-            });
-            (
-                config_center_client,
-                registry_center_client,
-                config_key,
-                snapshot_dir,
-                common_config_keys,
-            )
-        } else if let Some(nacos_config) = micro_svc_config.clone().nacos {
-            let snapshot_dir = nacos_config.config.as_ref().map(|c| c.snapshot_dir.clone());
-            let config_key = nacos_config.config.as_ref().and_then(|c| {
-                let namespace = nacos_config
-                    .hub_client
-                    .namespace
-                    .clone()
-                    .or(Some("public".to_string()));
-                let group = nacos_config
-                    .hub_client
-                    .group
-                    .clone()
-                    .or_else(|| micro_svc_config.profile.clone())
-                    .or(Some("DEFAULT_GROUP".to_string()));
-                build_config_key(
-                    &micro_svc_config.svc_name,
-                    &None,
-                    &namespace,
-                    &group,
-                    &c.file_format,
-                )
-            });
-            let nacos_namespace = nacos_config
-                .hub_client
-                .namespace
-                .clone()
-                .or(Some("public".to_string()));
-            let nacos_group = nacos_config
-                .hub_client
-                .group
-                .clone()
-                .or_else(|| micro_svc_config.profile.clone())
-                .or(Some("DEFAULT_GROUP".to_string()));
-            let common_config_keys = nacos_config
-                .config
-                .as_ref()
-                .map(|c| {
-                    build_common_config_keys(
-                        &c.common_configs,
-                        &nacos_namespace,
-                        &nacos_group,
-                        &None,
-                    )
-                })
-                .unwrap_or_default();
-            let client = NacosClient::new(micro_svc_config)
-                .await
-                .map(Arc::new)
-                .map_err(|e| {
-                    warn!(
-                        "failed to create nacos client: {:?}, will use snapshot if available",
+                    })
+                    .ok();
+                build_branch(
+                    &etcd_config.hub_client,
+                    &micro_svc_config,
+                    &etcd_config.config,
+                    &etcd_config.registry,
+                    client,
+                )?
+            } else if let Some(nacos_config) = micro_svc_config.clone().nacos {
+                let client = NacosClient::new(micro_svc_config.clone())
+                    .await
+                    .map_err(|e| {
+                        warn!(
+                            "failed to create nacos client: {:?}, will use snapshot if available",
+                            e
+                        );
                         e
-                    );
-                    e
-                })
-                .ok();
-            let config_center_client = client.as_ref().and_then(|c| {
-                nacos_config.config.map(|_| {
-                    let tmp: Arc<dyn ConfigCenterClient> = c.clone();
-                    tmp
-                })
-            });
-            let registry_center_client = client.as_ref().and_then(|c| {
-                nacos_config.registry.map(|_| {
-                    let tmp: Arc<dyn RegistryCenterClient> = c.clone();
-                    tmp
-                })
-            });
-            (
-                config_center_client,
-                registry_center_client,
-                config_key,
-                snapshot_dir,
-                common_config_keys,
-            )
-        } else {
-            (None, None, None, None, Vec::new())
+                    })
+                    .ok();
+                build_branch(
+                    &nacos_config.hub_client,
+                    &micro_svc_config,
+                    &nacos_config.config,
+                    &nacos_config.registry,
+                    client,
+                )?
+            } else {
+                Err(CfgError::NotInit(
+                    "no config center client available".to_string(),
+                ))?
+            }
         };
         Ok(Self {
             config: config_center_client,
             registry: registry_center_client,
-            config_key,
+            config_keys,
             snapshot_dir,
-            common_config_keys,
             config_watch_join_handle: Mutex::new(None),
+            registry_key: registry_group,
         })
     }
 
-    pub async fn get_configs(&self) -> Result<Option<Vec<ConfigItem>>, CfgError> {
+    pub async fn get_configs(&self) -> Result<Vec<ConfigItem>, CfgError> {
         let config_center_client = match self.config.as_ref() {
             Some(client) => client,
             None => {
-                if let Some(key) = &self.config_key {
-                    warn!(
-                        "config center client not available, trying snapshot for key: {}",
-                        key
-                    );
-                    if let Some(item) = self.load_snapshot(key) {
-                        warn!("using snapshot config (no backend connection)");
-                        return Ok(Some(vec![item]));
-                    }
-                }
-                return Ok(None);
+                return Err(CfgError::NotInit(
+                    "no config center client available".to_string(),
+                ));
             }
         };
 
         let mut all = Vec::new();
-
-        let config_key = config_center_client
-            .config_key()
-            .map_err(|e| CfgError::Init(e.to_string()))?;
-        let all_keys: Vec<&ConfigKey> = self
-            .common_config_keys
-            .iter()
-            .chain(std::iter::once(&config_key))
-            .collect();
-
-        info!("fetching {} configs: {:?}", all_keys.len(), all_keys);
-        for key in &all_keys {
-            match config_center_client.fetch(key).await {
-                Ok(item) => {
-                    info!("loaded config: {}", key);
-                    self.save_snapshot(&item);
-                    all.push(item);
-                }
-                Err(e) => {
-                    warn!("failed to fetch config {}: {:?}, trying snapshot", key, e);
-                    if let Some(item) = self.load_snapshot(key) {
-                        warn!("using snapshot for config: {}", key);
+        if let Some(config_keys) = self.config_keys.as_ref() {
+            for config_key in config_keys {
+                match config_center_client.fetch(config_key).await {
+                    Ok(item) => {
+                        info!("loaded config: {}", config_key);
+                        self.save_snapshot(&item);
                         all.push(item);
-                    } else {
-                        return Err(CfgError::Init(e.to_string()));
+                    }
+                    Err(e) => {
+                        warn!(
+                            "failed to fetch config {}: {:?}, trying snapshot",
+                            config_key, e
+                        );
+                        if let Some(item) = self.load_snapshot(config_key) {
+                            warn!("using snapshot for config: {}", config_key);
+                            all.push(item);
+                        } else {
+                            return Err(CfgError::Init(e.to_string()));
+                        }
                     }
                 }
             }
+        } else {
+            Err(CfgError::NotInit("no config keys available".to_string()))?
         }
-        Ok(Some(all))
+
+        Ok(all)
     }
 
-    fn snapshot_dir(&self) -> Option<PathBuf> {
-        self.snapshot_dir.as_ref().map(|dir| {
-            if dir.is_relative() {
-                if let Some(app_env) = APP_ENV.get() {
-                    app_env.app_dir.join(dir)
-                } else {
-                    dir.clone()
-                }
-            } else {
-                dir.clone()
+    pub async fn watch_config_changed<F, Fut>(&self, mut on_change: F) -> Result<(), CfgError>
+    where
+        F: FnMut() -> Fut + Send + 'static,
+        Fut: Future<Output = anyhow::Result<()>> + Send + 'static,
+    {
+        let config_center_client = self.config.as_ref().ok_or(CfgError::NotInit(
+            "config center not configured".to_string(),
+        ))?;
+
+        let (config_changed_tx, mut config_changed_rx) = watch::channel(());
+        let mut join_handles = Vec::new();
+        for config_key in self
+            .config_keys
+            .as_ref()
+            .ok_or(CfgError::NotInit("no config keys available".to_string()))?
+        {
+            if let Some(join_handle) = config_center_client
+                .watch(&config_key, config_changed_tx.clone())
+                .await
+                .map_err(|e| CfgError::Init(e.to_string()))?
+            {
+                join_handles.push(join_handle);
             }
-        })
+        }
+
+        let join_handle = tokio::spawn(async move {
+            info!("watch config changed (including common configs)...");
+            loop {
+                match config_changed_rx.changed().await {
+                    Ok(_) => {
+                        let _ = config_changed_rx.borrow().clone();
+                        if let Err(e) = on_change().await {
+                            warn!("handle config change error: {e:?}");
+                        }
+                    }
+                    Err(err) => {
+                        error!("watch config error: {:?}", err);
+                        break;
+                    }
+                }
+            }
+        });
+        join_handles.push(join_handle);
+
+        *self.config_watch_join_handle.lock().unwrap() = Some(join_handles);
+        Ok(())
     }
 
-    fn snapshot_path(&self, key: &ConfigKey) -> Option<PathBuf> {
-        self.snapshot_dir()
-            .map(|dir| dir.join(format!("{key}.json")))
+    fn snapshot_path(&self, config_key: &ConfigKey) -> Option<PathBuf> {
+        self.snapshot_dir
+            .clone()
+            .map(|dir| dir.join(config_key.to_string()))
     }
 
     fn save_snapshot(&self, item: &ConfigItem) {
@@ -393,8 +409,8 @@ impl HubClient {
         }
     }
 
-    fn load_snapshot(&self, key: &ConfigKey) -> Option<ConfigItem> {
-        let path = self.snapshot_path(key)?;
+    fn load_snapshot(&self, config_key: &ConfigKey) -> Option<ConfigItem> {
+        let path = self.snapshot_path(config_key)?;
         let json = std::fs::read_to_string(&path)
             .inspect_err(|e| warn!("failed to read snapshot {}: {:?}", path.display(), e))
             .ok()?;
@@ -403,72 +419,50 @@ impl HubClient {
             .ok()?;
         let format = parse_file_format(&snapshot.format)?;
         Some(ConfigItem {
-            key: key.clone(),
+            key: config_key.clone(),
             format,
             content: snapshot.content,
         })
     }
 
-    pub async fn watch_config_changed<F, Fut>(&self, mut on_change: F) -> Result<(), CfgError>
-    where
-        F: FnMut() -> Fut + Send + 'static,
-        Fut: Future<Output = anyhow::Result<()>> + Send + 'static,
-    {
-        let config_center_client = self.config.as_ref().ok_or(CfgError::NotInit(
-            "config center not configured".to_string(),
-        ))?;
-
-        let (config_changed_tx, mut config_changed_rx) = watch::channel(());
-
-        let config_key = config_center_client
-            .config_key()
-            .map_err(|e| CfgError::Init(e.to_string()))?;
-        let all_keys: Vec<ConfigKey> = self
-            .common_config_keys
-            .iter()
-            .cloned()
-            .chain(std::iter::once(config_key))
-            .collect();
-
-        config_center_client
-            .watch(&all_keys, config_changed_tx.clone())
-            .await
-            .map_err(|e| CfgError::Init(e.to_string()))?;
-
-        let join_handle = tokio::spawn(async move {
-            info!("watch config changed (including common configs)...");
-            loop {
-                match config_changed_rx.changed().await {
-                    Ok(_) => {
-                        let _ = config_changed_rx.borrow().clone();
-                        if let Err(e) = on_change().await {
-                            warn!("handle config change error: {e:?}");
-                        }
-                    }
-                    Err(err) => {
-                        error!("watch config error: {:?}", err);
-                        break;
-                    }
-                }
-            }
-        });
-
-        *self.config_watch_join_handle.lock().unwrap() = Some(join_handle);
-        Ok(())
+    fn build_service_instance(&self) -> Result<ServiceInstance, RegistryCenterError> {
+        let registry_key = self.registry_key.as_ref().ok_or_else(|| {
+            RegistryCenterError::Connection(
+                "registry center not configured, cannot determine svc_name".to_string(),
+            )
+        })?;
+        let svc_name = registry_key.svc_name.clone();
+        let instance_id = format!("{}-{}", svc_name, std::process::id());
+        let ip = get_local_ip().unwrap_or_else(|_| "127.0.0.1".to_string());
+        let port = crate::web::get_web_listen_port().ok_or_else(|| {
+            RegistryCenterError::Connection(
+                "web server not started, cannot determine listen port".to_string(),
+            )
+        })?;
+        Ok(ServiceInstance {
+            instance_id,
+            service_name: svc_name.to_string(),
+            ip,
+            port,
+            health_check_url: None,
+            metadata: Default::default(),
+        })
     }
 
     pub async fn register(&self, instance: &ServiceInstance) -> Result<(), RegistryCenterError> {
         let registry = self.registry.as_ref().ok_or_else(|| {
             RegistryCenterError::Connection("registry center not configured".to_string())
         })?;
-        registry.register(instance).await
+        registry.register(instance, self.registry_key.clone()).await
     }
 
     pub async fn deregister(&self, instance_id: &str) -> Result<(), RegistryCenterError> {
         let registry = self.registry.as_ref().ok_or_else(|| {
             RegistryCenterError::Connection("registry center not configured".to_string())
         })?;
-        registry.deregister(instance_id).await
+        registry
+            .deregister(instance_id, self.registry_key.clone())
+            .await
     }
 
     pub async fn discover(
@@ -478,7 +472,9 @@ impl HubClient {
         let registry = self.registry.as_ref().ok_or_else(|| {
             RegistryCenterError::Connection("registry center not configured".to_string())
         })?;
-        registry.discover(service_name).await
+        registry
+            .discover(service_name, self.registry_key.clone())
+            .await
     }
 }
 
@@ -495,15 +491,14 @@ fn parse_file_format(s: &str) -> Option<FileFormat> {
 }
 
 fn build_config_key(
-    svc_name: &Option<String>,
+    svc_name: &String,
     profile: &Option<String>,
     namespace: &Option<String>,
     group: &Option<String>,
     file_format: &str,
 ) -> Option<ConfigKey> {
     let group = group.clone().or_else(|| profile.clone());
-    let data_id = svc_name.clone()?;
-    let data_id = format!("{}.{}", data_id, file_format);
+    let data_id = format!("{}.{}", svc_name, file_format);
     Some(ConfigKey::new(namespace.clone(), group, data_id))
 }
 

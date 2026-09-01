@@ -2,6 +2,7 @@ use crate::micro_svc::config_center::{ConfigCenterError, ConfigItem};
 use crate::micro_svc::ConfigKey;
 use async_trait::async_trait;
 use tokio::sync::watch;
+use tokio::task::JoinHandle;
 
 /// 所有后端适配器（etcd / Consul / Nacos）必须实现的统一契约。
 ///
@@ -13,8 +14,6 @@ pub trait ConfigCenterClient: Send + Sync {
     /// 后端名称，仅用于日志/错误信息展示。
     fn name(&self) -> &'static str;
 
-    fn config_key(&self) -> Result<ConfigKey, ConfigCenterError>;
-
     /// 按指定的 key 拉取一次配置的当前内容。
     async fn fetch(&self, key: &ConfigKey) -> Result<ConfigItem, ConfigCenterError>;
 
@@ -23,7 +22,7 @@ pub trait ConfigCenterClient: Send + Sync {
     /// 变更感知机制，在各自的实现内部被吸收掉，对上层统一表现为同一种 channel 事件流。
     async fn watch(
         &self,
-        keys: &[ConfigKey],
+        keys: &ConfigKey,
         config_changed_sender: watch::Sender<()>,
-    ) -> Result<(), ConfigCenterError>;
+    ) -> Result<Option<JoinHandle<()>>, ConfigCenterError>;
 }

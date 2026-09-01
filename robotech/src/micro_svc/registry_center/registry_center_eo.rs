@@ -1,6 +1,17 @@
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub struct RegistryKey {
+    /// 命名空间(Nacos有此概念，Consul / etcd 无用)
+    pub namespace: Option<String>,
+    /// 分组(Nacos有此概念，Consul / etcd 无用)
+    /// 一般用环境来分组，例如 `dev`、`test`、`prod`等
+    pub group: Option<String>,
+    /// 服务名
+    pub svc_name: String,
+}
+
 /// 服务实例的完整信息，用于注册与发现。
 ///
 /// 各后端 (etcd / Consul / Nacos) 的适配器会把本结构体转换成各自的原生格式
@@ -8,6 +19,7 @@ use std::collections::HashMap;
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "kebab-case")]
 pub struct ServiceInstance {
+    pub group: Option<String>,
     pub instance_id: String,
     pub service_name: String,
     pub ip: String,

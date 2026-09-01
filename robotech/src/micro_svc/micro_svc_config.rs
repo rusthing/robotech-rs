@@ -23,3 +23,18 @@ pub struct MicroSvcConfig {
     #[serde(default)]
     pub nacos: Option<NacosConfig>,
 }
+
+impl Default for MicroSvcConfig {
+    fn default() -> Self {
+        Self {
+            svc_name: None,
+            profile: None,
+            #[cfg(any(feature = "config-center", feature = "registry-center"))]
+            consul: None,
+            #[cfg(any(feature = "config-center", feature = "registry-center"))]
+            etcd: None,
+            #[cfg(any(feature = "config-center", feature = "registry-center"))]
+            nacos: None,
+        }
+    }
+}

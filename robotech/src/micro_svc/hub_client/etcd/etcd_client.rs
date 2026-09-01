@@ -20,24 +20,12 @@ use crate::micro_svc::{
 };
 use async_trait::async_trait;
 use etcd_client::GetOptions;
-use std::sync::Mutex;
 use tokio::sync::watch;
 use tokio::task::JoinHandle;
 use tracing::warn;
 
 pub struct EtcdClient {
     etcd_client: etcd_client::Client,
-    config_key: Option<ConfigKey>,
-    config_watch_join_handles: Mutex<Vec<JoinHandle<()>>>,
-}
-
-impl Drop for EtcdClient {
-    fn drop(&mut self) {
-        let handles: Vec<_> = std::mem::take(&mut *self.config_watch_join_handles.lock().unwrap());
-        for handle in handles {
-            handle.abort();
-        }
-    }
 }
 
 impl EtcdClient {
@@ -45,37 +33,16 @@ impl EtcdClient {
 
     pub async fn new(micro_svc_config: MicroSvcConfig) -> Result<Self, HubClientError> {
         let MicroSvcConfig {
-            svc_name,
-            profile,
-            etcd: etcd_config,
-            ..
+            etcd: etcd_config, ..
         } = micro_svc_config;
         let etcd_config = etcd_config.unwrap(); // 调用new方法前判断etcd_config必须为Some
-        let HubClientConfig {
-            base_url,
-            namespace,
-            group,
-        } = etcd_config.hub_client.clone();
+        let HubClientConfig { base_url, .. } = etcd_config.hub_client.clone();
         let client =
             etcd_client::Client::connect(base_url, Some(etcd_config.connect_options.into()))
                 .await
                 .map_err(|e| HubClientError::Connection(e.to_string()))?;
-        let config_key = etcd_config
-            .config
-            .clone()
-            .map(|config| -> Result<ConfigKey, HubClientError> {
-                let group = group.or_else(|| profile.clone());
-                let mut data_id =
-                    svc_name.ok_or(HubClientError::Config("svc_name is required".to_string()))?;
-                data_id = format!("{}.{}", data_id, config.file_format);
-                Ok(ConfigKey::new(namespace, group, data_id))
-            })
-            .transpose()?;
-
         Ok(Self {
             etcd_client: client,
-            config_key,
-            config_watch_join_handles: Mutex::new(Vec::new()),
         })
     }
 }
@@ -84,12 +51,6 @@ impl EtcdClient {
 impl ConfigCenterClient for EtcdClient {
     fn name(&self) -> &'static str {
         Self::CLIENT_NAME
-    }
-
-    fn config_key(&self) -> Result<ConfigKey, ConfigCenterError> {
-        self.config_key
-            .clone()
-            .ok_or(ConfigCenterError::Parse("missing config_key".to_string()))
     }
 
     async fn fetch(&self, key: &ConfigKey) -> Result<ConfigItem, ConfigCenterError> {
@@ -118,49 +79,42 @@ impl ConfigCenterClient for EtcdClient {
 
     async fn watch(
         &self,
-        keys: &[ConfigKey],
+        config_key: &ConfigKey,
         config_changed_sender: watch::Sender<()>,
-    ) -> Result<(), ConfigCenterError> {
-        for key in keys {
-            let etcd_key = key.to_string();
+    ) -> Result<Option<JoinHandle<()>>, ConfigCenterError> {
+        let config_key = config_key.to_string();
 
-            let watch_stream = {
-                let mut etcd_client = self.etcd_client.clone();
-                etcd_client
-                    .watch(etcd_key, None)
-                    .await
-                    .map_err(|e| ConfigCenterError::Connection(e.to_string()))?
-            };
+        let watch_stream = {
+            let mut etcd_client = self.etcd_client.clone();
+            etcd_client
+                .watch(config_key, None)
+                .await
+                .map_err(|e| ConfigCenterError::Connection(e.to_string()))?
+        };
 
-            let sender = config_changed_sender.clone();
-            let join_handle = tokio::spawn(async move {
-                let mut stream = watch_stream;
+        let sender = config_changed_sender.clone();
+        let join_handle = tokio::spawn(async move {
+            let mut stream = watch_stream;
 
-                while let Ok(Some(resp)) = stream.message().await {
-                    if resp.canceled() {
-                        warn!(
-                            watch_id = resp.watch_id(),
-                            reason = %resp.cancel_reason(),
-                            "etcd watch canceled"
-                        );
-                        break;
-                    }
+            while let Ok(Some(resp)) = stream.message().await {
+                if resp.canceled() {
+                    warn!(
+                        watch_id = resp.watch_id(),
+                        reason = %resp.cancel_reason(),
+                        "etcd watch canceled"
+                    );
+                    break;
+                }
 
-                    if !resp.events().is_empty() {
-                        if sender.send(()).is_err() {
-                            return;
-                        }
+                if !resp.events().is_empty() {
+                    if sender.send(()).is_err() {
+                        return;
                     }
                 }
-            });
+            }
+        });
 
-            self.config_watch_join_handles
-                .lock()
-                .unwrap()
-                .push(join_handle);
-        }
-
-        Ok(())
+        Ok(Some(join_handle))
     }
 }
 
@@ -170,7 +124,11 @@ impl RegistryCenterClient for EtcdClient {
         Self::CLIENT_NAME
     }
 
-    async fn register(&self, instance: &ServiceInstance) -> Result<(), RegistryCenterError> {
+    async fn register(
+        &self,
+        instance: &ServiceInstance,
+        _group: Option<String>,
+    ) -> Result<(), RegistryCenterError> {
         let key = format!(
             "{}/registry/{}/{}",
             instance
@@ -191,15 +149,21 @@ impl RegistryCenterClient for EtcdClient {
         Ok(())
     }
 
-    async fn deregister(&self, instance_id: &str) -> Result<(), RegistryCenterError> {
-        let prefix = format!("/registry/");
+    async fn deregister(
+        &self,
+        instance_id: &str,
+        _group: Option<String>,
+    ) -> Result<(), RegistryCenterError> {
+        let prefix = "/registry/".to_string();
         let mut client = self.etcd_client.clone();
         let resp = client
             .get(prefix, Some(GetOptions::new().with_prefix()))
             .await
             .map_err(|e| RegistryCenterError::Connection(e.to_string()))?;
         for kv in resp.kvs() {
-            let key = kv.key_str().map_err(|e| RegistryCenterError::Parse(e.to_string()))?;
+            let key = kv
+                .key_str()
+                .map_err(|e| RegistryCenterError::Parse(e.to_string()))?;
             if key.ends_with(instance_id) {
                 client
                     .delete(key, None)
@@ -213,6 +177,7 @@ impl RegistryCenterClient for EtcdClient {
     async fn discover(
         &self,
         service_name: &str,
+        _group: Option<String>,
     ) -> Result<Vec<ServiceInstance>, RegistryCenterError> {
         let prefix = format!("/registry/{}", service_name);
         let mut client = self.etcd_client.clone();

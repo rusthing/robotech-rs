@@ -1,12 +1,12 @@
 use crate::cfg::base_config::BaseConfig;
 use crate::cfg::cfg_error::CfgError;
-use crate::micro_svc::get_config;
+use crate::micro_svc::get_configs;
 #[cfg(any(feature = "config-center", feature = "registry-center"))]
 use crate::micro_svc::{setup_hub_client, MicroSvcConfig, MICRO_SVC_CONFIG_KEY};
 use config::builder::DefaultState;
 use config::{Config, ConfigBuilder};
 use std::path::{Path, PathBuf};
-use tracing::warn;
+use tracing::{error, warn};
 
 pub type Result<T> = core::result::Result<T, CfgError>;
 
@@ -52,12 +52,21 @@ pub async fn build_cfg(
     if let Some(app_name) = app_file_name_without_ext {
         // 初始化配置中心和注册中心的客户端
         #[cfg(any(feature = "config-center", feature = "registry-center"))]
-        init_hub_client(config.clone(), app_name, &base_config.profile).await?;
-        // 从配置中心获取配置文件内容并加载到config中
-        #[cfg(feature = "config-center")]
-        if let Some(config_items) = get_config().await? {
-            for item in config_items {
-                config = config.add_source(config::File::from_str(&item.content, item.format));
+        if let Err(e) = init_hub_client(config.clone(), app_name, &base_config.profile).await {
+            error!("Failed to init hub client: {}", e);
+        } else {
+            // 从配置中心获取配置文件内容并加载到config中
+            #[cfg(feature = "config-center")]
+            match get_configs().await {
+                Ok(config_items) => {
+                    for item in config_items {
+                        config =
+                            config.add_source(config::File::from_str(&item.content, item.format));
+                    }
+                }
+                Err(e) => {
+                    error!("Failed to get configs from config center: {:?}", e);
+                }
             }
         }
     }

@@ -30,8 +30,20 @@ pub static ROUTER_SLICE: [fn() -> Router];
 #[distributed_slice]
 pub static API_DOC_SLICE: [fn() -> (Url<'static>, OpenApi)];
 
+use std::sync::atomic::{AtomicU16, Ordering};
+
 static WEB_SERVICE_HANDLES: RwLock<Option<Vec<JoinHandle<()>>>> = RwLock::new(None);
 static STOP_WEB_SERVICE_SENDER: RwLock<Option<broadcast::Sender<()>>> = RwLock::new(None);
+static WEB_LISTEN_PORT: AtomicU16 = AtomicU16::new(0);
+
+pub fn get_web_listen_port() -> Option<u16> {
+    let port = WEB_LISTEN_PORT.load(Ordering::Relaxed);
+    if port == 0 {
+        None
+    } else {
+        Some(port)
+    }
+}
 
 fn set_web_service_handles(value: Vec<JoinHandle<()>>) -> Result<(), WebServerError> {
     let mut write_lock = WEB_SERVICE_HANDLES
@@ -513,6 +525,7 @@ fn bind_and_start(
         let tcp_listener = create_listener(bind.to_string(), port, reuse_port)?;
         // 在 serve 之前获取实际端口
         let actual_addr = tcp_listener.local_addr()?;
+        WEB_LISTEN_PORT.store(actual_addr.port(), Ordering::Relaxed);
         let tokio_listener = tokio::net::TcpListener::from_std(tcp_listener)
             .map_err(|e| WebServerError::Socket(format!("转换为 tokio listener失败: {:#}", e)))?;
 

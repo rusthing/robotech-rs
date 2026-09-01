@@ -12,19 +12,21 @@
 
 use std::sync::{Arc, Mutex};
 
-use async_trait::async_trait;
-use nacos_sdk::api::config::{
-    ConfigChangeListener, ConfigResponse, ConfigService, ConfigServiceBuilder,
-};
-use nacos_sdk::api::naming::{NamingService, NamingServiceBuilder, ServiceInstance as NacosInstance};
-use nacos_sdk::api::props::ClientProps;
-use tokio::sync::watch;
-
 use crate::micro_svc::hub_client_config::HubClientConfig;
 use crate::micro_svc::{
     ConfigCenterClient, ConfigCenterError, ConfigItem, ConfigKey, HubClientError, MicroSvcConfig,
     RegistryCenterClient, RegistryCenterError, ServiceInstance,
 };
+use async_trait::async_trait;
+use nacos_sdk::api::config::{
+    ConfigChangeListener, ConfigResponse, ConfigService, ConfigServiceBuilder,
+};
+use nacos_sdk::api::naming::{
+    NamingService, NamingServiceBuilder, ServiceInstance as NacosInstance,
+};
+use nacos_sdk::api::props::ClientProps;
+use tokio::sync::watch;
+use tokio::task::JoinHandle;
 
 /// # 桥接器
 /// 把 Nacos SDK 的回调式监听，转换成本 crate 统一的 channel 事件流
@@ -46,13 +48,12 @@ impl ConfigChangeListener for Bridge {
 pub struct NacosClient {
     service: ConfigService,
     naming_service: NamingService,
-    config_key: Option<ConfigKey>,
-    config_listener: Mutex<Vec<(String, String, Arc<Bridge>)>>,
+    config_listeners: Mutex<Vec<(String, String, Arc<Bridge>)>>,
 }
 
 impl Drop for NacosClient {
     fn drop(&mut self) {
-        let listeners: Vec<_> = std::mem::take(&mut *self.config_listener.lock().unwrap());
+        let listeners: Vec<_> = std::mem::take(&mut *self.config_listeners.lock().unwrap());
         if !listeners.is_empty() {
             if let Ok(handle) = tokio::runtime::Handle::try_current() {
                 let service = self.service.clone();
@@ -65,13 +66,12 @@ impl Drop for NacosClient {
         }
     }
 }
+
 impl NacosClient {
     const CLIENT_NAME: &'static str = "nacos";
 
     pub async fn new(micro_svc_config: MicroSvcConfig) -> Result<Self, HubClientError> {
         let MicroSvcConfig {
-            svc_name,
-            profile,
             nacos: nacos_config,
             ..
         } = micro_svc_config;
@@ -79,26 +79,14 @@ impl NacosClient {
         let HubClientConfig {
             base_url,
             namespace,
-            group,
+            ..
         } = nacos_config.hub_client.clone();
         let namespace = if let Some(namespace) = namespace {
             namespace.clone()
         } else {
             "public".to_string()
         };
-        // 如果 group 和 profile 都为空，使用 DEFAULT_GROUP 作为默认group
-        let group = group.or_else(|| Some(profile.unwrap_or("DEFAULT_GROUP".to_string())));
         let server_addr = base_url[0].trim_end_matches('/').to_string();
-        let config_key = nacos_config
-            .config
-            .clone()
-            .map(|config| -> Result<ConfigKey, HubClientError> {
-                let mut data_id =
-                    svc_name.ok_or(HubClientError::Config("svc_name is required".to_string()))?;
-                data_id = format!("{}.{}", data_id, config.file_format);
-                Ok(ConfigKey::new(Some(namespace.clone()), group, data_id))
-            })
-            .transpose()?;
         let props = ClientProps::new()
             .server_addr(server_addr.clone())
             .namespace(namespace.clone());
@@ -113,8 +101,7 @@ impl NacosClient {
         Ok(Self {
             service,
             naming_service,
-            config_key,
-            config_listener: Mutex::new(Vec::new()),
+            config_listeners: Mutex::new(Vec::new()),
         })
     }
 }
@@ -125,18 +112,12 @@ impl ConfigCenterClient for NacosClient {
         Self::CLIENT_NAME
     }
 
-    fn config_key(&self) -> Result<ConfigKey, ConfigCenterError> {
-        self.config_key
-            .clone()
-            .ok_or(ConfigCenterError::Parse("missing config_key".to_string()))
-    }
-
     async fn fetch(&self, key: &ConfigKey) -> Result<ConfigItem, ConfigCenterError> {
         let data_id = key.data_id.clone();
         let group = key
             .group
             .clone()
-            .ok_or(ConfigCenterError::Parse("missing group".to_string()))?;
+            .unwrap_or_else(|| "DEFAULT_GROUP".to_string());
         let resp = self
             .service
             .get_config(data_id.clone(), group.clone())
@@ -153,33 +134,31 @@ impl ConfigCenterClient for NacosClient {
 
     async fn watch(
         &self,
-        keys: &[ConfigKey],
+        config_key: &ConfigKey,
         config_changed_sender: watch::Sender<()>,
-    ) -> Result<(), ConfigCenterError> {
-        for key in keys {
-            let data_id = key.data_id.clone();
-            let group = key
-                .group
-                .clone()
-                .ok_or(ConfigCenterError::Parse("missing group".to_string()))?;
+    ) -> Result<Option<JoinHandle<()>>, ConfigCenterError> {
+        let data_id = config_key.data_id.clone();
+        let group = config_key
+            .group
+            .clone()
+            .unwrap_or_else(|| "DEFAULT_GROUP".to_string());
 
-            let bridge = Arc::new(Bridge {
-                tx: config_changed_sender.clone(),
-                md5: String::new(),
-            });
+        let bridge = Arc::new(Bridge {
+            tx: config_changed_sender.clone(),
+            md5: String::new(),
+        });
 
-            self.service
-                .add_listener(data_id.clone(), group.clone(), bridge.clone())
-                .await
-                .map_err(|e| ConfigCenterError::Connection(e.to_string()))?;
+        self.service
+            .add_listener(data_id.clone(), group.clone(), bridge.clone())
+            .await
+            .map_err(|e| ConfigCenterError::Connection(e.to_string()))?;
 
-            self.config_listener
-                .lock()
-                .unwrap()
-                .push((data_id, group, bridge));
-        }
+        self.config_listeners
+            .lock()
+            .unwrap()
+            .push((data_id, group, bridge));
 
-        Ok(())
+        Ok(None)
     }
 }
 
@@ -198,8 +177,9 @@ impl RegistryCenterClient for NacosClient {
             metadata: instance.metadata.clone(),
             ..Default::default()
         };
+        let group = instance.group.clone();
         self.naming_service
-            .register_instance(instance.service_name.clone(), None, nacos_instance)
+            .register_instance(instance.service_name.clone(), group, nacos_instance)
             .await
             .map_err(|e| RegistryCenterError::Connection(e.to_string()))?;
         Ok(())
@@ -211,7 +191,7 @@ impl RegistryCenterClient for NacosClient {
             ..Default::default()
         };
         self.naming_service
-            .deregister_instance(String::new(), None, nacos_instance)
+            .deregister_instance(String::new(), group.clone(), nacos_instance)
             .await
             .map_err(|e| RegistryCenterError::Connection(e.to_string()))?;
         Ok(())
@@ -220,16 +200,11 @@ impl RegistryCenterClient for NacosClient {
     async fn discover(
         &self,
         service_name: &str,
+        group: Option<String>,
     ) -> Result<Vec<ServiceInstance>, RegistryCenterError> {
         let instances = self
             .naming_service
-            .select_instances(
-                service_name.to_string(),
-                None,
-                vec![],
-                false,
-                true,
-            )
+            .select_instances(service_name.to_string(), group.clone(), vec![], false, true)
             .await
             .map_err(|e| RegistryCenterError::Connection(e.to_string()))?;
         Ok(instances
