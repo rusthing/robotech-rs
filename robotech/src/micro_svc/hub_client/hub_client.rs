@@ -50,22 +50,43 @@ where
     hub_client.watch_config_changed(on_change).await
 }
 
-pub async fn register() -> Result<(), RegistryCenterError> {
-    let hub_client =
-        get_hub_client().map_err(|e| RegistryCenterError::Connection(e.to_string()))?;
-    hub_client.register().await
+pub async fn register_micro_svc() {
+    let hub_client = match get_hub_client() {
+        Ok(hub_client) => hub_client,
+        Err(e) => {
+            warn!("hub client not initialized: {:?}", e);
+            return;
+        }
+    };
+    if let Err(e) = hub_client.register().await {
+        warn!("register micro instance failed: {:?}", e);
+    }
 }
 
-pub async fn reregister() -> Result<(), RegistryCenterError> {
-    let hub_client =
-        get_hub_client().map_err(|e| RegistryCenterError::Connection(e.to_string()))?;
-    hub_client.reregister().await
+pub async fn reregister_micro_svc() {
+    let hub_client = match get_hub_client() {
+        Ok(hub_client) => hub_client,
+        Err(e) => {
+            warn!("hub client not initialized: {:?}", e);
+            return;
+        }
+    };
+    if let Err(e) = hub_client.reregister().await {
+        warn!("reregister micro instance failed: {:?}", e);
+    }
 }
 
-pub async fn deregister() -> Result<(), RegistryCenterError> {
-    let hub_client =
-        get_hub_client().map_err(|e| RegistryCenterError::Connection(e.to_string()))?;
-    hub_client.deregister().await
+pub async fn deregister_micro_svc() {
+    let hub_client = match get_hub_client() {
+        Ok(hub_client) => hub_client,
+        Err(e) => {
+            warn!("hub client not initialized: {:?}", e);
+            return;
+        }
+    };
+    if let Err(e) = hub_client.deregister().await {
+        warn!("deregister micro instance failed: {:?}", e);
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -417,9 +438,7 @@ impl HubClient {
 
     fn build_service_instance(&self) -> Result<ServiceInstance, RegistryCenterError> {
         let registry_key = self.registry_key.as_ref().ok_or_else(|| {
-            RegistryCenterError::Connection(
-                "registry center not configured, cannot determine svc_name".to_string(),
-            )
+            RegistryCenterError::Connection("registry center not configured".to_string())
         })?;
         let namespace = registry_key.namespace.clone();
         let group = registry_key.group.clone();
@@ -431,6 +450,12 @@ impl HubClient {
             )
         })?;
         let instance_id = format!("{svc_name}-{}-{port}", ip.replace('.', "-"));
+        let health_check_url = Some(format!(
+            "http://{}:{}{}",
+            ip,
+            port,
+            crate::web::get_health_check_uri()
+        ));
         Ok(ServiceInstance {
             namespace,
             group,
@@ -438,7 +463,7 @@ impl HubClient {
             instance_id,
             ip,
             port,
-            health_check_url: None,
+            health_check_url,
             metadata: Default::default(),
         })
     }

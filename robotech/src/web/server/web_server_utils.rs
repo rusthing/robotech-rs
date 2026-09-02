@@ -12,7 +12,7 @@ use robotech_macros::log_call;
 use socket2::{Domain, Socket, Type};
 use std::collections::HashMap;
 use std::net::{IpAddr, SocketAddr, TcpListener};
-use std::sync::{Arc, RwLock};
+use std::sync::Arc;
 use std::time::Duration;
 use tokio::sync::broadcast;
 use tokio::task::JoinHandle;
@@ -31,10 +31,12 @@ pub static ROUTER_SLICE: [fn() -> Router];
 pub static API_DOC_SLICE: [fn() -> (Url<'static>, OpenApi)];
 
 use std::sync::atomic::{AtomicU16, Ordering};
+use arc_swap::ArcSwapOption;
 
-static WEB_SERVICE_HANDLES: RwLock<Option<Vec<JoinHandle<()>>>> = RwLock::new(None);
-static STOP_WEB_SERVICE_SENDER: RwLock<Option<broadcast::Sender<()>>> = RwLock::new(None);
+static WEB_SERVICE_HANDLES: ArcSwapOption<Vec<JoinHandle<()>>> = ArcSwapOption::const_empty();
+static STOP_WEB_SERVICE_SENDER: ArcSwapOption<broadcast::Sender<()>> = ArcSwapOption::const_empty();
 static WEB_LISTEN_PORT: AtomicU16 = AtomicU16::new(0);
+static HEALTH_CHECK_URI: ArcSwapOption<String> = ArcSwapOption::const_empty();
 
 pub fn get_web_listen_port() -> Option<u16> {
     let port = WEB_LISTEN_PORT.load(Ordering::Relaxed);
@@ -45,34 +47,44 @@ pub fn get_web_listen_port() -> Option<u16> {
     }
 }
 
+pub fn get_health_check_uri() -> String {
+    HEALTH_CHECK_URI
+        .load()
+        .as_ref()
+        .map(|u| (**u).clone())
+        .unwrap_or_else(|| "/actuator/health".to_string())
+}
+
 fn set_web_service_handles(value: Vec<JoinHandle<()>>) -> Result<(), WebServerError> {
-    let mut write_lock = WEB_SERVICE_HANDLES
-        .write()
-        .map_err(|e| WebServerError::SetWebServiceHandles(e.to_string()))?;
-    *write_lock = Some(value);
+    WEB_SERVICE_HANDLES.store(Some(Arc::new(value)));
     Ok(())
 }
 
 fn take_web_service_handles() -> Result<Option<Vec<JoinHandle<()>>>, WebServerError> {
-    let mut write_lock = WEB_SERVICE_HANDLES
-        .write()
-        .map_err(|e| WebServerError::TakeWebServiceHandles(e.to_string()))?;
-    Ok(write_lock.take())
+    let arc_opt = WEB_SERVICE_HANDLES.swap(None);
+    Ok(match arc_opt {
+        Some(arc) => match Arc::try_unwrap(arc) {
+            Ok(v) => Some(v),
+            Err(arc) => {
+                error!("WEB_SERVICE_HANDLES still referenced elsewhere, aborting them instead");
+                for h in arc.iter() {
+                    h.abort();
+                }
+                None
+            }
+        },
+        None => None,
+    })
 }
 
 fn set_stop_web_service_sender(value: broadcast::Sender<()>) -> Result<(), WebServerError> {
-    let mut write_lock = STOP_WEB_SERVICE_SENDER
-        .write()
-        .map_err(|e| WebServerError::SetWebServiceHandles(e.to_string()))?;
-    *write_lock = Some(value);
+    STOP_WEB_SERVICE_SENDER.store(Some(Arc::new(value)));
     Ok(())
 }
 
 fn take_stop_web_service_sender() -> Result<Option<broadcast::Sender<()>>, WebServerError> {
-    let mut write_lock = STOP_WEB_SERVICE_SENDER
-        .write()
-        .map_err(|e| WebServerError::TakeWebServiceHandles(e.to_string()))?;
-    Ok(write_lock.take())
+    let arc_opt = STOP_WEB_SERVICE_SENDER.swap(None);
+    Ok(arc_opt.map(|arc| (*arc).clone()))
 }
 
 /// # 健康检查端点
@@ -119,6 +131,7 @@ pub async fn setup_web_server(
             terminate_old_app_retry_interval,
         } = web_server_config;
         let health_check_uri = &health_check.uri;
+        HEALTH_CHECK_URI.store(Some(Arc::new(health_check_uri.clone())));
 
         let (is_random_port, listen_binds) =
             get_listen_binds(port_of_args, binds, port_option, listens)?;
