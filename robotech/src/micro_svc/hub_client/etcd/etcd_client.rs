@@ -19,23 +19,31 @@ use crate::micro_svc::{
     HubClientError, MicroSvcConfig, RegistryCenterClient, RegistryCenterError, ServiceInstance,
 };
 use async_trait::async_trait;
-use etcd_client::GetOptions;
+use etcd_client::{GetOptions, PutOptions};
+use std::sync::Mutex;
 use tokio::sync::watch;
 use tokio::task::JoinHandle;
-use tracing::warn;
+use tracing::{error, warn};
 
 pub struct EtcdClient {
     etcd_client: etcd_client::Client,
+    lease_state: Mutex<Option<LeaseState>>,
+}
+
+struct LeaseState {
+    lease_id: i64,
+    keep_alive_handle: JoinHandle<()>,
 }
 
 impl EtcdClient {
     const CLIENT_NAME: &'static str = "etcd";
+    const LEASE_TTL_SECS: i64 = 30;
 
     pub async fn new(micro_svc_config: MicroSvcConfig) -> Result<Self, HubClientError> {
         let MicroSvcConfig {
             etcd: etcd_config, ..
         } = micro_svc_config;
-        let etcd_config = etcd_config.unwrap(); // 调用new方法前判断etcd_config必须为Some
+        let etcd_config = etcd_config.unwrap();
         let HubClientConfig { base_url, .. } = etcd_config.hub_client.clone();
         let client =
             etcd_client::Client::connect(base_url, Some(etcd_config.connect_options.into()))
@@ -43,6 +51,7 @@ impl EtcdClient {
                 .map_err(|e| HubClientError::Connection(e.to_string()))?;
         Ok(Self {
             etcd_client: client,
+            lease_state: Mutex::new(None),
         })
     }
 }
@@ -53,26 +62,29 @@ impl ConfigCenterClient for EtcdClient {
         Self::CLIENT_NAME
     }
 
-    async fn fetch(&self, key: &ConfigKey) -> Result<ConfigItem, ConfigCenterError> {
-        let etcd_key = key.to_string();
+    async fn fetch(&self, config_key: &ConfigKey) -> Result<ConfigItem, ConfigCenterError> {
+        let etcd_config_key = format!("/config/{config_key}");
         let mut client = self.etcd_client.clone();
         let resp = client
-            .get(etcd_key.clone(), Some(GetOptions::new().with_prefix()))
+            .get(
+                etcd_config_key.clone(),
+                Some(GetOptions::new().with_prefix()),
+            )
             .await
             .map_err(|e| ConfigCenterError::Connection(e.to_string()))?;
         let kv = resp
             .kvs()
             .first()
-            .ok_or_else(|| ConfigCenterError::NotFound(key.clone()))?;
+            .ok_or_else(|| ConfigCenterError::NotFound(config_key.clone()))?;
         let content = kv
             .value_str()
             .map_err(|e| ConfigCenterError::Parse(e.to_string()))?
             .to_string();
         Ok(ConfigItem {
-            key: key.clone(),
-            format: key
+            key: config_key.clone(),
+            format: config_key
                 .infer_file_format()
-                .ok_or(ConfigCenterError::UnknownFileFormat(etcd_key))?,
+                .ok_or(ConfigCenterError::UnknownFileFormat(etcd_config_key))?,
             content,
         })
     }
@@ -82,12 +94,12 @@ impl ConfigCenterClient for EtcdClient {
         config_key: &ConfigKey,
         config_changed_sender: watch::Sender<()>,
     ) -> Result<Option<JoinHandle<()>>, ConfigCenterError> {
-        let config_key = config_key.to_string();
+        let etcd_config_key = format!("/config/{config_key}");
 
         let watch_stream = {
             let mut etcd_client = self.etcd_client.clone();
             etcd_client
-                .watch(config_key, None)
+                .watch(etcd_config_key, None)
                 .await
                 .map_err(|e| ConfigCenterError::Connection(e.to_string()))?
         };
@@ -145,10 +157,47 @@ impl RegistryCenterClient for EtcdClient {
         let value = serde_json::to_string(service_instance)
             .map_err(|e| RegistryCenterError::Parse(e.to_string()))?;
         let mut client = self.etcd_client.clone();
-        client
-            .put(key, value, None)
+
+        let lease_resp = client
+            .lease_grant(Self::LEASE_TTL_SECS, None)
             .await
             .map_err(|e| RegistryCenterError::Connection(e.to_string()))?;
+        let lease_id = lease_resp.id();
+
+        let put_opts = PutOptions::new().with_lease(lease_id);
+        client
+            .put(key, value, Some(put_opts))
+            .await
+            .map_err(|e| RegistryCenterError::Connection(e.to_string()))?;
+
+        let (mut keeper, _stream) = client
+            .lease_keep_alive(lease_id)
+            .await
+            .map_err(|e| RegistryCenterError::Connection(e.to_string()))?;
+
+        let keep_alive_handle = tokio::spawn(async move {
+            let mut interval = tokio::time::interval(tokio::time::Duration::from_secs(
+                (Self::LEASE_TTL_SECS as u64) / 3,
+            ));
+            loop {
+                interval.tick().await;
+                if let Err(e) = keeper.keep_alive().await {
+                    error!("etcd lease keep_alive failed (lease_id={lease_id}): {e:?}");
+                    break;
+                }
+            }
+        });
+
+        let new_state = LeaseState {
+            lease_id,
+            keep_alive_handle,
+        };
+        let old_state = self.lease_state.lock().unwrap().replace(new_state);
+        if let Some(old) = old_state {
+            old.keep_alive_handle.abort();
+            let mut c = self.etcd_client.clone();
+            let _ = c.lease_revoke(old.lease_id).await;
+        }
         Ok(())
     }
 
@@ -158,6 +207,13 @@ impl RegistryCenterClient for EtcdClient {
     ) -> Result<(), RegistryCenterError> {
         let prefix = "/registry/".to_string();
         let mut client = self.etcd_client.clone();
+
+        let old_state = self.lease_state.lock().unwrap().take();
+        if let Some(state) = old_state {
+            state.keep_alive_handle.abort();
+            let _ = client.lease_revoke(state.lease_id).await;
+        }
+
         let resp = client
             .get(prefix, Some(GetOptions::new().with_prefix()))
             .await
