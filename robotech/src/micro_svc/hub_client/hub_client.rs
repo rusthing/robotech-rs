@@ -410,13 +410,13 @@ impl HubClient {
         })?;
         let group = registry_key.group.clone();
         let svc_name = registry_key.svc_name.clone();
-        let ip = get_local_ip()?.replace('.', "-");
+        let ip = get_local_ip()?;
         let port = crate::web::get_web_listen_port().ok_or_else(|| {
             RegistryCenterError::Connection(
                 "web server not started, cannot determine listen port".to_string(),
             )
         })?;
-        let instance_id = format!("{svc_name}-{ip}-{port}");
+        let instance_id = format!("{svc_name}-{}-{port}", ip.replace('.', "-"));
         Ok(ServiceInstance {
             group,
             svc_name,
