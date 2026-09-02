@@ -91,6 +91,19 @@ impl Drop for HubClient {
                 handle.abort();
             }
         }
+        if let Ok(_guard) = tokio::runtime::Handle::try_current() {
+            if let Some(registry) = self.registry.as_ref() {
+                let registry = registry.clone();
+                let service_instance = self.service_instance.lock().unwrap().clone();
+                if let Some(si) = service_instance {
+                    tokio::spawn(async move {
+                        if let Err(e) = registry.deregister(&si).await {
+                            error!("deregister service instance failed: {:?}", e);
+                        }
+                    });
+                }
+            }
+        }
     }
 }
 
