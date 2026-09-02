@@ -205,12 +205,12 @@ fn build_branch<C: ConfigCenterClient + RegistryCenterClient + 'static>(
         (None, None)
     };
 
-    let hut_client = hub_client.map(Arc::new);
-    let config_center_client = hut_client.as_ref().map(|c| {
+    let hub_client = hub_client.map(Arc::new);
+    let config_center_client = hub_client.as_ref().map(|c| {
         let tmp: Arc<dyn ConfigCenterClient> = c.clone();
         tmp
     });
-    let registry_center_client = hut_client.as_ref().map(|c| {
+    let registry_center_client = hub_client.as_ref().map(|c| {
         let tmp: Arc<dyn RegistryCenterClient> = c.clone();
         tmp
     });
