@@ -27,9 +27,18 @@ use tracing::{error, warn};
 
 pub struct EtcdClient {
     etcd_client: etcd_client::Client,
+    /// 当前活跃的租约状态。
+    /// * register() 每次都会生成**新的** lease_id 替换旧的
+    /// * deregister() / drop 时会 revoke 掉这个 lease，key 会立刻从 etcd 删除
+    /// * 进程 crash / etcd 网络不可达超过 LEASE_TTL_SECS 后，etcd 服务端会自动 expire 该 lease 关联的所有 key
     lease_state: Mutex<Option<LeaseState>>,
 }
 
+/// 一次租约生命周期的内部状态。
+///
+/// 为什么既要记 `lease_id` 又要记 `keep_alive_handle`：
+/// - deregister / 重新 register 时需要主动 revoke lease → 必须拿到 lease_id
+/// - 主动清理时需要先 abort 续租后台 task，避免它和 revoke 并发继续续租
 struct LeaseState {
     lease_id: i64,
     keep_alive_handle: JoinHandle<()>,
@@ -37,6 +46,7 @@ struct LeaseState {
 
 impl EtcdClient {
     const CLIENT_NAME: &'static str = "etcd";
+    /// 租约 TTL（秒）。续租失败超过这个时间 etcd 会自动删除绑定 key，保证不会有脏实例。
     const LEASE_TTL_SECS: i64 = 30;
 
     pub async fn new(micro_svc_config: MicroSvcConfig) -> Result<Self, HubClientError> {
@@ -136,6 +146,15 @@ impl RegistryCenterClient for EtcdClient {
         Self::CLIENT_NAME
     }
 
+    /// 将服务实例注册到 etcd。
+    ///
+    /// 流程（Etcd 最大坑在这里，**绝对不能写永久 key**）：
+    /// 1. `lease_grant(30s)` 申请一个带 TTL 的租约
+    /// 2. `put(key, value, PutOptions.with_lease(lease_id))` 把实例 key 绑定到这个租约上
+    /// 3. `lease_keep_alive` 拿到续租句柄，spawn 后台 task 每 TTL/3（≈10s）续租一次
+    /// 4. 如果 register 被重复调用（比如 keeper 30s 兜底刷新）：先停掉旧续租 task + revoke 旧 lease，旧 key 立即过期删除
+    ///
+    /// 这样进程 crash / 断网超过 30s，etcd 服务端会**自动删除**绑定 key，不会有脏实例一直留在表里。
     async fn register(
         &self,
         service_instance: &ServiceInstance,
@@ -158,23 +177,28 @@ impl RegistryCenterClient for EtcdClient {
             .map_err(|e| RegistryCenterError::Parse(e.to_string()))?;
         let mut client = self.etcd_client.clone();
 
+        // Step 1: 申请 30s TTL 租约
         let lease_resp = client
             .lease_grant(Self::LEASE_TTL_SECS, None)
             .await
             .map_err(|e| RegistryCenterError::Connection(e.to_string()))?;
         let lease_id = lease_resp.id();
 
+        // Step 2: put 绑定 lease_id，注意这里**没有 None**，绑定了 lease 才能自动过期
         let put_opts = PutOptions::new().with_lease(lease_id);
         client
             .put(key, value, Some(put_opts))
             .await
             .map_err(|e| RegistryCenterError::Connection(e.to_string()))?;
 
+        // Step 3: 开 keep_alive 通道，spawn 后台续租 task
         let (mut keeper, _stream) = client
             .lease_keep_alive(lease_id)
             .await
             .map_err(|e| RegistryCenterError::Connection(e.to_string()))?;
 
+        // 每 TTL/3 续租一次，留 2/3 的余量应对网络抖动。
+        // 失败直接 break：etcd 会在 TTL 后自动删 key，外部 keeper 30s 兜底时又会重新 grant+put。
         let keep_alive_handle = tokio::spawn(async move {
             let mut interval = tokio::time::interval(tokio::time::Duration::from_secs(
                 (Self::LEASE_TTL_SECS as u64) / 3,
@@ -188,6 +212,9 @@ impl RegistryCenterClient for EtcdClient {
             }
         });
 
+        // Step 4: 记录新 lease_state，同时清理旧的。
+        // 典型场景：instance_id 变了（端口更换）→ reregister → 新旧 lease 同时存在。
+        // 必须在这里主动 revoke 旧 lease，旧 key 才会秒没。
         let new_state = LeaseState {
             lease_id,
             keep_alive_handle,
@@ -201,6 +228,10 @@ impl RegistryCenterClient for EtcdClient {
         Ok(())
     }
 
+    /// 从 etcd 注销服务实例。
+    ///
+    /// 1. 先主动 revoke lease：key 立即从 etcd 删除（比等 TTL 快），同时停掉续租 task
+    /// 2. 再扫一遍 registry 前缀按 instance_id delete 兜底（防止旧 key 没绑 lease 的历史遗留脏数据）
     async fn deregister(
         &self,
         service_instance: &ServiceInstance,
