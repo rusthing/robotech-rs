@@ -237,6 +237,7 @@ impl RegistryCenterClient for ConsulClient {
 
     async fn discover(
         &self,
+        namespace: Option<String>,
         group: Option<String>,
         svc_name: &str,
     ) -> Result<Vec<ServiceInstance>, RegistryCenterError> {
@@ -277,8 +278,9 @@ impl RegistryCenterClient for ConsulClient {
         Ok(entries
             .into_iter()
             .map(|entry| ServiceInstance {
-                instance_id: entry.service.id,
+                namespace: namespace.clone(),
                 group: group.clone(),
+                instance_id: entry.service.id,
                 svc_name: entry.service.service,
                 ip: entry.service.address,
                 port: entry.service.port,

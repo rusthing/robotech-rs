@@ -19,6 +19,7 @@ pub struct RegistryKey {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "kebab-case")]
 pub struct ServiceInstance {
+    pub namespace: Option<String>,
     pub group: Option<String>,
     pub svc_name: String,
     pub instance_id: String,

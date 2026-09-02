@@ -209,6 +209,7 @@ impl RegistryCenterClient for NacosClient {
 
     async fn discover(
         &self,
+        namespace: Option<String>,
         group: Option<String>,
         svc_name: &str,
     ) -> Result<Vec<ServiceInstance>, RegistryCenterError> {
@@ -220,8 +221,9 @@ impl RegistryCenterClient for NacosClient {
         Ok(instances
             .into_iter()
             .map(|service_instance| ServiceInstance {
-                instance_id: service_instance.instance_id.unwrap_or_default(),
+                namespace: namespace.clone(),
                 group: group.clone(),
+                instance_id: service_instance.instance_id.unwrap_or_default(),
                 svc_name: service_instance.service_name.unwrap_or_default(),
                 ip: service_instance.ip,
                 port: service_instance.port as u16,

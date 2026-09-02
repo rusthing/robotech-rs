@@ -24,6 +24,7 @@ pub trait RegistryCenterClient: Send + Sync {
     /// 发现指定服务的所有健康实例。
     async fn discover(
         &self,
+        namespace: Option<String>,
         group: Option<String>,
         svc_name: &str,
     ) -> Result<Vec<ServiceInstance>, RegistryCenterError>;

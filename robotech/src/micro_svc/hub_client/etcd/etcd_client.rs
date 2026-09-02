@@ -128,15 +128,19 @@ impl RegistryCenterClient for EtcdClient {
         &self,
         service_instance: &ServiceInstance,
     ) -> Result<(), RegistryCenterError> {
+        let namespace = if let Some(namespace) = &service_instance.namespace {
+            format!("{}/", namespace)
+        } else {
+            "".to_string()
+        };
+        let group = if let Some(group) = &service_instance.group {
+            format!("{}/", group)
+        } else {
+            "".to_string()
+        };
         let key = format!(
-            "{}/registry/{}/{}",
-            service_instance
-                .metadata
-                .get("namespace")
-                .cloned()
-                .unwrap_or_default(),
-            service_instance.svc_name,
-            service_instance.instance_id
+            "/registry/{}{}{}/{}",
+            namespace, group, service_instance.svc_name, service_instance.instance_id
         );
         let value = serde_json::to_string(service_instance)
             .map_err(|e| RegistryCenterError::Parse(e.to_string()))?;
@@ -174,6 +178,7 @@ impl RegistryCenterClient for EtcdClient {
 
     async fn discover(
         &self,
+        namespace: Option<String>,
         group: Option<String>,
         svc_name: &str,
     ) -> Result<Vec<ServiceInstance>, RegistryCenterError> {
@@ -190,6 +195,7 @@ impl RegistryCenterClient for EtcdClient {
                 .map_err(|e| RegistryCenterError::Parse(e.to_string()))?;
             let mut service_instance: ServiceInstance = serde_json::from_str(value)
                 .map_err(|e| RegistryCenterError::Parse(e.to_string()))?;
+            service_instance.namespace = namespace.clone();
             service_instance.group = group.clone();
             instances.push(service_instance);
         }

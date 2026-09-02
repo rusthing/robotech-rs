@@ -408,6 +408,7 @@ impl HubClient {
                 "registry center not configured, cannot determine svc_name".to_string(),
             )
         })?;
+        let namespace = registry_key.namespace.clone();
         let group = registry_key.group.clone();
         let svc_name = registry_key.svc_name.clone();
         let ip = get_local_ip()?;
@@ -418,6 +419,7 @@ impl HubClient {
         })?;
         let instance_id = format!("{svc_name}-{}-{port}", ip.replace('.', "-"));
         Ok(ServiceInstance {
+            namespace,
             group,
             svc_name,
             instance_id,
