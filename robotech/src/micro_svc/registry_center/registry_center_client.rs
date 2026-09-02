@@ -12,14 +12,19 @@ pub trait RegistryCenterClient: Send + Sync {
     fn name(&self) -> &'static str;
 
     /// 注册一个服务实例。
-    async fn register(&self, instance: &ServiceInstance) -> Result<(), RegistryCenterError>;
+    async fn register(&self, service_instance: &ServiceInstance)
+    -> Result<(), RegistryCenterError>;
 
     /// 注销一个服务实例。
-    async fn deregister(&self, instance_id: &str) -> Result<(), RegistryCenterError>;
+    async fn deregister(
+        &self,
+        service_instance: &ServiceInstance,
+    ) -> Result<(), RegistryCenterError>;
 
     /// 发现指定服务的所有健康实例。
     async fn discover(
         &self,
-        service_name: &str,
+        group: Option<String>,
+        svc_name: &str,
     ) -> Result<Vec<ServiceInstance>, RegistryCenterError>;
 }

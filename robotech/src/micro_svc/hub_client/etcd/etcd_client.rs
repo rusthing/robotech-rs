@@ -126,20 +126,19 @@ impl RegistryCenterClient for EtcdClient {
 
     async fn register(
         &self,
-        instance: &ServiceInstance,
-        _group: Option<String>,
+        service_instance: &ServiceInstance,
     ) -> Result<(), RegistryCenterError> {
         let key = format!(
             "{}/registry/{}/{}",
-            instance
+            service_instance
                 .metadata
                 .get("namespace")
                 .cloned()
                 .unwrap_or_default(),
-            instance.service_name,
-            instance.instance_id
+            service_instance.svc_name,
+            service_instance.instance_id
         );
-        let value = serde_json::to_string(instance)
+        let value = serde_json::to_string(service_instance)
             .map_err(|e| RegistryCenterError::Parse(e.to_string()))?;
         let mut client = self.etcd_client.clone();
         client
@@ -151,8 +150,7 @@ impl RegistryCenterClient for EtcdClient {
 
     async fn deregister(
         &self,
-        instance_id: &str,
-        _group: Option<String>,
+        service_instance: &ServiceInstance,
     ) -> Result<(), RegistryCenterError> {
         let prefix = "/registry/".to_string();
         let mut client = self.etcd_client.clone();
@@ -164,7 +162,7 @@ impl RegistryCenterClient for EtcdClient {
             let key = kv
                 .key_str()
                 .map_err(|e| RegistryCenterError::Parse(e.to_string()))?;
-            if key.ends_with(instance_id) {
+            if key.ends_with(&service_instance.instance_id) {
                 client
                     .delete(key, None)
                     .await
@@ -176,10 +174,10 @@ impl RegistryCenterClient for EtcdClient {
 
     async fn discover(
         &self,
-        service_name: &str,
-        _group: Option<String>,
+        group: Option<String>,
+        svc_name: &str,
     ) -> Result<Vec<ServiceInstance>, RegistryCenterError> {
-        let prefix = format!("/registry/{}", service_name);
+        let prefix = format!("/registry/{}", svc_name);
         let mut client = self.etcd_client.clone();
         let resp = client
             .get(prefix, Some(GetOptions::new().with_prefix()))
@@ -190,9 +188,10 @@ impl RegistryCenterClient for EtcdClient {
             let value = kv
                 .value_str()
                 .map_err(|e| RegistryCenterError::Parse(e.to_string()))?;
-            let instance: ServiceInstance = serde_json::from_str(value)
+            let mut service_instance: ServiceInstance = serde_json::from_str(value)
                 .map_err(|e| RegistryCenterError::Parse(e.to_string()))?;
-            instances.push(instance);
+            service_instance.group = group.clone();
+            instances.push(service_instance);
         }
         Ok(instances)
     }

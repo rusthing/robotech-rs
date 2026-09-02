@@ -1,4 +1,5 @@
 use thiserror::Error;
+use wheel_rs::ipnet_utils::IpnetError;
 
 #[derive(Debug, Error)]
 pub enum RegistryCenterError {
@@ -13,6 +14,9 @@ pub enum RegistryCenterError {
 
     #[error("不支持的后端: {0}（对应 Cargo feature 未启用，检查 Cargo.toml 里的 features）")]
     BackendNotEnabled(String),
+
+    #[error("获取本地IP失败: {0}")]
+    IpnetError(#[from] IpnetError),
 
     #[error("注册中心错误: {0}")]
     Internal(String),

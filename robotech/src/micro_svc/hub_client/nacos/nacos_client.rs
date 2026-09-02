@@ -168,30 +168,40 @@ impl RegistryCenterClient for NacosClient {
         Self::CLIENT_NAME
     }
 
-    async fn register(&self, instance: &ServiceInstance) -> Result<(), RegistryCenterError> {
+    async fn register(
+        &self,
+        service_instance: &ServiceInstance,
+    ) -> Result<(), RegistryCenterError> {
         let nacos_instance = NacosInstance {
-            instance_id: Some(instance.instance_id.clone()),
-            ip: instance.ip.clone(),
-            port: instance.port as i32,
-            service_name: Some(instance.service_name.clone()),
-            metadata: instance.metadata.clone(),
+            instance_id: Some(service_instance.instance_id.clone()),
+            ip: service_instance.ip.clone(),
+            port: service_instance.port as i32,
+            service_name: Some(service_instance.svc_name.clone()),
+            metadata: service_instance.metadata.clone(),
             ..Default::default()
         };
-        let group = instance.group.clone();
+        let group = service_instance.group.clone();
         self.naming_service
-            .register_instance(instance.service_name.clone(), group, nacos_instance)
+            .register_instance(service_instance.svc_name.clone(), group, nacos_instance)
             .await
             .map_err(|e| RegistryCenterError::Connection(e.to_string()))?;
         Ok(())
     }
 
-    async fn deregister(&self, instance_id: &str) -> Result<(), RegistryCenterError> {
+    async fn deregister(
+        &self,
+        service_instance: &ServiceInstance,
+    ) -> Result<(), RegistryCenterError> {
         let nacos_instance = NacosInstance {
-            instance_id: Some(instance_id.to_string()),
+            instance_id: Some(service_instance.instance_id.clone()),
             ..Default::default()
         };
         self.naming_service
-            .deregister_instance(String::new(), group.clone(), nacos_instance)
+            .deregister_instance(
+                service_instance.svc_name.clone(),
+                service_instance.group.clone(),
+                nacos_instance,
+            )
             .await
             .map_err(|e| RegistryCenterError::Connection(e.to_string()))?;
         Ok(())
@@ -199,22 +209,23 @@ impl RegistryCenterClient for NacosClient {
 
     async fn discover(
         &self,
-        service_name: &str,
         group: Option<String>,
+        svc_name: &str,
     ) -> Result<Vec<ServiceInstance>, RegistryCenterError> {
         let instances = self
             .naming_service
-            .select_instances(service_name.to_string(), group.clone(), vec![], false, true)
+            .select_instances(svc_name.to_string(), group.clone(), vec![], false, true)
             .await
             .map_err(|e| RegistryCenterError::Connection(e.to_string()))?;
         Ok(instances
             .into_iter()
-            .map(|i| ServiceInstance {
-                instance_id: i.instance_id.unwrap_or_default(),
-                service_name: i.service_name.unwrap_or_default(),
-                ip: i.ip,
-                port: i.port as u16,
-                metadata: i.metadata,
+            .map(|service_instance| ServiceInstance {
+                instance_id: service_instance.instance_id.unwrap_or_default(),
+                group: group.clone(),
+                svc_name: service_instance.service_name.unwrap_or_default(),
+                ip: service_instance.ip,
+                port: service_instance.port as u16,
+                metadata: service_instance.metadata,
                 health_check_url: None,
             })
             .collect())

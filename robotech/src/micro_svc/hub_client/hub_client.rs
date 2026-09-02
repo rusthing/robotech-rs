@@ -51,46 +51,22 @@ where
     hub_client.watch_config_changed(on_change).await
 }
 
-static REGISTERED_INSTANCE_ID: Mutex<Option<String>> = Mutex::new(None);
-static REGISTERED_PORT: AtomicU16 = AtomicU16::new(0);
-
 pub async fn register() -> Result<(), RegistryCenterError> {
-    let hub_client =
+    let mut hub_client =
         get_hub_client().map_err(|e| RegistryCenterError::Connection(e.to_string()))?;
-    let instance = hub_client.build_service_instance()?;
-    let new_port = instance.port;
-    let old_port = REGISTERED_PORT.swap(new_port, Ordering::Relaxed);
+    hub_client.register().await
+}
 
-    if old_port == new_port && old_port != 0 {
-        return Ok(());
-    }
-
-    if old_port != 0 {
-        let old_instance_id = REGISTERED_INSTANCE_ID.lock().unwrap().clone();
-        if let Some(id) = old_instance_id {
-            let _ = hub_client.deregister(&id).await;
-        }
-    }
-
-    *REGISTERED_INSTANCE_ID.lock().unwrap() = Some(instance.instance_id.clone());
-    hub_client.register(&instance).await
+pub async fn reregister() -> Result<(), RegistryCenterError> {
+    let mut hub_client =
+        get_hub_client().map_err(|e| RegistryCenterError::Connection(e.to_string()))?;
+    hub_client.reregister().await
 }
 
 pub async fn deregister() -> Result<(), RegistryCenterError> {
     let hub_client =
         get_hub_client().map_err(|e| RegistryCenterError::Connection(e.to_string()))?;
-    let instance_id = REGISTERED_INSTANCE_ID
-        .lock()
-        .unwrap()
-        .clone()
-        .ok_or_else(|| RegistryCenterError::Connection("not registered yet".to_string()))?;
-    hub_client.deregister(&instance_id).await
-}
-
-pub async fn discover(service_name: &str) -> Result<Vec<ServiceInstance>, RegistryCenterError> {
-    let hub_client =
-        get_hub_client().map_err(|e| RegistryCenterError::Connection(e.to_string()))?;
-    hub_client.discover(service_name).await
+    hub_client.deregister().await
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -105,6 +81,7 @@ pub struct HubClient {
     config_keys: Option<Vec<ConfigKey>>,
     snapshot_dir: Option<PathBuf>,
     registry_key: Option<RegistryKey>,
+    service_instance: Option<ServiceInstance>,
     config_watch_join_handle: Mutex<Option<Vec<tokio::task::JoinHandle<()>>>>,
 }
 
@@ -285,8 +262,9 @@ impl HubClient {
             registry: registry_center_client,
             config_keys,
             snapshot_dir,
-            config_watch_join_handle: Mutex::new(None),
             registry_key: registry_group,
+            service_instance: None,
+            config_watch_join_handle: Mutex::new(None),
         })
     }
 
@@ -431,17 +409,19 @@ impl HubClient {
                 "registry center not configured, cannot determine svc_name".to_string(),
             )
         })?;
+        let group = registry_key.group.clone();
         let svc_name = registry_key.svc_name.clone();
-        let instance_id = format!("{}-{}", svc_name, std::process::id());
-        let ip = get_local_ip().unwrap_or_else(|_| "127.0.0.1".to_string());
+        let ip = get_local_ip()?.replace('.', "-");
         let port = crate::web::get_web_listen_port().ok_or_else(|| {
             RegistryCenterError::Connection(
                 "web server not started, cannot determine listen port".to_string(),
             )
         })?;
+        let instance_id = format!("{svc_name}-{ip}-{port}");
         Ok(ServiceInstance {
+            group,
+            svc_name,
             instance_id,
-            service_name: svc_name.to_string(),
             ip,
             port,
             health_check_url: None,
@@ -449,32 +429,41 @@ impl HubClient {
         })
     }
 
-    pub async fn register(&self, instance: &ServiceInstance) -> Result<(), RegistryCenterError> {
+    pub async fn register(&mut self) -> Result<(), RegistryCenterError> {
         let registry = self.registry.as_ref().ok_or_else(|| {
             RegistryCenterError::Connection("registry center not configured".to_string())
         })?;
-        registry.register(instance, self.registry_key.clone()).await
+        let service_instance = self.build_service_instance()?;
+        self.service_instance = Some(service_instance.clone());
+        registry.register(&service_instance).await
     }
 
-    pub async fn deregister(&self, instance_id: &str) -> Result<(), RegistryCenterError> {
+    pub async fn reregister(&mut self) -> Result<(), RegistryCenterError> {
         let registry = self.registry.as_ref().ok_or_else(|| {
             RegistryCenterError::Connection("registry center not configured".to_string())
         })?;
-        registry
-            .deregister(instance_id, self.registry_key.clone())
-            .await
+        let service_instance = self.build_service_instance()?;
+        let old_service_instance = self.service_instance.as_ref();
+        if let Some(old_service_instance) = old_service_instance
+            && !service_instance.eq(old_service_instance)
+        {
+            registry.deregister(old_service_instance).await?;
+        }
+        self.service_instance = Some(service_instance.clone());
+        registry.register(&service_instance).await
     }
 
-    pub async fn discover(
-        &self,
-        service_name: &str,
-    ) -> Result<Vec<ServiceInstance>, RegistryCenterError> {
+    pub async fn deregister(&self) -> Result<(), RegistryCenterError> {
         let registry = self.registry.as_ref().ok_or_else(|| {
             RegistryCenterError::Connection("registry center not configured".to_string())
         })?;
-        registry
-            .discover(service_name, self.registry_key.clone())
-            .await
+        let service_instance =
+            self.service_instance
+                .as_ref()
+                .ok_or(RegistryCenterError::Connection(
+                    "service instance not registered".to_string(),
+                ))?;
+        registry.deregister(&service_instance).await
     }
 }
 
