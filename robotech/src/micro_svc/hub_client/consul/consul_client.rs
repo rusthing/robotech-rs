@@ -172,14 +172,19 @@ impl ConfigCenterClient for ConsulClient {
                 .await
                 {
                     Ok(Some(entry)) => {
+                        let new_index = entry.modify_index.to_string();
+                        let is_first_fetch = last_index.is_none();
                         if let Some(ref last_idx) = last_index {
-                            if entry.modify_index.to_string() == *last_idx {
+                            if new_index == *last_idx {
                                 continue;
                             }
                         }
-                        last_index = Some(entry.modify_index.to_string());
-                        if config_changed_sender.send(()).is_err() {
-                            return;
+                        last_index = Some(new_index);
+                        // 首次 fetch 仅记录初始 index，不触发变更通知
+                        if !is_first_fetch {
+                            if config_changed_sender.send(()).is_err() {
+                                return;
+                            }
                         }
                     }
                     Ok(None) => {
