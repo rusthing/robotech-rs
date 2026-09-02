@@ -12,7 +12,6 @@ use arc_swap::ArcSwapOption;
 use config::FileFormat;
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
-use std::sync::atomic::{AtomicU16, Ordering};
 use std::sync::{Arc, Mutex};
 use tokio::sync::watch;
 use tracing::{error, info, warn};
@@ -52,13 +51,13 @@ where
 }
 
 pub async fn register() -> Result<(), RegistryCenterError> {
-    let mut hub_client =
+    let hub_client =
         get_hub_client().map_err(|e| RegistryCenterError::Connection(e.to_string()))?;
     hub_client.register().await
 }
 
 pub async fn reregister() -> Result<(), RegistryCenterError> {
-    let mut hub_client =
+    let hub_client =
         get_hub_client().map_err(|e| RegistryCenterError::Connection(e.to_string()))?;
     hub_client.reregister().await
 }
@@ -81,7 +80,7 @@ pub struct HubClient {
     config_keys: Option<Vec<ConfigKey>>,
     snapshot_dir: Option<PathBuf>,
     registry_key: Option<RegistryKey>,
-    service_instance: Option<ServiceInstance>,
+    service_instance: Mutex<Option<ServiceInstance>>,
     config_watch_join_handle: Mutex<Option<Vec<tokio::task::JoinHandle<()>>>>,
 }
 
@@ -263,7 +262,7 @@ impl HubClient {
             config_keys,
             snapshot_dir,
             registry_key: registry_group,
-            service_instance: None,
+            service_instance: Mutex::new(None),
             config_watch_join_handle: Mutex::new(None),
         })
     }
@@ -429,27 +428,27 @@ impl HubClient {
         })
     }
 
-    pub async fn register(&mut self) -> Result<(), RegistryCenterError> {
+    pub async fn register(&self) -> Result<(), RegistryCenterError> {
         let registry = self.registry.as_ref().ok_or_else(|| {
             RegistryCenterError::Connection("registry center not configured".to_string())
         })?;
         let service_instance = self.build_service_instance()?;
-        self.service_instance = Some(service_instance.clone());
+        *self.service_instance.lock().unwrap() = Some(service_instance.clone());
         registry.register(&service_instance).await
     }
 
-    pub async fn reregister(&mut self) -> Result<(), RegistryCenterError> {
+    pub async fn reregister(&self) -> Result<(), RegistryCenterError> {
         let registry = self.registry.as_ref().ok_or_else(|| {
             RegistryCenterError::Connection("registry center not configured".to_string())
         })?;
         let service_instance = self.build_service_instance()?;
-        let old_service_instance = self.service_instance.as_ref();
+        let old_service_instance = self.service_instance.lock().unwrap().clone();
         if let Some(old_service_instance) = old_service_instance
-            && !service_instance.eq(old_service_instance)
+            && !service_instance.eq(&old_service_instance)
         {
-            registry.deregister(old_service_instance).await?;
+            registry.deregister(&old_service_instance).await?;
         }
-        self.service_instance = Some(service_instance.clone());
+        *self.service_instance.lock().unwrap() = Some(service_instance.clone());
         registry.register(&service_instance).await
     }
 
@@ -459,7 +458,9 @@ impl HubClient {
         })?;
         let service_instance =
             self.service_instance
-                .as_ref()
+                .lock()
+                .unwrap()
+                .clone()
                 .ok_or(RegistryCenterError::Connection(
                     "service instance not registered".to_string(),
                 ))?;

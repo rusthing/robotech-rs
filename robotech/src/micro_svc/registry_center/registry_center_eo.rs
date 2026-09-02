@@ -16,7 +16,7 @@ pub struct RegistryKey {
 ///
 /// 各后端 (etcd / Consul / Nacos) 的适配器会把本结构体转换成各自的原生格式
 /// （见对应 backend 模块里的实现），上层业务代码只需要认识这一个结构体。
-#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "kebab-case")]
 pub struct ServiceInstance {
     pub group: Option<String>,
