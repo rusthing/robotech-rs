@@ -103,6 +103,20 @@ fn decode_value(raw: &str) -> Result<String, ConfigCenterError> {
     String::from_utf8(bytes).map_err(|e| ConfigCenterError::Parse(e.to_string()))
 }
 
+fn build_instance_id(service_instance: ServiceInstance) -> String {
+    let namespace = if let Some(namespace) = &service_instance.namespace {
+        format!("{}-", namespace)
+    } else {
+        "".to_string()
+    };
+    let group = if let Some(group) = &service_instance.group {
+        format!("{}-", group)
+    } else {
+        "".to_string()
+    };
+    format!("{}{}{}", namespace, group, service_instance.instance_id)
+}
+
 #[async_trait]
 impl ConfigCenterClient for ConsulClient {
     fn name(&self) -> &'static str {
@@ -196,8 +210,9 @@ impl RegistryCenterClient for ConsulClient {
         service_instance: &ServiceInstance,
     ) -> Result<(), RegistryCenterError> {
         let url = format!("{}/v1/agent/service/register", self.base_url);
+        let instance_id = build_instance_id(service_instance.clone());
         let body = serde_json::json!({
-            "ID": service_instance.instance_id,
+            "ID": instance_id,
             "Name": service_instance.svc_name,
             "Address": service_instance.ip,
             "Port": service_instance.port,
@@ -223,9 +238,10 @@ impl RegistryCenterClient for ConsulClient {
         &self,
         service_instance: &ServiceInstance,
     ) -> Result<(), RegistryCenterError> {
+        let instance_id = build_instance_id(service_instance.clone());
         let url = format!(
             "{}/v1/agent/service/deregister/{}",
-            self.base_url, service_instance.instance_id
+            self.base_url, instance_id
         );
         self.reqwest_client
             .put(&url)
