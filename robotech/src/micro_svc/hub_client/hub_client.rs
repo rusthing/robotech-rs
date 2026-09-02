@@ -14,7 +14,9 @@ use config::FileFormat;
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
+use std::time::Duration;
 use tokio::sync::watch;
+use tokio::task::JoinHandle;
 use tracing::{error, info, warn};
 
 static HUB_CLIENT: ArcSwapOption<HubClient> = ArcSwapOption::const_empty();
@@ -59,22 +61,7 @@ pub async fn register_micro_svc() {
             return;
         }
     };
-    if let Err(e) = hub_client.register().await {
-        warn!("register micro instance failed: {:?}", e);
-    }
-}
-
-pub async fn reregister_micro_svc() {
-    let hub_client = match get_hub_client() {
-        Ok(hub_client) => hub_client,
-        Err(e) => {
-            warn!("hub client not initialized: {:?}", e);
-            return;
-        }
-    };
-    if let Err(e) = hub_client.reregister().await {
-        warn!("reregister micro instance failed: {:?}", e);
-    }
+    hub_client.start_register_loop();
 }
 
 pub async fn deregister_micro_svc() {
@@ -103,12 +90,14 @@ pub struct HubClient {
     snapshot_dir: Option<PathBuf>,
     registry_key: Option<RegistryKey>,
     service_instance: Mutex<Option<ServiceInstance>>,
-    config_watch_join_handle: Mutex<Option<Vec<tokio::task::JoinHandle<()>>>>,
+    retry_interval: Duration,
+    refresh_interval: Duration,
+    join_handles: Mutex<Option<Vec<JoinHandle<()>>>>,
 }
 
 impl Drop for HubClient {
     fn drop(&mut self) {
-        if let Some(handles) = self.config_watch_join_handle.lock().unwrap().take() {
+        if let Some(handles) = self.join_handles.lock().unwrap().take() {
             for handle in handles {
                 handle.abort();
             }
@@ -159,6 +148,8 @@ fn build_branch<C: ConfigCenterClient + RegistryCenterClient + 'static>(
         Option<Vec<ConfigKey>>,
         Option<PathBuf>,
         Option<RegistryKey>,
+        Duration,
+        Duration,
     ),
     CfgError,
 > {
@@ -214,12 +205,18 @@ fn build_branch<C: ConfigCenterClient + RegistryCenterClient + 'static>(
         let tmp: Arc<dyn RegistryCenterClient> = c.clone();
         tmp
     });
+    let (retry_interval, refresh_interval) = registry_center_config
+        .as_ref()
+        .map(|c| (c.retry_interval, c.refresh_interval))
+        .unwrap_or_default();
     Ok((
         config_center_client,
         registry_center_client,
         config_keys,
         snapshot_dir,
         registry_key,
+        retry_interval,
+        refresh_interval,
     ))
 }
 
@@ -231,6 +228,8 @@ impl HubClient {
             config_keys,
             snapshot_dir,
             registry_group,
+            retry_interval,
+            refresh_interval,
         ) = {
             if let Some(consul_config) = micro_svc_config.clone().consul {
                 let client = ConsulClient::new(micro_svc_config.clone())
@@ -298,7 +297,9 @@ impl HubClient {
             snapshot_dir,
             registry_key: registry_group,
             service_instance: Mutex::new(None),
-            config_watch_join_handle: Mutex::new(None),
+            retry_interval,
+            refresh_interval,
+            join_handles: Mutex::new(None),
         })
     }
 
@@ -386,7 +387,7 @@ impl HubClient {
         });
         join_handles.push(join_handle);
 
-        *self.config_watch_join_handle.lock().unwrap() = Some(join_handles);
+        *self.join_handles.lock().unwrap() = Some(join_handles);
         Ok(())
     }
 
@@ -453,7 +454,6 @@ impl HubClient {
         let instance_id = format!("{svc_name}-{}-{port}", ip.replace('.', "-"));
         let health_check_url = get_health_check_url_http_protocol()
             .map(|prefix| format!("{}://{}:{}{}", prefix, ip, port, get_health_check_uri()));
-        info!("health_check_url: {health_check_url:?}");
         Ok(ServiceInstance {
             namespace,
             group,
@@ -475,21 +475,6 @@ impl HubClient {
         registry.register(&service_instance).await
     }
 
-    pub async fn reregister(&self) -> Result<(), RegistryCenterError> {
-        let registry = self.registry.as_ref().ok_or_else(|| {
-            RegistryCenterError::Connection("registry center not configured".to_string())
-        })?;
-        let service_instance = self.build_service_instance()?;
-        let old_service_instance = self.service_instance.lock().unwrap().clone();
-        if let Some(old_service_instance) = old_service_instance
-            && !service_instance.eq(&old_service_instance)
-        {
-            registry.deregister(&old_service_instance).await?;
-        }
-        *self.service_instance.lock().unwrap() = Some(service_instance.clone());
-        registry.register(&service_instance).await
-    }
-
     pub async fn deregister(&self) -> Result<(), RegistryCenterError> {
         let registry = self.registry.as_ref().ok_or_else(|| {
             RegistryCenterError::Connection("registry center not configured".to_string())
@@ -498,6 +483,27 @@ impl HubClient {
             RegistryCenterError::Connection("service instance not registered".to_string()),
         )?;
         registry.deregister(&service_instance).await
+    }
+
+    fn start_register_loop(self: &Arc<Self>) {
+        let this = self.clone();
+        let retry_interval = self.retry_interval;
+        let refresh_interval = self.refresh_interval;
+        let handle = tokio::spawn(async move {
+            loop {
+                match this.register().await {
+                    Ok(()) => tokio::time::sleep(refresh_interval).await,
+                    Err(e) => {
+                        warn!("register failed: {e:?}, retry in {retry_interval:?}");
+                        tokio::time::sleep(retry_interval).await;
+                    }
+                }
+            }
+        });
+        if let Some(mut handles) = self.join_handles.lock().unwrap().take() {
+            handles.push(handle);
+            *self.join_handles.lock().unwrap() = Some(handles);
+        }
     }
 }
 
