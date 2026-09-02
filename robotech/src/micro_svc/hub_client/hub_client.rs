@@ -8,6 +8,7 @@ use crate::micro_svc::{
     MicroSvcConfig, NacosClient, RegistryCenterClient, RegistryCenterConfig, RegistryCenterError,
     RegistryKey, ServiceInstance,
 };
+use crate::web::{get_health_check_uri, get_health_check_url_http_protocol};
 use arc_swap::ArcSwapOption;
 use config::FileFormat;
 use serde::{Deserialize, Serialize};
@@ -450,12 +451,9 @@ impl HubClient {
             )
         })?;
         let instance_id = format!("{svc_name}-{}-{port}", ip.replace('.', "-"));
-        let health_check_url = Some(format!(
-            "http://{}:{}{}",
-            ip,
-            port,
-            crate::web::get_health_check_uri()
-        ));
+        let health_check_url = get_health_check_url_http_protocol()
+            .map(|prefix| format!("{}://{}:{}{}", prefix, ip, port, get_health_check_uri()));
+        info!("health_check_url: {health_check_url:?}");
         Ok(ServiceInstance {
             namespace,
             group,

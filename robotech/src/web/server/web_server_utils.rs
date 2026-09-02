@@ -1,11 +1,11 @@
 use crate::web::middleware::{
-    ForbiddenUrnsState, IpBanState, LocalOnlyUrnsState, forbidden_urns_middleware,
-    ip_ban_middleware, local_only_middleware, local_only_urns_middleware,
+    forbidden_urns_middleware, ip_ban_middleware, local_only_middleware, local_only_urns_middleware,
+    ForbiddenUrnsState, IpBanState, LocalOnlyUrnsState,
 };
 use crate::web::{
-    HttpsConfig, WEB_SERVER_CONFIG_KEY, WebServerConfig, WebServerError, build_cors, build_https,
+    build_cors, build_https, HttpsConfig, WebServerConfig, WebServerError, WEB_SERVER_CONFIG_KEY,
 };
-use axum::{Router, debug_handler, middleware, routing::get};
+use axum::{debug_handler, middleware, routing::get, Router};
 use config::Value;
 use linkme::distributed_slice;
 use robotech_macros::log_call;
@@ -30,21 +30,18 @@ pub static ROUTER_SLICE: [fn() -> Router];
 #[distributed_slice]
 pub static API_DOC_SLICE: [fn() -> (Url<'static>, OpenApi)];
 
-use std::sync::atomic::{AtomicU16, Ordering};
 use arc_swap::ArcSwapOption;
+use std::sync::atomic::{AtomicU16, Ordering};
 
 static WEB_SERVICE_HANDLES: ArcSwapOption<Vec<JoinHandle<()>>> = ArcSwapOption::const_empty();
 static STOP_WEB_SERVICE_SENDER: ArcSwapOption<broadcast::Sender<()>> = ArcSwapOption::const_empty();
 static WEB_LISTEN_PORT: AtomicU16 = AtomicU16::new(0);
 static HEALTH_CHECK_URI: ArcSwapOption<String> = ArcSwapOption::const_empty();
+static HEALTH_CHECK_URL_HTTP_PROTOCOL: ArcSwapOption<String> = ArcSwapOption::const_empty();
 
 pub fn get_web_listen_port() -> Option<u16> {
     let port = WEB_LISTEN_PORT.load(Ordering::Relaxed);
-    if port == 0 {
-        None
-    } else {
-        Some(port)
-    }
+    if port == 0 { None } else { Some(port) }
 }
 
 pub fn get_health_check_uri() -> String {
@@ -53,6 +50,13 @@ pub fn get_health_check_uri() -> String {
         .as_ref()
         .map(|u| (**u).clone())
         .unwrap_or_else(|| "/actuator/health".to_string())
+}
+
+pub fn get_health_check_url_http_protocol() -> Option<String> {
+    HEALTH_CHECK_URL_HTTP_PROTOCOL
+        .load()
+        .as_ref()
+        .map(|u| (**u).clone())
 }
 
 fn set_web_service_handles(value: Vec<JoinHandle<()>>) -> Result<(), WebServerError> {
@@ -288,6 +292,7 @@ pub async fn setup_web_server(
 
         set_web_service_handles(web_service_handles)?;
         set_stop_web_service_sender(stop_web_service_sender)?;
+        HEALTH_CHECK_URL_HTTP_PROTOCOL.store(Some(Arc::new(http_protocol.to_string())));
     }
     Ok(())
 }
@@ -577,19 +582,16 @@ fn bind_and_start(
         let actual_port = actual_addr.port();
         let ip = if bind == "0.0.0.0" {
             // 设置域名返回给外部用来健康检查
-            health_check_url_prefix =
-                Some(format!("{http_protocol}://localhost:{actual_port}"));
+            health_check_url_prefix = Some(format!("{http_protocol}://localhost:{actual_port}"));
             "127.0.0.1"
         } else if bind == r"[::]" {
             // 设置域名返回给外部用来健康检查
-            health_check_url_prefix =
-                Some(format!("{http_protocol}://localhost:{actual_port}"));
+            health_check_url_prefix = Some(format!("{http_protocol}://localhost:{actual_port}"));
             r"[::1]"
         } else {
             // 设置域名返回给外部用来健康检查
             if health_check_url_prefix.is_none() {
-                health_check_url_prefix =
-                    Some(format!("{http_protocol}://{bind}:{actual_port}"));
+                health_check_url_prefix = Some(format!("{http_protocol}://{bind}:{actual_port}"));
             }
             &bind
         };
