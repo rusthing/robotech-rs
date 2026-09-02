@@ -456,14 +456,9 @@ impl HubClient {
         let registry = self.registry.as_ref().ok_or_else(|| {
             RegistryCenterError::Connection("registry center not configured".to_string())
         })?;
-        let service_instance =
-            self.service_instance
-                .lock()
-                .unwrap()
-                .clone()
-                .ok_or(RegistryCenterError::Connection(
-                    "service instance not registered".to_string(),
-                ))?;
+        let service_instance = self.service_instance.lock().unwrap().clone().ok_or(
+            RegistryCenterError::Connection("service instance not registered".to_string()),
+        )?;
         registry.deregister(&service_instance).await
     }
 }
@@ -478,29 +473,4 @@ fn parse_file_format(s: &str) -> Option<FileFormat> {
         "Ron" => Some(FileFormat::Ron),
         _ => None,
     }
-}
-
-fn build_config_key(
-    svc_name: &String,
-    profile: &Option<String>,
-    namespace: &Option<String>,
-    group: &Option<String>,
-    file_format: &str,
-) -> Option<ConfigKey> {
-    let group = group.clone().or_else(|| profile.clone());
-    let data_id = format!("{}.{}", svc_name, file_format);
-    Some(ConfigKey::new(namespace.clone(), group, data_id))
-}
-
-fn build_common_config_keys(
-    common_configs: &[String],
-    namespace: &Option<String>,
-    group: &Option<String>,
-    profile: &Option<String>,
-) -> Vec<ConfigKey> {
-    let effective_group = group.clone().or_else(|| profile.clone());
-    common_configs
-        .iter()
-        .map(|data_id| ConfigKey::new(namespace.clone(), effective_group.clone(), data_id.clone()))
-        .collect()
 }

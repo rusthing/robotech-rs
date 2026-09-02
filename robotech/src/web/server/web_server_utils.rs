@@ -561,22 +561,26 @@ fn bind_and_start(
             web_service_handles.push(handle);
         }
 
+        let actual_port = actual_addr.port();
         let ip = if bind == "0.0.0.0" {
             // 设置域名返回给外部用来健康检查
-            health_check_url_prefix = Some(format!("{http_protocol}://localhost:{port}"));
+            health_check_url_prefix =
+                Some(format!("{http_protocol}://localhost:{actual_port}"));
             "127.0.0.1"
         } else if bind == r"[::]" {
             // 设置域名返回给外部用来健康检查
-            health_check_url_prefix = Some(format!("{http_protocol}://localhost:{port}"));
+            health_check_url_prefix =
+                Some(format!("{http_protocol}://localhost:{actual_port}"));
             r"[::1]"
         } else {
             // 设置域名返回给外部用来健康检查
             if health_check_url_prefix.is_none() {
-                health_check_url_prefix = Some(format!("{http_protocol}://{bind}:{port}"));
+                health_check_url_prefix =
+                    Some(format!("{http_protocol}://{bind}:{actual_port}"));
             }
             &bind
         };
-        info!("监听 <{actual_addr}> 成功✅  -> 🌐 {http_protocol}://{ip}:{port}");
+        info!("监听 <{actual_addr}> 成功✅  -> 🌐 {http_protocol}://{ip}:{actual_port}");
     }
     Ok((health_check_url_prefix.unwrap(), web_service_handles))
 }
