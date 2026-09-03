@@ -23,12 +23,22 @@ static HUB_CLIENT: ArcSwapOption<HubClient> = ArcSwapOption::const_empty();
 
 pub async fn setup_hub_client(micro_svc_config: MicroSvcConfig) -> Result<(), CfgError> {
     info!("setup hub client...: {micro_svc_config:?}");
+    if let Ok(hub_client) = get_hub_client().as_ref() {
+        if let Err(e) = hub_client.deregister().await {
+            warn!("deregister failed: {e:?}");
+        }
+    }
     let hub_client = HubClient::new(micro_svc_config).await?;
     HUB_CLIENT.store(Some(Arc::new(hub_client)));
     Ok(())
 }
 
-pub fn drop_hub_client() {
+pub async fn drop_hub_client() {
+    if let Ok(hub_client) = get_hub_client().as_ref() {
+        if let Err(e) = hub_client.deregister().await {
+            warn!("deregister failed: {e:?}");
+        }
+    }
     HUB_CLIENT.store(None);
 }
 
@@ -58,14 +68,23 @@ where
 }
 
 pub async fn register_micro_svc() {
-    let hub_client = match get_hub_client() {
-        Ok(hub_client) => hub_client,
-        Err(e) => {
-            warn!("hub client not initialized: {:?}", e);
-            return;
+    tokio::spawn(async move {
+        loop {
+            if let Ok(hub_client) = get_hub_client().as_ref() {
+                let retry_interval = hub_client.retry_interval;
+                let refresh_interval = hub_client.refresh_interval;
+                match hub_client.register().await {
+                    Ok(()) => tokio::time::sleep(refresh_interval).await,
+                    Err(e) => {
+                        warn!("register failed: {e:?}, retry in {retry_interval:?}");
+                        tokio::time::sleep(retry_interval).await;
+                    }
+                }
+            } else {
+                tokio::time::sleep(Duration::from_secs(5)).await;
+            };
         }
-    };
-    hub_client.start_register_loop();
+    });
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -88,118 +107,11 @@ pub struct HubClient {
 
 impl Drop for HubClient {
     fn drop(&mut self) {
+        info!("drop hub client...");
         for handle in self.join_handles.get_mut().unwrap().drain(..) {
             handle.abort();
         }
-
-        if let Ok(handle) = tokio::runtime::Handle::try_current() {
-            if let Err(e) = handle.block_on(self.deregister()) {
-                error!("deregister service instance failed: {:?}", e);
-            }
-        }
     }
-}
-
-/// 根据后端配置分支，统一构建 HubClient 所需的各个组件。
-///
-/// 使用泛型 `C` 统一处理不同后端的客户端类型，避免为 Consul/Etcd/Nacos 各写一套重复逻辑。
-///
-/// # 参数
-/// - `hub_client`: 后端配置中的 HubClient 通用配置（base_url、namespace、group 等）
-/// - `micro_svc_config`: 微服务全局配置，用于提取 svc_name、profile 等字段
-/// - `config`: 配置中心相关配置（快照目录、文件格式、公共配置列表等）
-/// - `client`: 已创建的后端客户端实例，若创建失败则为 `None`
-///
-/// # 返回
-/// 返回一个元组，包含：
-/// - 配置中心客户端 trait object
-/// - 注册中心客户端 trait object
-/// - 配置项的 ConfigKey 列表
-/// - 快照目录路径
-/// - 注册中心使用的 RegistryKey
-fn build_branch<C: ConfigCenterClient + RegistryCenterClient + 'static>(
-    hub_client_config: &HubClientConfig,
-    micro_svc_config: &MicroSvcConfig,
-    config_center_config: &Option<ConfigCenterConfig>,
-    registry_center_config: &Option<RegistryCenterConfig>,
-    hub_client: Option<C>,
-) -> Result<
-    (
-        Option<Arc<dyn ConfigCenterClient>>,
-        Option<Arc<dyn RegistryCenterClient>>,
-        Option<Vec<ConfigKey>>,
-        Option<PathBuf>,
-        Option<RegistryKey>,
-        Duration,
-        Duration,
-    ),
-    CfgError,
-> {
-    let AppEnv { app_dir, .. } = APP_ENV.get().ok_or(EnvError::GetAppEnv())?;
-
-    let svc_name = &micro_svc_config.svc_name.clone().unwrap(); // 服务名如果配置为空，在前面传进来的就会是应用名，这里不可能为空
-    let profile = &micro_svc_config.profile;
-    let namespace = hub_client_config.namespace.clone();
-    let group = hub_client_config.group.clone().or_else(|| profile.clone());
-
-    let registry_key = if let Some(_registry_center_config) = registry_center_config {
-        Some(RegistryKey {
-            namespace: namespace.clone(),
-            group: group.clone(),
-            svc_name: svc_name.clone(),
-        })
-    } else {
-        None
-    };
-
-    let (snapshot_dir, config_keys) = if let Some(config_center_config) = config_center_config {
-        let mut snapshot_dir = config_center_config.snapshot_dir.clone();
-        // 如果是相对路径，相对的就是应用目录
-        if snapshot_dir.is_relative() {
-            snapshot_dir = app_dir.join(snapshot_dir);
-        }
-
-        let file_format = config_center_config.file_format.clone();
-        // 构建公共配置项的 ConfigKey 列表
-        let mut config_keys: Vec<ConfigKey> = config_center_config
-            .common_configs
-            .iter()
-            .map(|data_id| ConfigKey::new(namespace.clone(), group.clone(), data_id.clone()))
-            .collect();
-        // 添加应用配置项的 ConfigKey
-        let config_key = {
-            let data_id = format!("{}.{}", svc_name, file_format);
-            ConfigKey::new(namespace.clone(), group.clone(), data_id.clone())
-        };
-        config_keys.push(config_key);
-
-        (Some(snapshot_dir), Some(config_keys))
-    } else {
-        (None, None)
-    };
-
-    let hub_client = hub_client.map(Arc::new);
-    let config_center_client = hub_client.as_ref().map(|c| {
-        let tmp: Arc<dyn ConfigCenterClient> = c.clone();
-        tmp
-    });
-    let registry_center_client = hub_client.as_ref().map(|c| {
-        let tmp: Arc<dyn RegistryCenterClient> = c.clone();
-        tmp
-    });
-    let (retry_interval, refresh_interval) = registry_center_config
-        .as_ref()
-        .map(|c| (c.retry_interval, c.refresh_interval))
-        .unwrap_or_default();
-    Ok((
-        config_center_client,
-        registry_center_client,
-        config_keys,
-        snapshot_dir,
-        registry_key,
-        retry_interval,
-        refresh_interval,
-    ))
 }
 
 impl HubClient {
@@ -442,24 +354,6 @@ impl HubClient {
         Ok(())
     }
 
-    fn start_register_loop(self: &Arc<Self>) {
-        let this = self.clone();
-        let retry_interval = self.retry_interval;
-        let refresh_interval = self.refresh_interval;
-        let handle = tokio::spawn(async move {
-            loop {
-                match this.register().await {
-                    Ok(()) => tokio::time::sleep(refresh_interval).await,
-                    Err(e) => {
-                        warn!("register failed: {e:?}, retry in {retry_interval:?}");
-                        tokio::time::sleep(retry_interval).await;
-                    }
-                }
-            }
-        });
-        self.add_join_handles(vec![handle]);
-    }
-
     fn add_join_handles(&self, handles: Vec<JoinHandle<()>>) {
         self.join_handles.lock().unwrap().extend(handles);
     }
@@ -498,4 +392,106 @@ fn parse_file_format(s: &str) -> Option<FileFormat> {
         "Ron" => Some(FileFormat::Ron),
         _ => None,
     }
+}
+
+/// 根据后端配置分支，统一构建 HubClient 所需的各个组件。
+///
+/// 使用泛型 `C` 统一处理不同后端的客户端类型，避免为 Consul/Etcd/Nacos 各写一套重复逻辑。
+///
+/// # 参数
+/// - `hub_client`: 后端配置中的 HubClient 通用配置（base_url、namespace、group 等）
+/// - `micro_svc_config`: 微服务全局配置，用于提取 svc_name、profile 等字段
+/// - `config`: 配置中心相关配置（快照目录、文件格式、公共配置列表等）
+/// - `client`: 已创建的后端客户端实例，若创建失败则为 `None`
+///
+/// # 返回
+/// 返回一个元组，包含：
+/// - 配置中心客户端 trait object
+/// - 注册中心客户端 trait object
+/// - 配置项的 ConfigKey 列表
+/// - 快照目录路径
+/// - 注册中心使用的 RegistryKey
+fn build_branch<C: ConfigCenterClient + RegistryCenterClient + 'static>(
+    hub_client_config: &HubClientConfig,
+    micro_svc_config: &MicroSvcConfig,
+    config_center_config: &Option<ConfigCenterConfig>,
+    registry_center_config: &Option<RegistryCenterConfig>,
+    hub_client: Option<C>,
+) -> Result<
+    (
+        Option<Arc<dyn ConfigCenterClient>>,
+        Option<Arc<dyn RegistryCenterClient>>,
+        Option<Vec<ConfigKey>>,
+        Option<PathBuf>,
+        Option<RegistryKey>,
+        Duration,
+        Duration,
+    ),
+    CfgError,
+> {
+    let AppEnv { app_dir, .. } = APP_ENV.get().ok_or(EnvError::GetAppEnv())?;
+
+    let svc_name = &micro_svc_config.svc_name.clone().unwrap(); // 服务名如果配置为空，在前面传进来的就会是应用名，这里不可能为空
+    let profile = &micro_svc_config.profile;
+    let namespace = hub_client_config.namespace.clone();
+    let group = hub_client_config.group.clone().or_else(|| profile.clone());
+
+    let registry_key = if let Some(_registry_center_config) = registry_center_config {
+        Some(RegistryKey {
+            namespace: namespace.clone(),
+            group: group.clone(),
+            svc_name: svc_name.clone(),
+        })
+    } else {
+        None
+    };
+
+    let (snapshot_dir, config_keys) = if let Some(config_center_config) = config_center_config {
+        let mut snapshot_dir = config_center_config.snapshot_dir.clone();
+        // 如果是相对路径，相对的就是应用目录
+        if snapshot_dir.is_relative() {
+            snapshot_dir = app_dir.join(snapshot_dir);
+        }
+
+        let file_format = config_center_config.file_format.clone();
+        // 构建公共配置项的 ConfigKey 列表
+        let mut config_keys: Vec<ConfigKey> = config_center_config
+            .common_configs
+            .iter()
+            .map(|data_id| ConfigKey::new(namespace.clone(), group.clone(), data_id.clone()))
+            .collect();
+        // 添加应用配置项的 ConfigKey
+        let config_key = {
+            let data_id = format!("{}.{}", svc_name, file_format);
+            ConfigKey::new(namespace.clone(), group.clone(), data_id.clone())
+        };
+        config_keys.push(config_key);
+
+        (Some(snapshot_dir), Some(config_keys))
+    } else {
+        (None, None)
+    };
+
+    let hub_client = hub_client.map(Arc::new);
+    let config_center_client = hub_client.as_ref().map(|c| {
+        let tmp: Arc<dyn ConfigCenterClient> = c.clone();
+        tmp
+    });
+    let registry_center_client = hub_client.as_ref().map(|c| {
+        let tmp: Arc<dyn RegistryCenterClient> = c.clone();
+        tmp
+    });
+    let (retry_interval, refresh_interval) = registry_center_config
+        .as_ref()
+        .map(|c| (c.retry_interval, c.refresh_interval))
+        .unwrap_or_default();
+    Ok((
+        config_center_client,
+        registry_center_client,
+        config_keys,
+        snapshot_dir,
+        registry_key,
+        retry_interval,
+        refresh_interval,
+    ))
 }
