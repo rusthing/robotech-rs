@@ -9,6 +9,9 @@ pub enum RegistryCenterError {
     #[error("服务实例解析失败: {0}")]
     Parse(String),
 
+    #[error("Web服务器未启动")]
+    WebServerNotRunning,
+
     #[error("后端连接/请求失败: {0}")]
     Connection(String),
 

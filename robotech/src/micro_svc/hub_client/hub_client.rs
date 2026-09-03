@@ -8,12 +8,12 @@ use crate::micro_svc::{
     MicroSvcConfig, NacosClient, RegistryCenterClient, RegistryCenterConfig, RegistryCenterError,
     RegistryKey, ServiceInstance,
 };
-use crate::web::{get_health_check_uri, get_health_check_url_http_protocol};
+use crate::web::{get_health_check_uri, get_health_check_url_http_protocol, get_web_listen_port};
 use arc_swap::ArcSwapOption;
 use config::FileFormat;
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Mutex, OnceLock};
 use std::time::Duration;
 use tokio::sync::watch;
 use tokio::task::JoinHandle;
@@ -26,6 +26,10 @@ pub async fn setup_hub_client(micro_svc_config: MicroSvcConfig) -> Result<(), Cf
     let hub_client = HubClient::new(micro_svc_config).await?;
     HUB_CLIENT.store(Some(Arc::new(hub_client)));
     Ok(())
+}
+
+pub fn drop_hub_client() {
+    HUB_CLIENT.store(None);
 }
 
 fn get_hub_client() -> Result<Arc<HubClient>, CfgError> {
@@ -64,19 +68,6 @@ pub async fn register_micro_svc() {
     hub_client.start_register_loop();
 }
 
-pub async fn deregister_micro_svc() {
-    let hub_client = match get_hub_client() {
-        Ok(hub_client) => hub_client,
-        Err(e) => {
-            warn!("hub client not initialized: {:?}", e);
-            return;
-        }
-    };
-    if let Err(e) = hub_client.deregister().await {
-        warn!("deregister micro instance failed: {:?}", e);
-    }
-}
-
 #[derive(Debug, Clone, Serialize, Deserialize)]
 struct ConfigSnapshot {
     format: String,
@@ -89,30 +80,21 @@ pub struct HubClient {
     config_keys: Option<Vec<ConfigKey>>,
     snapshot_dir: Option<PathBuf>,
     registry_key: Option<RegistryKey>,
-    service_instance: Mutex<Option<ServiceInstance>>,
+    service_instance: OnceLock<ServiceInstance>,
     retry_interval: Duration,
     refresh_interval: Duration,
-    join_handles: Mutex<Option<Vec<JoinHandle<()>>>>,
+    join_handles: Mutex<Vec<JoinHandle<()>>>,
 }
 
 impl Drop for HubClient {
     fn drop(&mut self) {
-        if let Some(handles) = self.join_handles.lock().unwrap().take() {
-            for handle in handles {
-                handle.abort();
-            }
+        for handle in self.join_handles.get_mut().unwrap().drain(..) {
+            handle.abort();
         }
-        if let Ok(_guard) = tokio::runtime::Handle::try_current() {
-            if let Some(registry) = self.registry.as_ref() {
-                let registry = registry.clone();
-                let service_instance = self.service_instance.lock().unwrap().clone();
-                if let Some(si) = service_instance {
-                    tokio::spawn(async move {
-                        if let Err(e) = registry.deregister(&si).await {
-                            error!("deregister service instance failed: {:?}", e);
-                        }
-                    });
-                }
+
+        if let Ok(handle) = tokio::runtime::Handle::try_current() {
+            if let Err(e) = handle.block_on(self.deregister()) {
+                error!("deregister service instance failed: {:?}", e);
             }
         }
     }
@@ -227,7 +209,7 @@ impl HubClient {
             registry_center_client,
             config_keys,
             snapshot_dir,
-            registry_group,
+            registry_key,
             retry_interval,
             refresh_interval,
         ) = {
@@ -295,11 +277,11 @@ impl HubClient {
             registry: registry_center_client,
             config_keys,
             snapshot_dir,
-            registry_key: registry_group,
-            service_instance: Mutex::new(None),
+            registry_key,
+            service_instance: OnceLock::new(),
             retry_interval,
             refresh_interval,
-            join_handles: Mutex::new(None),
+            join_handles: Mutex::new(Vec::new()),
         })
     }
 
@@ -387,7 +369,7 @@ impl HubClient {
         });
         join_handles.push(join_handle);
 
-        *self.join_handles.lock().unwrap() = Some(join_handles);
+        self.add_join_handles(join_handles);
         Ok(())
     }
 
@@ -438,51 +420,26 @@ impl HubClient {
         })
     }
 
-    fn build_service_instance(&self) -> Result<ServiceInstance, RegistryCenterError> {
-        let registry_key = self.registry_key.as_ref().ok_or_else(|| {
-            RegistryCenterError::Connection("registry center not configured".to_string())
-        })?;
-        let namespace = registry_key.namespace.clone();
-        let group = registry_key.group.clone();
-        let svc_name = registry_key.svc_name.clone();
-        let ip = get_local_ip()?;
-        let port = crate::web::get_web_listen_port().ok_or_else(|| {
-            RegistryCenterError::Connection(
-                "web server not started, cannot determine listen port".to_string(),
-            )
-        })?;
-        let instance_id = format!("{svc_name}-{}-{port}", ip.replace('.', "-"));
-        let health_check_url = get_health_check_url_http_protocol()
-            .map(|prefix| format!("{}://{}:{}{}", prefix, ip, port, get_health_check_uri()));
-        Ok(ServiceInstance {
-            namespace,
-            group,
-            svc_name,
-            instance_id,
-            ip,
-            port,
-            health_check_url,
-            metadata: Default::default(),
-        })
-    }
-
     pub async fn register(&self) -> Result<(), RegistryCenterError> {
-        let registry = self.registry.as_ref().ok_or_else(|| {
-            RegistryCenterError::Connection("registry center not configured".to_string())
-        })?;
-        let service_instance = self.build_service_instance()?;
-        *self.service_instance.lock().unwrap() = Some(service_instance.clone());
-        registry.register(&service_instance).await
+        if let (Some(registry), Some(registry_key)) = (
+            self.registry.as_ref().map(Arc::clone),
+            self.registry_key.clone(),
+        ) {
+            let service_instance = build_service_instance(registry_key)?;
+            self.service_instance.set(service_instance.clone()).ok();
+            registry.register(&service_instance).await?;
+        }
+        Ok(())
     }
 
     pub async fn deregister(&self) -> Result<(), RegistryCenterError> {
-        let registry = self.registry.as_ref().ok_or_else(|| {
-            RegistryCenterError::Connection("registry center not configured".to_string())
-        })?;
-        let service_instance = self.service_instance.lock().unwrap().clone().ok_or(
-            RegistryCenterError::Connection("service instance not registered".to_string()),
-        )?;
-        registry.deregister(&service_instance).await
+        if let (Some(registry), Some(service_instance)) = (
+            self.registry.as_ref().map(Arc::clone),
+            self.service_instance.get().cloned(),
+        ) {
+            registry.deregister(&service_instance).await?;
+        }
+        Ok(())
     }
 
     fn start_register_loop(self: &Arc<Self>) {
@@ -500,11 +457,35 @@ impl HubClient {
                 }
             }
         });
-        if let Some(mut handles) = self.join_handles.lock().unwrap().take() {
-            handles.push(handle);
-            *self.join_handles.lock().unwrap() = Some(handles);
-        }
+        self.add_join_handles(vec![handle]);
     }
+
+    fn add_join_handles(&self, handles: Vec<JoinHandle<()>>) {
+        self.join_handles.lock().unwrap().extend(handles);
+    }
+}
+
+fn build_service_instance(
+    registry_key: RegistryKey,
+) -> Result<ServiceInstance, RegistryCenterError> {
+    let namespace = registry_key.namespace.clone();
+    let group = registry_key.group.clone();
+    let svc_name = registry_key.svc_name.clone();
+    let ip = get_local_ip()?;
+    let port = get_web_listen_port().ok_or(RegistryCenterError::WebServerNotRunning)?;
+    let instance_id = format!("{svc_name}-{}-{port}", ip.replace('.', "-"));
+    let health_check_url = get_health_check_url_http_protocol()
+        .map(|prefix| format!("{}://{}:{}{}", prefix, ip, port, get_health_check_uri()));
+    Ok(ServiceInstance {
+        namespace,
+        group,
+        svc_name,
+        instance_id,
+        ip,
+        port,
+        health_check_url,
+        metadata: Default::default(),
+    })
 }
 
 fn parse_file_format(s: &str) -> Option<FileFormat> {
