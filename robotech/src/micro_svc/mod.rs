@@ -5,6 +5,8 @@ mod hub_client;
 mod micro_svc_config;
 #[cfg(feature = "registry-center")]
 mod registry_center;
+#[cfg(feature = "registry-center")]
+pub mod feign_client;
 
 #[cfg(feature = "config-center")]
 pub use config_center::*;
@@ -13,3 +15,5 @@ pub use hub_client::*;
 pub use micro_svc_config::*;
 #[cfg(feature = "registry-center")]
 pub use registry_center::*;
+#[cfg(feature = "registry-center")]
+pub use feign_client::*;

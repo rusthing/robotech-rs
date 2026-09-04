@@ -55,7 +55,7 @@ nacos-sdk = "0.8.2"
 
 wheel-rs = "1.10.0"
 idworker = "1.3.0"
-robotech-macros = "1.11.0"
+robotech-macros = "1.12.0"
 
 # macro依赖
 proc-macro2 = "1.0.107"             # 提供与标准库 proc_macro 兼容但更易测试的接口
