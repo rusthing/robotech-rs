@@ -21,16 +21,58 @@ use tracing::{error, info, warn};
 
 static HUB_CLIENT: ArcSwapOption<HubClient> = ArcSwapOption::const_empty();
 
-pub async fn setup_hub_client(micro_svc_config: MicroSvcConfig) -> Result<(), CfgError> {
+static RETRY_NEW_HUB_CLIENT_JOIN_HANDLE: ArcSwapOption<JoinHandle<()>> =
+    ArcSwapOption::const_empty();
+
+pub async fn setup_hub_client(micro_svc_config: MicroSvcConfig) {
     info!("setup hub client...: {micro_svc_config:?}");
+    // 先注销旧服务
     if let Ok(hub_client) = get_hub_client().as_ref() {
         if let Err(e) = hub_client.deregister().await {
             warn!("deregister failed: {e:?}");
         }
     }
-    let hub_client = HubClient::new(micro_svc_config).await?;
-    HUB_CLIENT.store(Some(Arc::new(hub_client)));
-    Ok(())
+
+    // 新建hub_client
+    match HubClient::new(micro_svc_config.clone()).await {
+        Ok(hub_client) => {
+            #[cfg(feature = "registry-center")]
+            if hub_client.registry_key.is_some() && hub_client.registry.is_none() {
+                start_new_hub_client_loop(micro_svc_config);
+            }
+            HUB_CLIENT.store(Some(Arc::new(hub_client)));
+        }
+        Err(e) => {
+            error!("failed to register hub client: {e:?}");
+            start_new_hub_client_loop(micro_svc_config);
+        }
+    }
+}
+
+fn start_new_hub_client_loop(micro_svc_config: MicroSvcConfig) {
+    // 停止旧的重试新建客户端的任务
+    if let Some(join_handle) = RETRY_NEW_HUB_CLIENT_JOIN_HANDLE.load_full() {
+        join_handle.abort();
+    }
+
+    let micro_svc_config_clone = micro_svc_config.clone();
+    let join_handle = tokio::spawn(async move {
+        loop {
+            match HubClient::new(micro_svc_config_clone.clone()).await {
+                Ok(hub_client) => {
+                    if hub_client.registry.is_some() {
+                        HUB_CLIENT.store(Some(Arc::new(hub_client)));
+                        return;
+                    }
+                }
+                Err(e) => {
+                    error!("failed to register hub client: {e:?}");
+                }
+            }
+            tokio::time::sleep(Duration::from_secs(5)).await;
+        }
+    });
+    RETRY_NEW_HUB_CLIENT_JOIN_HANDLE.store(Some(Arc::new(join_handle)));
 }
 
 pub async fn drop_hub_client() {
@@ -129,8 +171,7 @@ impl HubClient {
                 let client = ConsulClient::new(micro_svc_config.clone())
                     .map_err(|e| {
                         warn!(
-                            "failed to create consul client: {:?}, will use snapshot if available",
-                            e
+                            "failed to create consul client: {e:?}, will use snapshot if available",
                         );
                         e
                     })
@@ -147,8 +188,7 @@ impl HubClient {
                     .await
                     .map_err(|e| {
                         warn!(
-                            "failed to create etcd client: {:?}, will use snapshot if available",
-                            e
+                            "failed to create etcd client: {e:?}, will use snapshot if available",
                         );
                         e
                     })
@@ -165,8 +205,7 @@ impl HubClient {
                     .await
                     .map_err(|e| {
                         warn!(
-                            "failed to create nacos client: {:?}, will use snapshot if available",
-                            e
+                            "failed to create nacos client: {e:?}, will use snapshot if available",
                         );
                         e
                     })
