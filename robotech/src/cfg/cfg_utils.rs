@@ -1,5 +1,6 @@
 use crate::cfg::base_config::BaseConfig;
 use crate::cfg::cfg_error::CfgError;
+#[cfg(feature = "config-center")]
 use crate::micro_svc::get_configs;
 #[cfg(any(feature = "config-center", feature = "registry-center"))]
 use crate::micro_svc::{setup_hub_client, MicroSvcConfig, MICRO_SVC_CONFIG_KEY};
