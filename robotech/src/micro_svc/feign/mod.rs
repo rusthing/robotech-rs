@@ -5,7 +5,7 @@ pub use load_balancer::*;
 pub use service_discovery::*;
 
 #[cfg(feature = "api-client")]
-mod feign_client;
+mod feign_api_client;
 
 #[cfg(feature = "api-client")]
-pub use feign_client::*;
+pub use feign_api_client::*;

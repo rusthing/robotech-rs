@@ -4,6 +4,7 @@
 
 use serde::{Deserialize, Serialize};
 use std::time::Duration;
+use wheel_rs::serde::duration_serde;
 
 pub const API_CLIENT_CONFIG_KEY: &str = "api";
 
@@ -23,26 +24,43 @@ pub struct ApiClientConfig {
     /// 设置后优先使用服务发现模式，base_url 作为 fallback
     #[serde(default)]
     pub svc_name: Option<String>,
+    /// 认证策略
+    ///
+    /// 用于定义API请求的认证策略，包括 Token、Basic、Bearer 等
+    #[serde(default)]
+    pub auth: Option<ApiAuthStrategy>,
 }
 
 /// # API认证策略枚举
 ///
 /// 用于定义API请求的认证策略
-#[derive(Debug, Deserialize, Clone)]
+#[derive(Debug, Serialize, Deserialize, Clone)]
 #[serde(tag = "type")]
 pub enum ApiAuthStrategy {
+    /// Token 认证策略
+    ///
+    /// 用于在请求头中包含认证令牌，通常用于 API 密钥或 JWT 认证
+    #[serde(rename_all = "kebab-case")]
     Token {
         /// 认证头名称
         header: String,
         /// 认证令牌
         token: String,
     },
+    /// Basic 认证策略
+    ///
+    /// 用于在请求头中包含用户名和密码，通常用于 HTTP 基本认证
+    #[serde(rename_all = "kebab-case")]
     Basic {
         /// 用户名
         username: String,
         /// 密码
         password: Option<String>,
     },
+    /// Bearer 认证策略
+    ///
+    /// 用于在请求头中包含 Bearer 令牌，通常用于 JWT 认证
+    #[serde(rename_all = "kebab-case")]
     Bearer {
         /// 算法
         algorithm: String,
@@ -53,6 +71,7 @@ pub enum ApiAuthStrategy {
         /// 发布者(通常是API服务端)
         iss: String,
         /// 过期时间（Duration）
+        #[serde(with = "duration_serde")]
         expires_in: Duration,
     },
 }

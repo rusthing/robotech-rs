@@ -12,43 +12,30 @@ use serde::Serialize;
 use std::fmt::Debug;
 use std::str::FromStr;
 use std::sync::LazyLock;
-use wheel_rs::addr_utils::Addr;
 use wheel_rs::urn_utils::Urn;
 
 pub static REQWEST_CLIENT: LazyLock<Client> = LazyLock::new(|| Client::new());
 
 #[derive(Debug, Clone)]
-pub struct ApiClient {
-    base_url: String,
-}
+pub struct ApiClientUtils;
 
-impl ApiClient {
-    pub fn new(base_url: String) -> Self {
-        Self { base_url }
-    }
-
-    pub fn new_from_addr(addr: Addr) -> Self {
-        let protocol = "http";
-        let base_url = format!("{}://{}", protocol, addr);
-        Self { base_url }
-    }
-
+impl ApiClientUtils {
     fn build_request<D: Serialize + ?Sized>(
-        &self,
         method: Method,
+        base_url: &str,
         uri: &str,
         params: Option<&D>,
         body: Option<&D>,
-        headers: Option<HeaderMap>,
-        auth: Option<ApiAuthStrategy>,
+        headers: Option<&HeaderMap>,
+        auth: Option<&ApiAuthStrategy>,
     ) -> Result<(Urn, RequestBuilder), ApiClientError> {
-        let url = format!("{}{}", self.base_url, uri);
+        let url = format!("{}{}", base_url, uri);
         let urn = Urn::from_str(&format!("{method}:{url}"))
             .map_err(|e| ApiClientError::SetApiClient(format!("解析url失败: {e}")))?;
         tracing::debug!("request: {urn}....");
         let mut request_builder = REQWEST_CLIENT.request(method, &url);
         if let Some(headers) = headers {
-            request_builder = request_builder.headers(headers);
+            request_builder = request_builder.headers(headers.clone());
         }
         if let Some(params) = params {
             request_builder = request_builder.query(params);
@@ -63,7 +50,7 @@ impl ApiClient {
                     request_builder = request_builder.header(header, token);
                 }
                 ApiAuthStrategy::Basic { username, password } => {
-                    request_builder = request_builder.basic_auth(username, password);
+                    request_builder = request_builder.basic_auth(username, password.clone());
                 }
                 ApiAuthStrategy::Bearer {
                     algorithm,
@@ -74,10 +61,10 @@ impl ApiClient {
                 } => {
                     let now = Utc::now();
                     let claim = Claim {
-                        sub,
-                        iss,
+                        sub: sub.clone(),
+                        iss: iss.clone(),
                         iat: now.timestamp(),
-                        exp: (now + expires_in).timestamp(),
+                        exp: (now + expires_in.clone()).timestamp(),
                     };
                     let token = encode(
                         &jsonwebtoken::Header::new(jsonwebtoken::Algorithm::from_str(
@@ -130,20 +117,20 @@ impl ApiClient {
     /// 执行请求的通用方法
     #[log_call]
     pub async fn request<D, E>(
-        &self,
         method: Method,
+        base_url: &str,
         uri: &str,
         params: Option<&D>,
         body: Option<&D>,
-        headers: Option<HeaderMap>,
-        auth: Option<ApiAuthStrategy>,
+        headers: Option<&HeaderMap>,
+        auth: Option<&ApiAuthStrategy>,
     ) -> Result<Ro<E>, ApiClientError>
     where
         D: Serialize + ?Sized + Debug,
         E: DeserializeOwned + Debug,
     {
         let (urn, request_builder) =
-            self.build_request(method, uri, params, body, headers, auth)?;
+            Self::build_request(method, base_url, uri, params, body, headers, auth)?;
         let response = Self::send(&urn, request_builder).await?;
         Self::response_json(&urn, response).await
     }
@@ -153,34 +140,34 @@ impl ApiClient {
     /// GET方法为params，其它方法为body
     #[log_call]
     pub async fn webhook<D, E>(
-        &self,
         method: Method,
+        base_url: &str,
         uri: &str,
         data: Option<&D>,
-        headers: Option<HeaderMap>,
-        auth: Option<ApiAuthStrategy>,
+        headers: Option<&HeaderMap>,
+        auth: Option<&ApiAuthStrategy>,
     ) -> Result<Ro<E>, ApiClientError>
     where
         D: Serialize + ?Sized + Debug,
         E: DeserializeOwned + Debug,
     {
         match method {
-            Method::GET => self.request(method, uri, data, None, headers, auth).await,
-            _ => self.request(method, uri, None, data, headers, auth).await,
+            Method::GET => Self::request(method, base_url, uri, data, None, headers, auth).await,
+            _ => Self::request(method, base_url, uri, None, data, headers, auth).await,
         }
     }
 
     /// 执行GET请求的通用方法
     #[log_call]
     pub async fn get<D: Serialize + ?Sized + std::fmt::Debug>(
-        &self,
+        base_url: &str,
         uri: &str,
         params: Option<&D>,
-        headers: Option<HeaderMap>,
-        auth: Option<ApiAuthStrategy>,
+        headers: Option<&HeaderMap>,
+        auth: Option<&ApiAuthStrategy>,
     ) -> Result<Ro<serde_json::Value>, ApiClientError> {
         let (urn, request_builder) =
-            self.build_request(Method::GET, uri, params, None, headers, auth)?;
+            Self::build_request(Method::GET, base_url, uri, params, None, headers, auth)?;
         let response = Self::send(&urn, request_builder).await?;
         Self::response_json(&urn, response).await
     }
@@ -188,14 +175,14 @@ impl ApiClient {
     /// 执行GET请求的通用方法，返回bytes
     #[log_call]
     pub async fn get_bytes<D: Serialize + ?Sized + std::fmt::Debug>(
-        &self,
+        base_url: &str,
         uri: &str,
         params: Option<&D>,
-        headers: Option<HeaderMap>,
-        auth: Option<ApiAuthStrategy>,
+        headers: Option<&HeaderMap>,
+        auth: Option<&ApiAuthStrategy>,
     ) -> Result<Vec<u8>, ApiClientError> {
         let (urn, request_builder) =
-            self.build_request(Method::GET, uri, params, None, headers, auth)?;
+            Self::build_request(Method::GET, base_url, uri, params, None, headers, auth)?;
         let response = Self::send(&urn, request_builder).await?;
         let result = response
             .bytes()
@@ -208,42 +195,42 @@ impl ApiClient {
     /// 执行POST请求的通用方法
     #[log_call]
     pub async fn post<D: Serialize + ?Sized + std::fmt::Debug>(
-        &self,
+        base_url: &str,
         uri: &str,
         body: Option<&D>,
-        headers: Option<HeaderMap>,
-        auth: Option<ApiAuthStrategy>,
+        headers: Option<&HeaderMap>,
+        auth: Option<&ApiAuthStrategy>,
     ) -> Result<Ro<serde_json::Value>, ApiClientError> {
         let (urn, request_builder) =
-            self.build_request(Method::POST, uri, None, body, headers, auth)?;
+            Self::build_request(Method::POST, base_url, uri, None, body, headers, auth)?;
         let response = Self::send(&urn, request_builder).await?;
         Self::response_json(&urn, response).await
     }
     /// 执行PUT请求的通用方法
     #[log_call]
     pub async fn put<D: Serialize + ?Sized + std::fmt::Debug>(
-        &self,
+        base_url: &str,
         uri: &str,
-        headers: Option<HeaderMap>,
+        headers: Option<&HeaderMap>,
         body: &D,
-        auth: Option<ApiAuthStrategy>,
+        auth: Option<&ApiAuthStrategy>,
     ) -> Result<Ro<serde_json::Value>, ApiClientError> {
         let (urn, request_builder) =
-            self.build_request(Method::PUT, uri, None, Some(body), headers, auth)?;
+            Self::build_request(Method::PUT, base_url, uri, None, Some(body), headers, auth)?;
         let response = Self::send(&urn, request_builder).await?;
         Self::response_json(&urn, response).await
     }
     /// 执行DELETE请求的通用方法
     #[log_call]
     pub async fn delete<D: Serialize + ?Sized + std::fmt::Debug>(
-        &self,
+        base_url: &str,
         uri: &str,
         body: Option<&D>,
-        headers: Option<HeaderMap>,
-        auth: Option<ApiAuthStrategy>,
+        headers: Option<&HeaderMap>,
+        auth: Option<&ApiAuthStrategy>,
     ) -> Result<Ro<serde_json::Value>, ApiClientError> {
         let (urn, request_builder) =
-            self.build_request(Method::DELETE, uri, None, body, headers, auth)?;
+            Self::build_request(Method::DELETE, base_url, uri, None, body, headers, auth)?;
         let response = Self::send(&urn, request_builder).await?;
         Self::response_json(&urn, response).await
     }
@@ -251,14 +238,14 @@ impl ApiClient {
     /// 执行post multipart请求的通用方法
     #[log_call]
     pub async fn multipart(
-        &self,
+        base_url: &str,
         uri: &str,
         form: reqwest::multipart::Form,
-        headers: Option<HeaderMap>,
-        auth: Option<ApiAuthStrategy>,
+        headers: Option<&HeaderMap>,
+        auth: Option<&ApiAuthStrategy>,
     ) -> Result<Ro<serde_json::Value>, ApiClientError> {
         let (urn, mut request_builder) =
-            self.build_request::<String>(Method::POST, uri, None, None, headers, auth)?;
+            Self::build_request::<String>(Method::POST, base_url, uri, None, None, headers, auth)?;
         request_builder = request_builder.multipart(form);
         let response = Self::send(&urn, request_builder).await?;
         Self::response_json(&urn, response).await
