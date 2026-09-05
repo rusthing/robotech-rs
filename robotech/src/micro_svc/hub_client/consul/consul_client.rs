@@ -5,7 +5,6 @@
 //! `ModifyIndex` 去发起下一次请求，Consul agent 会一直 hold 住连接，直到该 key 有
 //! 变化或超时才返回——本质是长轮询，不是真正的服务端推送，所以watch的实时性弱于
 //! etcd/Nacos，但胜在协议极其简单、不需要额外依赖。
-
 use crate::micro_svc::config_center::{
     ConfigCenterClient, ConfigCenterError, ConfigItem, ConfigKey,
 };
@@ -204,6 +203,7 @@ impl ConfigCenterClient for ConsulClient {
     }
 }
 
+#[cfg(feature = "registry-center")]
 #[async_trait]
 impl RegistryCenterClient for ConsulClient {
     fn name(&self) -> &'static str {

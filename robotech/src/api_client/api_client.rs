@@ -1,4 +1,4 @@
-use crate::api_client::api_client_config::{ApiAuthStrategy, ApiClientConfig, Claim};
+use crate::api_client::api_client_config::{ApiAuthStrategy, Claim};
 use crate::api_client::ApiClientError;
 use crate::ro::Ro;
 use chrono::Utc;
@@ -12,16 +12,27 @@ use serde::Serialize;
 use std::fmt::Debug;
 use std::str::FromStr;
 use std::sync::LazyLock;
+use wheel_rs::addr_utils::Addr;
 use wheel_rs::urn_utils::Urn;
 
 pub static REQWEST_CLIENT: LazyLock<Client> = LazyLock::new(|| Client::new());
 
 #[derive(Debug, Clone)]
 pub struct ApiClient {
-    pub api_client_config: ApiClientConfig,
+    base_url: String,
 }
 
 impl ApiClient {
+    pub fn new(base_url: String) -> Self {
+        Self { base_url }
+    }
+
+    pub fn new_from_addr(addr: Addr) -> Self {
+        let protocol = "http";
+        let base_url = format!("{}://{}", protocol, addr);
+        Self { base_url }
+    }
+
     fn build_request<D: Serialize + ?Sized>(
         &self,
         method: Method,
@@ -31,7 +42,7 @@ impl ApiClient {
         headers: Option<HeaderMap>,
         auth: Option<ApiAuthStrategy>,
     ) -> Result<(Urn, RequestBuilder), ApiClientError> {
-        let url = format!("{}{}", self.api_client_config.base_url, uri);
+        let url = format!("{}{}", self.base_url, uri);
         let urn = Urn::from_str(&format!("{method}:{url}"))
             .map_err(|e| ApiClientError::SetApiClient(format!("解析url失败: {e}")))?;
         tracing::debug!("request: {urn}....");

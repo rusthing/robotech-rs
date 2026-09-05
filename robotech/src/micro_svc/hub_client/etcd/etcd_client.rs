@@ -10,7 +10,6 @@
 //! `cargo build` 做真实编译校验，接入前建议先 `cargo check --features etcd` 跑一遍，
 //! 关注 `kv.value_str()` / `event.event_type()` / `kv.mod_revision()` 这几个方法名
 //! 是否与你锁定的具体版本一致。
-
 use crate::micro_svc::config_center::{
     ConfigCenterClient, ConfigCenterError, ConfigItem, ConfigKey,
 };
@@ -140,6 +139,7 @@ impl ConfigCenterClient for EtcdClient {
     }
 }
 
+#[cfg(feature = "registry-center")]
 #[async_trait]
 impl RegistryCenterClient for EtcdClient {
     fn name(&self) -> &'static str {

@@ -1,6 +1,8 @@
 use crate::micro_svc::etcd_connect_option_wrapper::EtcdConnectOptionsWrapper;
 use crate::micro_svc::hub_client_config::HubClientConfig;
-use crate::micro_svc::{ConfigCenterConfig, RegistryCenterConfig};
+use crate::micro_svc::ConfigCenterConfig;
+#[cfg(feature = "registry-center")]
+use crate::micro_svc::RegistryCenterConfig;
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -15,7 +17,6 @@ pub struct EtcdConfig {
     pub connect_options: EtcdConnectOptionsWrapper,
 
     /// 配置中心
-    #[cfg(feature = "config-center")]
     #[serde(default)]
     pub config: Option<ConfigCenterConfig>,
     /// 注册中心

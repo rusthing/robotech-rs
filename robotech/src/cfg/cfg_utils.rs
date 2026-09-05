@@ -7,7 +7,10 @@ use crate::micro_svc::{setup_hub_client, MicroSvcConfig, MICRO_SVC_CONFIG_KEY};
 use config::builder::DefaultState;
 use config::{Config, ConfigBuilder};
 use std::path::{Path, PathBuf};
-use tracing::{error, warn};
+#[cfg(feature = "config-center")]
+use tracing::error;
+#[cfg(feature = "config-center")]
+use tracing::warn;
 
 pub type Result<T> = core::result::Result<T, CfgError>;
 
@@ -19,32 +22,41 @@ pub async fn build_cfg(
     cfg_file_path: Option<String>,
 ) -> Result<(Config, Vec<String>)> {
     // 先加载基础配置文件获取profile，后续根据profile加载对应的配置文件
-    let config = Config::builder();
-    let (config, ..) = add_cfg_files(app_dir, cfg_file_name_without_ext, &cfg_file_path, config)?;
-    let base_config: BaseConfig = config
+    let config_builder = Config::builder();
+    let (config_builder, ..) = add_cfg_files(
+        app_dir,
+        cfg_file_name_without_ext,
+        &cfg_file_path,
+        config_builder,
+    )?;
+    let base_config: BaseConfig = config_builder
         .build()
         .map_err(CfgError::Build)?
         .try_deserialize()
         .map_err(CfgError::Deserialize)?;
 
-    let config = Config::builder();
+    let config_builder = Config::builder();
 
     // 加载配置文件
-    let (config, mut files) =
-        add_cfg_files(app_dir, cfg_file_name_without_ext, &cfg_file_path, config)?;
+    let (config_builder, mut files) = add_cfg_files(
+        app_dir,
+        cfg_file_name_without_ext,
+        &cfg_file_path,
+        config_builder,
+    )?;
 
     // 加载profile对应的配置文件
-    let (mut config, files) = if let Some(profile) = &base_config.profile {
-        let (config, profile_files) = add_cfg_files(
+    let (mut config_builder, files) = if let Some(profile) = &base_config.profile {
+        let (config_builder, profile_files) = add_cfg_files(
             app_dir,
             format!("{}-{}", cfg_file_name_without_ext, profile).as_str(),
             &cfg_file_path,
-            config,
+            config_builder,
         )?;
         files.extend(profile_files);
-        (config, files)
+        (config_builder, files)
     } else {
-        (config, files)
+        (config_builder, files)
     };
 
     // 初始化配置中心和注册中心的客户端
@@ -53,13 +65,14 @@ pub async fn build_cfg(
     if let Some(app_name) = app_file_name_without_ext {
         // 初始化配置中心和注册中心的客户端
         #[cfg(any(feature = "config-center", feature = "registry-center"))]
-        init_hub_client(config.clone(), app_name, &base_config.profile).await?;
+        init_hub_client(config_builder.clone(), app_name, &base_config.profile).await?;
         // 从配置中心获取配置文件内容并加载到config中
         #[cfg(feature = "config-center")]
         match get_configs().await {
             Ok(config_items) => {
                 for item in config_items {
-                    config = config.add_source(config::File::from_str(&item.content, item.format));
+                    config_builder = config_builder
+                        .add_source(config::File::from_str(&item.content, item.format));
                 }
             }
             Err(e) => {
@@ -69,12 +82,12 @@ pub async fn build_cfg(
     }
 
     // 添加环境变量，以覆盖配置文件中的设置
-    let config = config
+    config_builder = config_builder
         // Add in app from the environment (with a prefix of XXX)
         // E.g. `XXX_DEBUG=true ./target/app` would set the `debug` to `true`
-        .add_source(config::Environment::with_prefix(env_var_prefix))
-        .build()
-        .map_err(CfgError::Build)?;
+        .add_source(config::Environment::with_prefix(env_var_prefix));
+
+    let config = config_builder.build().map_err(CfgError::Build)?;
 
     Ok((config, files))
 }

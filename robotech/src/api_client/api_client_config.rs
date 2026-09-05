@@ -10,14 +10,19 @@ pub const API_CLIENT_CONFIG_KEY: &str = "api";
 /// # API配置结构体
 ///
 /// 用于存储API所需的各种配置参数
-#[derive(Debug, Serialize, Deserialize, Clone)]
+#[derive(Debug, Default, Serialize, Deserialize, Clone)]
 #[serde(rename_all = "kebab-case")]
 pub struct ApiClientConfig {
     /// API请求的基础URL
     ///
     /// 例如: http://127.0.0.1:8080
-    #[serde()]
-    pub base_url: String,
+    #[serde(default)]
+    pub base_url: Option<String>,
+    /// 服务名，用于 feign 模式（服务发现）
+    ///
+    /// 设置后优先使用服务发现模式，base_url 作为 fallback
+    #[serde(default)]
+    pub svc_name: Option<String>,
 }
 
 /// # API认证策略枚举

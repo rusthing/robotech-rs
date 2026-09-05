@@ -1,5 +1,4 @@
 use crate::api_client::ApiClient;
-use crate::api_client::ApiClientConfig;
 use crate::api_client::ApiClientError;
 use crate::micro_svc::feign_client::load_balancer::{LoadBalancer, RoundRobinBalancer};
 use crate::micro_svc::feign_client::service_discovery::ServiceDiscovery;
@@ -15,6 +14,7 @@ use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 use thiserror::Error;
 use tracing::warn;
+use wheel_rs::addr_utils::Addr;
 
 #[derive(Debug, Error)]
 pub enum FeignError {
@@ -94,8 +94,7 @@ impl FeignClient {
     }
 
     pub async fn new_default(svc_name: &str) -> Self {
-        let service_discovery =
-            Arc::new(ServiceDiscovery::new(svc_name, Duration::from_secs(30)));
+        let service_discovery = Arc::new(ServiceDiscovery::new(svc_name, Duration::from_secs(30)));
         if let Err(e) = service_discovery.init().await {
             warn!(
                 "service discovery init failed for '{}': {:?}, will retry on first request",
@@ -167,10 +166,8 @@ impl FeignClient {
             };
             tried_ids.push(instance.instance_id.clone());
 
-            let base_url = format!("http://{}:{}", instance.ip, instance.port);
-            let api_client = ApiClient {
-                api_client_config: ApiClientConfig { base_url },
-            };
+            let addr = Addr::new(instance.ip, Some(instance.port));
+            let api_client = ApiClient::new_from_addr(addr.clone());
 
             let result = api_client
                 .request(method.clone(), uri, params, body, headers.cloned(), None)
@@ -184,7 +181,7 @@ impl FeignClient {
                 Err(e) => {
                     warn!(
                         "feign call failed for instance {} ({}) on {}: {:?}",
-                        instance.instance_id, instance.ip, uri, e
+                        instance.instance_id, addr, uri, e
                     );
                     self.record_failure(&instance.instance_id);
                 }
@@ -245,10 +242,8 @@ impl FeignClient {
             };
             tried_ids.push(instance.instance_id.clone());
 
-            let base_url = format!("http://{}:{}", instance.ip, instance.port);
-            let api_client = ApiClient {
-                api_client_config: ApiClientConfig { base_url },
-            };
+            let addr = Addr::new(instance.ip, Some(instance.port));
+            let api_client = ApiClient::new_from_addr(addr.clone());
 
             let result = api_client
                 .get_bytes(uri, params, headers.clone(), None)
@@ -262,7 +257,7 @@ impl FeignClient {
                 Err(e) => {
                     warn!(
                         "feign get_bytes failed for instance {} ({}): {:?}",
-                        instance.instance_id, instance.ip, e
+                        instance.instance_id, addr, e
                     );
                     self.record_failure(&instance.instance_id);
                 }
@@ -300,14 +295,10 @@ impl FeignClient {
             }
         };
 
-        let base_url = format!("http://{}:{}", instance.ip, instance.port);
-        let api_client = ApiClient {
-            api_client_config: ApiClientConfig { base_url },
-        };
+        let addr = Addr::new(instance.ip, Some(instance.port));
+        let api_client = ApiClient::new_from_addr(addr.clone());
 
-        let result = api_client
-            .multipart(uri, form, headers.clone(), None)
-            .await;
+        let result = api_client.multipart(uri, form, headers.clone(), None).await;
 
         match result {
             Ok(resp) => {
@@ -317,7 +308,7 @@ impl FeignClient {
             Err(e) => {
                 warn!(
                     "feign multipart failed for instance {} ({}): {:?}",
-                    instance.instance_id, instance.ip, e
+                    instance.instance_id, addr, e
                 );
                 self.record_failure(&instance.instance_id);
                 Err(e)

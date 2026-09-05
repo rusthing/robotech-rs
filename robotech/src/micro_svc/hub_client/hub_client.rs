@@ -3,12 +3,11 @@ use wheel_rs::ipnet_utils::get_local_ip;
 use crate::cfg::CfgError;
 use crate::env::{AppEnv, EnvError, APP_ENV};
 use crate::micro_svc::hub_client_config::HubClientConfig;
+use crate::micro_svc::{ConfigCenterClient, ConfigCenterConfig, ConfigItem, ConfigKey};
+use crate::micro_svc::{ConsulClient, EtcdClient, MicroSvcConfig, NacosClient};
 use crate::micro_svc::{
-    ConfigCenterClient, ConfigCenterConfig, ConfigItem, ConfigKey, ConsulClient, EtcdClient,
-    MicroSvcConfig, NacosClient, RegistryCenterClient, RegistryCenterConfig, RegistryCenterError,
-    RegistryKey, ServiceInstance,
+    RegistryCenterClient, RegistryCenterConfig, RegistryCenterError, RegistryKey, ServiceInstance,
 };
-#[cfg(feature = "web")]
 use crate::web::{get_health_check_uri, get_health_check_url_http_protocol, get_web_listen_port};
 use arc_swap::ArcSwapOption;
 use config::FileFormat;
@@ -28,7 +27,7 @@ static RETRY_NEW_HUB_CLIENT_JOIN_HANDLE: ArcSwapOption<JoinHandle<()>> =
 pub async fn setup_hub_client(micro_svc_config: MicroSvcConfig) {
     info!("setup hub client...: {micro_svc_config:?}");
     // 先注销旧服务
-    #[cfg(feature = "web")]
+    #[cfg(feature = "registry-center")]
     if let Ok(hub_client) = get_hub_client().as_ref() {
         if let Err(e) = hub_client.deregister().await {
             warn!("deregister failed: {e:?}");
@@ -78,7 +77,7 @@ fn start_new_hub_client_loop(micro_svc_config: MicroSvcConfig) {
 }
 
 pub async fn drop_hub_client() {
-    #[cfg(feature = "web")]
+    #[cfg(feature = "registry-center")]
     if let Ok(hub_client) = get_hub_client().as_ref() {
         if let Err(e) = hub_client.deregister().await {
             warn!("deregister failed: {e:?}");
@@ -100,13 +99,12 @@ pub async fn get_configs() -> Result<Vec<ConfigItem>, CfgError> {
     Ok(config)
 }
 
-pub async fn discover_service(
-    svc_name: &str,
-) -> Result<Vec<ServiceInstance>, CfgError> {
+pub async fn discover_service(svc_name: &str) -> Result<Vec<ServiceInstance>, CfgError> {
     let hub_client = get_hub_client()?;
-    hub_client.discover(svc_name).await.map_err(|e| {
-        CfgError::NotInit(format!("discover service failed: {e:?}",))
-    })
+    hub_client
+        .discover(svc_name)
+        .await
+        .map_err(|e| CfgError::NotInit(format!("discover service failed: {e:?}",)))
 }
 
 pub async fn watch_config_changed<F, Fut>(on_change: F) -> Result<(), CfgError>
@@ -122,26 +120,23 @@ where
 }
 
 pub async fn register_micro_svc() {
-    #[cfg(feature = "web")]
-    {
-        tokio::spawn(async move {
-            loop {
-                if let Ok(hub_client) = get_hub_client().as_ref() {
-                    let retry_interval = hub_client.retry_interval;
-                    let refresh_interval = hub_client.refresh_interval;
-                    match hub_client.register().await {
-                        Ok(()) => tokio::time::sleep(refresh_interval).await,
-                        Err(e) => {
-                            warn!("register failed: {e:?}, retry in {retry_interval:?}");
-                            tokio::time::sleep(retry_interval).await;
-                        }
+    tokio::spawn(async move {
+        loop {
+            if let Ok(hub_client) = get_hub_client().as_ref() {
+                let retry_interval = hub_client.retry_interval;
+                let refresh_interval = hub_client.refresh_interval;
+                match hub_client.register().await {
+                    Ok(()) => tokio::time::sleep(refresh_interval).await,
+                    Err(e) => {
+                        warn!("register failed: {e:?}, retry in {retry_interval:?}");
+                        tokio::time::sleep(retry_interval).await;
                     }
-                } else {
-                    tokio::time::sleep(Duration::from_secs(5)).await;
-                };
-            }
-        });
-    }
+                }
+            } else {
+                tokio::time::sleep(Duration::from_secs(5)).await;
+            };
+        }
+    });
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -152,9 +147,9 @@ struct ConfigSnapshot {
 
 pub struct HubClient {
     config: Option<Arc<dyn ConfigCenterClient>>,
-    registry: Option<Arc<dyn RegistryCenterClient>>,
     config_keys: Option<Vec<ConfigKey>>,
     snapshot_dir: Option<PathBuf>,
+    registry: Option<Arc<dyn RegistryCenterClient>>,
     registry_key: Option<RegistryKey>,
     service_instance: OnceLock<ServiceInstance>,
     retry_interval: Duration,
@@ -386,7 +381,6 @@ impl HubClient {
         })
     }
 
-    #[cfg(feature = "web")]
     pub async fn register(&self) -> Result<(), RegistryCenterError> {
         if let (Some(registry), Some(registry_key)) = (
             self.registry.as_ref().map(Arc::clone),
@@ -399,7 +393,6 @@ impl HubClient {
         Ok(())
     }
 
-    #[cfg(feature = "web")]
     pub async fn deregister(&self) -> Result<(), RegistryCenterError> {
         if let (Some(registry), Some(service_instance)) = (
             self.registry.as_ref().map(Arc::clone),
@@ -414,9 +407,12 @@ impl HubClient {
         &self,
         svc_name: &str,
     ) -> Result<Vec<ServiceInstance>, RegistryCenterError> {
-        let registry = self.registry.as_ref().ok_or(
-            RegistryCenterError::BackendNotEnabled("registry center not configured".to_string()),
-        )?;
+        let registry = self
+            .registry
+            .as_ref()
+            .ok_or(RegistryCenterError::BackendNotEnabled(
+                "registry center not configured".to_string(),
+            ))?;
         let namespace = self.registry_key.as_ref().and_then(|k| k.namespace.clone());
         let group = self.registry_key.as_ref().and_then(|k| k.group.clone());
         registry.discover(namespace, group, svc_name).await
@@ -427,7 +423,6 @@ impl HubClient {
     }
 }
 
-#[cfg(feature = "web")]
 fn build_service_instance(
     registry_key: RegistryKey,
 ) -> Result<ServiceInstance, RegistryCenterError> {

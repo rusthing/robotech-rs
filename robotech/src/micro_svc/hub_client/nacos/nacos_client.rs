@@ -13,10 +13,10 @@
 use std::sync::{Arc, Mutex};
 
 use crate::micro_svc::hub_client_config::HubClientConfig;
-use crate::micro_svc::{
-    ConfigCenterClient, ConfigCenterError, ConfigItem, ConfigKey, HubClientError, MicroSvcConfig,
-    RegistryCenterClient, RegistryCenterError, ServiceInstance,
-};
+
+use crate::micro_svc::{ConfigCenterClient, ConfigCenterError, ConfigItem, ConfigKey};
+use crate::micro_svc::{HubClientError, MicroSvcConfig};
+use crate::micro_svc::{RegistryCenterClient, RegistryCenterError, ServiceInstance};
 use async_trait::async_trait;
 use nacos_sdk::api::config::{
     ConfigChangeListener, ConfigResponse, ConfigService, ConfigServiceBuilder,
@@ -162,6 +162,7 @@ impl ConfigCenterClient for NacosClient {
     }
 }
 
+#[cfg(feature = "registry-center")]
 #[async_trait]
 impl RegistryCenterClient for NacosClient {
     fn name(&self) -> &'static str {

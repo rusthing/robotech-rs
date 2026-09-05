@@ -1,5 +1,7 @@
 use crate::micro_svc::hub_client_config::HubClientConfig;
-use crate::micro_svc::{ConfigCenterConfig, RegistryCenterConfig};
+use crate::micro_svc::ConfigCenterConfig;
+#[cfg(feature = "registry-center")]
+use crate::micro_svc::RegistryCenterConfig;
 use serde::{Deserialize, Serialize};
 use std::time::Duration;
 use wheel_rs::serde::duration_serde;
@@ -22,7 +24,6 @@ pub struct ConsulConfig {
     pub blocking_query_timeout: Duration,
 
     /// 配置中心
-    #[cfg(feature = "config-center")]
     #[serde(default)]
     pub config: Option<ConfigCenterConfig>,
     /// 注册中心

@@ -2,8 +2,8 @@ use crate::app::AppError;
 use crate::cfg::{build_cfg, deserialize_config, BaseConfig, CfgError};
 use crate::env::{AppEnv, EnvError, APP_ENV};
 use crate::log::LogConfig;
-use crate::micro_svc::watch_config_changed;
 #[cfg(feature = "config-center")]
+use crate::micro_svc::watch_config_changed;
 use arc_swap::ArcSwap;
 use config::{Config, Value};
 use std::collections::HashMap;
