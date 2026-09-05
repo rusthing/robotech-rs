@@ -1,7 +1,7 @@
 use crate::api_client::ApiClient;
 use crate::api_client::ApiClientError;
-use crate::micro_svc::feign_client::load_balancer::{LoadBalancer, RoundRobinBalancer};
-use crate::micro_svc::feign_client::service_discovery::ServiceDiscovery;
+use crate::micro_svc::feign::load_balancer::{LoadBalancer, RoundRobinBalancer};
+use crate::micro_svc::feign::service_discovery::ServiceDiscovery;
 use crate::micro_svc::ServiceInstance;
 use crate::ro::Ro;
 use http::Method;
