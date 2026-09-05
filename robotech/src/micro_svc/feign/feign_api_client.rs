@@ -1,9 +1,11 @@
 use crate::api_client::ApiClientError;
 use crate::api_client::ApiClientUtils;
+use crate::api_client::ApiClient;
 use crate::micro_svc::feign::load_balancer::{LoadBalancer, RoundRobinBalancer};
 use crate::micro_svc::feign::service_discovery::ServiceDiscovery;
 use crate::micro_svc::ServiceInstance;
 use crate::ro::Ro;
+use async_trait::async_trait;
 use http::Method;
 use reqwest::header::HeaderMap;
 use serde::de::DeserializeOwned;
@@ -209,13 +211,13 @@ impl FeignApiClient {
         uri: &str,
         params: Option<&D>,
         body: Option<&D>,
-        headers: Option<HeaderMap>,
+        headers: Option<&HeaderMap>,
     ) -> Result<Ro<E>, ApiClientError>
     where
         D: Serialize + ?Sized + Debug,
         E: DeserializeOwned + Debug,
     {
-        self.do_request(&method, uri, params, body, headers.as_ref())
+        self.do_request(&method, uri, params, body, headers)
             .await
     }
 
@@ -279,13 +281,13 @@ impl FeignApiClient {
         &self,
         uri: &str,
         body: Option<&D>,
-        headers: Option<HeaderMap>,
+        headers: Option<&HeaderMap>,
     ) -> Result<Ro<serde_json::Value>, ApiClientError> {
-        self.do_request(&Method::POST, uri, None::<&D>, body, headers.as_ref())
+        self.do_request(&Method::POST, uri, None::<&D>, body, headers)
             .await
     }
 
-    pub async fn multipart<D: Serialize + ?Sized + Debug>(
+    pub async fn multipart(
         &self,
         uri: &str,
         form: reqwest::multipart::Form,
@@ -318,5 +320,114 @@ impl FeignApiClient {
                 Err(e)
             }
         }
+    }
+
+    pub async fn put<D: Serialize + ?Sized + Debug>(
+        &self,
+        uri: &str,
+        headers: Option<&HeaderMap>,
+        body: &D,
+    ) -> Result<Ro<serde_json::Value>, ApiClientError> {
+        self.do_request(&Method::PUT, uri, None::<&D>, Some(body), headers)
+            .await
+    }
+
+    pub async fn delete<D: Serialize + ?Sized + Debug>(
+        &self,
+        uri: &str,
+        body: Option<&D>,
+        headers: Option<&HeaderMap>,
+    ) -> Result<Ro<serde_json::Value>, ApiClientError> {
+        self.do_request(&Method::DELETE, uri, None::<&D>, body, headers)
+            .await
+    }
+
+    pub async fn webhook<D, E>(
+        &self,
+        method: Method,
+        uri: &str,
+        data: Option<&D>,
+        headers: Option<&HeaderMap>,
+    ) -> Result<Ro<E>, ApiClientError>
+    where
+        D: Serialize + ?Sized + Debug,
+        E: DeserializeOwned + Debug,
+    {
+        match method {
+            Method::GET => self.do_request(&method, uri, data, None, headers).await,
+            _ => self.do_request(&method, uri, None, data, headers).await,
+        }
+    }
+}
+
+#[async_trait]
+impl ApiClient for FeignApiClient {
+    async fn request<D, E>(
+        &self,
+        method: Method,
+        uri: &str,
+        params: Option<&D>,
+        body: Option<&D>,
+        headers: Option<&HeaderMap>,
+    ) -> Result<Ro<E>, ApiClientError>
+    where
+        D: Serialize + ?Sized + Debug + Send + Sync,
+        E: DeserializeOwned + Debug + Send,
+    {
+        FeignApiClient::request(self, method, uri, params, body, headers).await
+    }
+
+    async fn get<D: Serialize + ?Sized + Debug + Send + Sync>(
+        &self,
+        uri: &str,
+        params: Option<&D>,
+        headers: Option<&HeaderMap>,
+    ) -> Result<Ro<serde_json::Value>, ApiClientError> {
+        FeignApiClient::get(self, uri, params, headers).await
+    }
+
+    async fn get_bytes<D: Serialize + ?Sized + Debug + Send + Sync>(
+        &self,
+        uri: &str,
+        params: Option<&D>,
+        headers: Option<&HeaderMap>,
+    ) -> Result<Vec<u8>, ApiClientError> {
+        FeignApiClient::get_bytes(self, uri, params, headers).await
+    }
+
+    async fn post<D: Serialize + ?Sized + Debug + Send + Sync>(
+        &self,
+        uri: &str,
+        body: Option<&D>,
+        headers: Option<&HeaderMap>,
+    ) -> Result<Ro<serde_json::Value>, ApiClientError> {
+        FeignApiClient::post(self, uri, body, headers).await
+    }
+
+    async fn put<D: Serialize + ?Sized + Debug + Send + Sync>(
+        &self,
+        uri: &str,
+        headers: Option<&HeaderMap>,
+        body: &D,
+    ) -> Result<Ro<serde_json::Value>, ApiClientError> {
+        FeignApiClient::put(self, uri, headers, body).await
+    }
+
+    async fn delete<D: Serialize + ?Sized + Debug + Send + Sync>(
+        &self,
+        uri: &str,
+        body: Option<&D>,
+        headers: Option<&HeaderMap>,
+    ) -> Result<Ro<serde_json::Value>, ApiClientError> {
+        FeignApiClient::delete(self, uri, body, headers).await
+    }
+
+    async fn multipart(
+        &self,
+        uri: &str,
+        form: reqwest::multipart::Form,
+        headers: Option<&HeaderMap>,
+    ) -> Result<Ro<serde_json::Value>, ApiClientError> {
+        FeignApiClient::multipart(self, uri, form, headers).await
     }
 }
