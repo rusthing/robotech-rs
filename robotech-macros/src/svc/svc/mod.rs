@@ -231,10 +231,8 @@ pub(crate) fn svc_macro(input: ItemStruct) -> TokenStream {
         where
             C: ConnectionTrait,
         {
-            let one = #dao_name::get_by_id::<_, #vo_name>(id, db)
-                .await?
-                .ok_or(SvcError::NotFound(format!("id: {}", id)))?;
-            Ok(Ro::success("查询成功".to_string()).extra(Some(one)))
+            let one = #dao_name::get_by_id::<_, #vo_name>(id, db).await?;
+            Ok(Ro::success("查询成功".to_string()).extra(one))
         }
     });
 
@@ -265,10 +263,8 @@ pub(crate) fn svc_macro(input: ItemStruct) -> TokenStream {
                 condition = condition.add(build_like_condition(keyword, #dao_name::LIKE_COLUMNS));
             }
 
-            let one = #dao_name::get_by_condition::<_, #vo_name>(condition, db)
-                .await?
-                .ok_or(SvcError::NotFound(format!("dto: {}", dto)))?;
-            Ok(Ro::success("查询成功".to_string()).extra(Some(one)))
+            let one = #dao_name::get_by_condition::<_, #vo_name>(condition, db).await?;
+            Ok(Ro::success("查询成功".to_string()).extra(one))
         }
     });
 
@@ -377,11 +373,10 @@ pub(crate) fn svc_macro(input: ItemStruct) -> TokenStream {
         where
             C: ConnectionTrait,
         {
-            let one: #ex_vo_name = #dao_name::get_ex_by_id(id, db)
+            let one: Option<#ex_vo_name> = #dao_name::get_ex_by_id(id, db)
                 .await?
-                .map(|m| m.into())
-                .ok_or(SvcError::NotFound(format!("id: {}", id)))?;
-            Ok(Ro::success("查询成功".to_string()).extra(Some(one)))
+                .map(|m| m.into());
+            Ok(Ro::success("查询成功".to_string()).extra(one))
         }
     });
 
@@ -412,11 +407,10 @@ pub(crate) fn svc_macro(input: ItemStruct) -> TokenStream {
                 condition = condition.add(build_like_condition(keyword, #dao_name::LIKE_COLUMNS));
             }
 
-            let one: #ex_vo_name = #dao_name::get_ex_by_condition(condition, db)
+            let one: Option<#ex_vo_name> = #dao_name::get_ex_by_condition(condition, db)
                 .await?
-                .map(|m| m.into())
-                .ok_or(SvcError::NotFound(format!("dto: {:?}", dto)))?;
-            Ok(Ro::success("查询成功".to_string()).extra(Some(one)))
+                .map(|m| m.into());
+            Ok(Ro::success("查询成功".to_string()).extra(one))
         }
     });
 
