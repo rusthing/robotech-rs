@@ -9,7 +9,6 @@ use config::{Config, ConfigBuilder};
 use std::path::{Path, PathBuf};
 #[cfg(feature = "config-center")]
 use tracing::error;
-#[cfg(feature = "config-center")]
 use tracing::warn;
 
 pub type Result<T> = core::result::Result<T, CfgError>;

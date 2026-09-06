@@ -1,7 +1,6 @@
 mod api_client_config;
 mod api_client_error;
 mod api_client_utils;
-mod api_client;
 mod simple_api_client;
 mod webhook_config;
 
@@ -9,6 +8,5 @@ mod webhook_config;
 pub use api_client_config::*;
 pub use api_client_error::*;
 pub use api_client_utils::*;
-pub use api_client::*;
 pub use simple_api_client::*;
 pub use webhook_config::*;

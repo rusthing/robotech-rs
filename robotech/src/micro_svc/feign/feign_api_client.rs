@@ -1,11 +1,9 @@
 use crate::api_client::ApiClientError;
 use crate::api_client::ApiClientUtils;
-use crate::api_client::ApiClient;
 use crate::micro_svc::feign::load_balancer::{LoadBalancer, RoundRobinBalancer};
 use crate::micro_svc::feign::service_discovery::ServiceDiscovery;
 use crate::micro_svc::ServiceInstance;
 use crate::ro::Ro;
-use async_trait::async_trait;
 use http::Method;
 use reqwest::header::HeaderMap;
 use serde::de::DeserializeOwned;
@@ -133,6 +131,19 @@ impl FeignApiClient {
             .collect()
     }
 
+    fn try_select_instance(&self, tried_ids: &mut Vec<String>) -> Option<(String, String)> {
+        let available = self.get_available_instances();
+        let candidates: Vec<ServiceInstance> = available
+            .into_iter()
+            .filter(|i| !tried_ids.contains(&i.instance_id))
+            .collect();
+        let instance = self.load_balancer.choose(&candidates)?;
+        let instance_id = instance.instance_id.clone();
+        let base_url = Self::get_base_url(&instance.ip, &instance.port);
+        tried_ids.push(instance_id.clone());
+        Some((base_url, instance_id))
+    }
+
     fn record_failure(&self, instance_id: &str) {
         let mut tracker = self.failure_tracker.lock().unwrap();
         tracker.record_failure(instance_id, self.max_failures, self.cooldown_duration);
@@ -145,7 +156,7 @@ impl FeignApiClient {
 
     async fn do_request<D, E>(
         &self,
-        method: &Method,
+        method: Method,
         uri: &str,
         params: Option<&D>,
         body: Option<&D>,
@@ -155,25 +166,15 @@ impl FeignApiClient {
         D: Serialize + ?Sized + Debug,
         E: DeserializeOwned + Debug,
     {
-        let all_instances = self.service_discovery.get_instances();
-        let max_retries = all_instances.len().max(1);
-
+        let max_retries = self.service_discovery.get_instances().len().max(1);
         let mut tried_ids = Vec::new();
 
         for _ in 0..max_retries {
-            let available = self.get_available_instances();
-            let candidates: Vec<ServiceInstance> = available
-                .into_iter()
-                .filter(|i| !tried_ids.contains(&i.instance_id))
-                .collect();
-
-            let instance = match self.load_balancer.choose(&candidates) {
-                Some(inst) => inst,
+            let (base_url, instance_id) = match self.try_select_instance(&mut tried_ids) {
+                Some(x) => x,
                 None => break,
             };
-            tried_ids.push(instance.instance_id.clone());
 
-            let base_url = Self::get_base_url(&instance.ip, &instance.port);
             let result = ApiClientUtils::request(
                 method.clone(),
                 &base_url,
@@ -187,15 +188,15 @@ impl FeignApiClient {
 
             match result {
                 Ok(resp) => {
-                    self.record_success(&instance.instance_id);
+                    self.record_success(&instance_id);
                     return Ok(resp);
                 }
                 Err(e) => {
                     warn!(
                         "feign call failed for instance {} ({}) on {}: {:?}",
-                        instance.instance_id, base_url, uri, e
+                        instance_id, base_url, uri, e
                     );
-                    self.record_failure(&instance.instance_id);
+                    self.record_failure(&instance_id);
                 }
             }
         }
@@ -217,8 +218,24 @@ impl FeignApiClient {
         D: Serialize + ?Sized + Debug,
         E: DeserializeOwned + Debug,
     {
-        self.do_request(&method, uri, params, body, headers)
-            .await
+        self.do_request(method, uri, params, body, headers).await
+    }
+
+    pub async fn webhook<D, E>(
+        &self,
+        method: Method,
+        uri: &str,
+        data: Option<&D>,
+        headers: Option<&HeaderMap>,
+    ) -> Result<Ro<E>, ApiClientError>
+    where
+        D: Serialize + ?Sized + Debug,
+        E: DeserializeOwned + Debug,
+    {
+        match method {
+            Method::GET => self.do_request(method, uri, data, None, headers).await,
+            _ => self.do_request(method, uri, None, data, headers).await,
+        }
     }
 
     pub async fn get<D: Serialize + ?Sized + Debug>(
@@ -227,7 +244,7 @@ impl FeignApiClient {
         params: Option<&D>,
         headers: Option<&HeaderMap>,
     ) -> Result<Ro<serde_json::Value>, ApiClientError> {
-        self.do_request(&Method::GET, uri, params, None::<&D>, headers)
+        self.do_request(Method::GET, uri, params, None::<&D>, headers)
             .await
     }
 
@@ -237,37 +254,28 @@ impl FeignApiClient {
         params: Option<&D>,
         headers: Option<&HeaderMap>,
     ) -> Result<Vec<u8>, ApiClientError> {
-        let all_instances = self.service_discovery.get_instances();
-        let max_retries = all_instances.len().max(1);
+        let max_retries = self.service_discovery.get_instances().len().max(1);
         let mut tried_ids = Vec::new();
 
         for _ in 0..max_retries {
-            let available = self.get_available_instances();
-            let candidates: Vec<ServiceInstance> = available
-                .into_iter()
-                .filter(|i| !tried_ids.contains(&i.instance_id))
-                .collect();
-
-            let instance = match self.load_balancer.choose(&candidates) {
-                Some(inst) => inst,
+            let (base_url, instance_id) = match self.try_select_instance(&mut tried_ids) {
+                Some(x) => x,
                 None => break,
             };
-            tried_ids.push(instance.instance_id.clone());
 
-            let base_url = Self::get_base_url(&instance.ip, &instance.port);
             let result = ApiClientUtils::get_bytes(&base_url, uri, params, headers, None).await;
 
             match result {
                 Ok(bytes) => {
-                    self.record_success(&instance.instance_id);
+                    self.record_success(&instance_id);
                     return Ok(bytes);
                 }
                 Err(e) => {
                     warn!(
                         "feign get_bytes failed for instance {} ({}): {:?}",
-                        instance.instance_id, base_url, e
+                        instance_id, base_url, e
                     );
-                    self.record_failure(&instance.instance_id);
+                    self.record_failure(&instance_id);
                 }
             }
         }
@@ -283,43 +291,8 @@ impl FeignApiClient {
         body: Option<&D>,
         headers: Option<&HeaderMap>,
     ) -> Result<Ro<serde_json::Value>, ApiClientError> {
-        self.do_request(&Method::POST, uri, None::<&D>, body, headers)
+        self.do_request(Method::POST, uri, None::<&D>, body, headers)
             .await
-    }
-
-    pub async fn multipart(
-        &self,
-        uri: &str,
-        form: reqwest::multipart::Form,
-        headers: Option<&HeaderMap>,
-    ) -> Result<Ro<serde_json::Value>, ApiClientError> {
-        let available = self.get_available_instances();
-        let instance = match self.load_balancer.choose(&available) {
-            Some(inst) => inst,
-            None => {
-                return Err(ApiClientError::NotInit(
-                    FeignError::NoAvailableInstance.to_string(),
-                ));
-            }
-        };
-
-        let base_url = Self::get_base_url(&instance.ip, &instance.port);
-        let result = ApiClientUtils::multipart(&base_url, uri, form, headers, None).await;
-
-        match result {
-            Ok(resp) => {
-                self.record_success(&instance.instance_id);
-                Ok(resp)
-            }
-            Err(e) => {
-                warn!(
-                    "feign multipart failed for instance {} ({}): {:?}",
-                    instance.instance_id, base_url, e
-                );
-                self.record_failure(&instance.instance_id);
-                Err(e)
-            }
-        }
     }
 
     pub async fn put<D: Serialize + ?Sized + Debug>(
@@ -328,7 +301,7 @@ impl FeignApiClient {
         headers: Option<&HeaderMap>,
         body: &D,
     ) -> Result<Ro<serde_json::Value>, ApiClientError> {
-        self.do_request(&Method::PUT, uri, None::<&D>, Some(body), headers)
+        self.do_request(Method::PUT, uri, None::<&D>, Some(body), headers)
             .await
     }
 
@@ -338,96 +311,41 @@ impl FeignApiClient {
         body: Option<&D>,
         headers: Option<&HeaderMap>,
     ) -> Result<Ro<serde_json::Value>, ApiClientError> {
-        self.do_request(&Method::DELETE, uri, None::<&D>, body, headers)
+        self.do_request(Method::DELETE, uri, None::<&D>, body, headers)
             .await
     }
 
-    pub async fn webhook<D, E>(
-        &self,
-        method: Method,
-        uri: &str,
-        data: Option<&D>,
-        headers: Option<&HeaderMap>,
-    ) -> Result<Ro<E>, ApiClientError>
-    where
-        D: Serialize + ?Sized + Debug,
-        E: DeserializeOwned + Debug,
-    {
-        match method {
-            Method::GET => self.do_request(&method, uri, data, None, headers).await,
-            _ => self.do_request(&method, uri, None, data, headers).await,
-        }
-    }
-}
-
-#[async_trait]
-impl ApiClient for FeignApiClient {
-    async fn request<D, E>(
-        &self,
-        method: Method,
-        uri: &str,
-        params: Option<&D>,
-        body: Option<&D>,
-        headers: Option<&HeaderMap>,
-    ) -> Result<Ro<E>, ApiClientError>
-    where
-        D: Serialize + ?Sized + Debug + Send + Sync,
-        E: DeserializeOwned + Debug + Send,
-    {
-        FeignApiClient::request(self, method, uri, params, body, headers).await
-    }
-
-    async fn get<D: Serialize + ?Sized + Debug + Send + Sync>(
-        &self,
-        uri: &str,
-        params: Option<&D>,
-        headers: Option<&HeaderMap>,
-    ) -> Result<Ro<serde_json::Value>, ApiClientError> {
-        FeignApiClient::get(self, uri, params, headers).await
-    }
-
-    async fn get_bytes<D: Serialize + ?Sized + Debug + Send + Sync>(
-        &self,
-        uri: &str,
-        params: Option<&D>,
-        headers: Option<&HeaderMap>,
-    ) -> Result<Vec<u8>, ApiClientError> {
-        FeignApiClient::get_bytes(self, uri, params, headers).await
-    }
-
-    async fn post<D: Serialize + ?Sized + Debug + Send + Sync>(
-        &self,
-        uri: &str,
-        body: Option<&D>,
-        headers: Option<&HeaderMap>,
-    ) -> Result<Ro<serde_json::Value>, ApiClientError> {
-        FeignApiClient::post(self, uri, body, headers).await
-    }
-
-    async fn put<D: Serialize + ?Sized + Debug + Send + Sync>(
-        &self,
-        uri: &str,
-        headers: Option<&HeaderMap>,
-        body: &D,
-    ) -> Result<Ro<serde_json::Value>, ApiClientError> {
-        FeignApiClient::put(self, uri, headers, body).await
-    }
-
-    async fn delete<D: Serialize + ?Sized + Debug + Send + Sync>(
-        &self,
-        uri: &str,
-        body: Option<&D>,
-        headers: Option<&HeaderMap>,
-    ) -> Result<Ro<serde_json::Value>, ApiClientError> {
-        FeignApiClient::delete(self, uri, body, headers).await
-    }
-
-    async fn multipart(
+    pub async fn multipart(
         &self,
         uri: &str,
         form: reqwest::multipart::Form,
         headers: Option<&HeaderMap>,
     ) -> Result<Ro<serde_json::Value>, ApiClientError> {
-        FeignApiClient::multipart(self, uri, form, headers).await
+        let mut tried_ids = Vec::new();
+        let (base_url, instance_id) = match self.try_select_instance(&mut tried_ids) {
+            Some(x) => x,
+            None => {
+                return Err(ApiClientError::NotInit(
+                    FeignError::NoAvailableInstance.to_string(),
+                ));
+            }
+        };
+
+        let result = ApiClientUtils::multipart(&base_url, uri, form, headers, None).await;
+
+        match result {
+            Ok(resp) => {
+                self.record_success(&instance_id);
+                Ok(resp)
+            }
+            Err(e) => {
+                warn!(
+                    "feign multipart failed for instance {} ({}): {:?}",
+                    instance_id, base_url, e
+                );
+                self.record_failure(&instance_id);
+                Err(e)
+            }
+        }
     }
 }
