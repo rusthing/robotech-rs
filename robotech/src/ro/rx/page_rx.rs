@@ -1,13 +1,17 @@
 use derive_setters::Setters;
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use serde_with::skip_serializing_none;
 use typed_builder::TypedBuilder;
 use utoipa::ToSchema;
 
 #[skip_serializing_none]
-#[derive(ToSchema, Debug, Serialize, Clone, Setters, TypedBuilder)]
+#[derive(ToSchema, Debug, Serialize, Deserialize, Clone, Setters, TypedBuilder)]
 #[builder]
 #[serde(rename_all = "camelCase")]
+#[serde(bound(
+    serialize = "T: utoipa::ToSchema + serde::Serialize",
+    deserialize = "T: serde::de::DeserializeOwned"
+))]
 pub struct PageRx<T>
 where
     T: utoipa::ToSchema + serde::Serialize,
