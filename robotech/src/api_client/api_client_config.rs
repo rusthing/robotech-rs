@@ -8,42 +8,41 @@ use wheel_rs::serde::duration_serde;
 
 pub const API_CLIENT_CONFIG_KEY: &str = "api";
 
-/// # API配置结构体
+/// # API配置枚举
 ///
-/// 用于存储API所需的各种配置参数
-#[derive(Debug, Default, Serialize, Deserialize, Clone)]
-#[serde(rename_all = "kebab-case")]
-pub struct ApiClientConfig {
-    /// API请求的基础URL
-    ///
-    /// 例如: http://127.0.0.1:8080
-    #[serde(default)]
-    pub base_url: Option<String>,
-    /// 服务名，用于 feign 模式（服务发现）
-    ///
-    /// 设置后优先使用服务发现模式，base_url 作为 fallback
-    #[serde(default)]
-    pub svc_name: Option<String>,
-    /// 认证策略
-    ///
-    /// 用于定义API请求的认证策略，包括 Token、Basic、Bearer 等
-    #[serde(default)]
-    pub auth: Option<ApiAuthStrategy>,
-    /// 最大失败次数，超过后进入冷却期
-    ///
-    /// 仅 feign 模式有效，默认 3
-    #[serde(default = "default_max_failures")]
-    pub max_failures: usize,
-    /// 失败冷却时间
-    ///
-    /// 仅 feign 模式有效，默认 30s
-    #[serde(default = "default_cooldown_duration", with = "duration_serde")]
-    pub cooldown_duration: Duration,
-    /// 服务发现刷新间隔
-    ///
-    /// 仅 feign 模式有效，默认 30s
-    #[serde(default = "default_refresh_interval", with = "duration_serde")]
-    pub refresh_interval: Duration,
+/// 通过 `type` 字段区分两种模式：
+/// - `feign`: 服务发现模式，通过 svc_name 动态发现服务实例
+/// - `static`: 静态模式，直接使用 base_url 连接
+#[derive(Debug, Serialize, Deserialize, Clone)]
+#[serde(tag = "type")]
+pub enum ApiClientConfig {
+    /// 微服务模式
+    #[serde(rename_all = "kebab-case")]
+    MicroSvc {
+        /// 服务名，用于服务发现
+        svc_name: String,
+        /// 认证策略
+        #[serde(default)]
+        auth: Option<ApiAuthStrategy>,
+        /// 最大失败次数，超过后进入冷却期，默认 3
+        #[serde(default = "default_max_failures")]
+        max_failures: usize,
+        /// 失败冷却时间，默认 30s
+        #[serde(default = "default_cooldown_duration", with = "duration_serde")]
+        cooldown_duration: Duration,
+        /// 服务发现刷新间隔，默认 30s
+        #[serde(default = "default_refresh_interval", with = "duration_serde")]
+        refresh_interval: Duration,
+    },
+    /// 简单直连模式
+    #[serde(rename_all = "kebab-case")]
+    Simple {
+        /// API请求的基础URL，例如: http://127.0.0.1:8080
+        base_url: String,
+        /// 认证策略
+        #[serde(default)]
+        auth: Option<ApiAuthStrategy>,
+    },
 }
 
 fn default_max_failures() -> usize {

@@ -7,8 +7,6 @@ use crate::micro_svc::{setup_hub_client, MicroSvcConfig, MICRO_SVC_CONFIG_KEY};
 use config::builder::DefaultState;
 use config::{Config, ConfigBuilder};
 use std::path::{Path, PathBuf};
-#[cfg(feature = "config-center")]
-use tracing::error;
 use tracing::warn;
 
 pub type Result<T> = core::result::Result<T, CfgError>;
@@ -75,7 +73,7 @@ pub async fn build_cfg(
                 }
             }
             Err(e) => {
-                error!("Failed to get configs from config center: {:?}", e);
+                warn!("Failed to get configs from config center: {:?}", e);
             }
         }
     }

@@ -71,14 +71,14 @@ impl FailureTracker {
 }
 
 enum FeignMode {
-    Feign {
+    MicroSvc {
         service_discovery: Arc<ServiceDiscovery>,
         load_balancer: Box<dyn LoadBalancer>,
         failure_tracker: Arc<Mutex<FailureTracker>>,
         max_failures: usize,
         cooldown_duration: Duration,
     },
-    Static {
+    Simple {
         base_url: String,
         auth: Option<ApiAuthStrategy>,
     },
@@ -90,40 +90,42 @@ pub struct FeignApiClient {
 
 impl FeignApiClient {
     pub async fn new(config: ApiClientConfig) -> Self {
-        if let Some(svc_name) = &config.svc_name {
-            let service_discovery = Arc::new(ServiceDiscovery::new(
+        match config {
+            ApiClientConfig::MicroSvc {
                 svc_name,
-                config.refresh_interval,
-            ));
-            if let Err(e) = service_discovery.init().await {
-                warn!(
-                    "service discovery init failed for '{}': {:?}, will retry on first request",
-                    svc_name, e
-                );
+                auth: _,
+                max_failures,
+                cooldown_duration,
+                refresh_interval,
+            } => {
+                let service_discovery =
+                    Arc::new(ServiceDiscovery::new(&svc_name, refresh_interval));
+                if let Err(e) = service_discovery.init().await {
+                    warn!(
+                        "service discovery init failed for '{}': {:?}, will retry on first request",
+                        svc_name, e
+                    );
+                }
+                let sd_clone = Arc::clone(&service_discovery);
+                sd_clone.start_refresh_loop();
+                Self {
+                    mode: FeignMode::MicroSvc {
+                        service_discovery,
+                        load_balancer: Box::new(RoundRobinBalancer::new()),
+                        failure_tracker: Arc::new(Mutex::new(FailureTracker::new())),
+                        max_failures,
+                        cooldown_duration,
+                    },
+                }
             }
-            let sd_clone = Arc::clone(&service_discovery);
-            sd_clone.start_refresh_loop();
-            Self {
-                mode: FeignMode::Feign {
-                    service_discovery,
-                    load_balancer: Box::new(RoundRobinBalancer::new()),
-                    failure_tracker: Arc::new(Mutex::new(FailureTracker::new())),
-                    max_failures: config.max_failures,
-                    cooldown_duration: config.cooldown_duration,
-                },
-            }
-        } else {
-            Self {
-                mode: FeignMode::Static {
-                    base_url: config.base_url.unwrap_or_default(),
-                    auth: config.auth,
-                },
-            }
+            ApiClientConfig::Simple { base_url, auth } => Self {
+                mode: FeignMode::Simple { base_url, auth },
+            },
         }
     }
 
     pub fn with_load_balancer(mut self, load_balancer: impl LoadBalancer + 'static) -> Self {
-        if let FeignMode::Feign {
+        if let FeignMode::MicroSvc {
             load_balancer: ref mut lb,
             ..
         } = self.mode
@@ -134,7 +136,7 @@ impl FeignApiClient {
     }
 
     pub fn with_max_failures(mut self, max_failures: usize) -> Self {
-        if let FeignMode::Feign {
+        if let FeignMode::MicroSvc {
             max_failures: ref mut mf,
             ..
         } = self.mode
@@ -145,7 +147,7 @@ impl FeignApiClient {
     }
 
     pub fn with_cooldown_duration(mut self, cooldown_duration: Duration) -> Self {
-        if let FeignMode::Feign {
+        if let FeignMode::MicroSvc {
             cooldown_duration: ref mut cd,
             ..
         } = self.mode
@@ -162,10 +164,10 @@ impl FeignApiClient {
 
     pub fn service_discovery(&self) -> Option<&Arc<ServiceDiscovery>> {
         match &self.mode {
-            FeignMode::Feign {
+            FeignMode::MicroSvc {
                 service_discovery, ..
             } => Some(service_discovery),
-            FeignMode::Static { .. } => None,
+            FeignMode::Simple { .. } => None,
         }
     }
 
@@ -228,11 +230,11 @@ impl FeignApiClient {
         E: DeserializeOwned + Debug,
     {
         match &self.mode {
-            FeignMode::Static { base_url, auth } => {
+            FeignMode::Simple { base_url, auth } => {
                 ApiClientUtils::request(method, base_url, uri, params, body, headers, auth.as_ref())
                     .await
             }
-            FeignMode::Feign {
+            FeignMode::MicroSvc {
                 service_discovery,
                 load_balancer,
                 failure_tracker,
@@ -341,10 +343,10 @@ impl FeignApiClient {
         headers: Option<&HeaderMap>,
     ) -> Result<Vec<u8>, ApiClientError> {
         match &self.mode {
-            FeignMode::Static { base_url, auth } => {
+            FeignMode::Simple { base_url, auth } => {
                 ApiClientUtils::get_bytes(base_url, uri, params, headers, auth.as_ref()).await
             }
-            FeignMode::Feign {
+            FeignMode::MicroSvc {
                 service_discovery,
                 load_balancer,
                 failure_tracker,
@@ -433,10 +435,10 @@ impl FeignApiClient {
         headers: Option<&HeaderMap>,
     ) -> Result<Ro<serde_json::Value>, ApiClientError> {
         match &self.mode {
-            FeignMode::Static { base_url, auth } => {
+            FeignMode::Simple { base_url, auth } => {
                 ApiClientUtils::multipart(base_url, uri, form, headers, auth.as_ref()).await
             }
-            FeignMode::Feign {
+            FeignMode::MicroSvc {
                 service_discovery,
                 load_balancer,
                 failure_tracker,
