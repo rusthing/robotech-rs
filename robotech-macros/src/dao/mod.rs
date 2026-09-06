@@ -72,6 +72,8 @@ pub(super) struct DaoArgs {
     like_columns: Vec<Expr>,
     /// 关联表
     related_tables: Vec<Expr>,
+    /// mo模块所在的crate路径
+    mo_crate: Option<String>,
 }
 
 impl Parse for DaoArgs {
@@ -80,13 +82,19 @@ impl Parse for DaoArgs {
         let mut foreign_keys = vec![];
         let mut like_columns = vec![];
         let mut related_tables = vec![];
+        let mut mo_crate = None;
 
         // 解析可选的参数列表
         while !input.is_empty() {
             // 解析标识符（参数名）
             let ident: Ident = input.parse()?;
-            // 解析冒号
-            let _colon: Token![:] = input.parse()?;
+            // 解析冒号或等号
+            let lookahead = input.lookahead1();
+            if lookahead.peek(Token![:]) {
+                let _colon: Token![:] = input.parse()?;
+            } else if lookahead.peek(Token![=]) {
+                let _eq: Token![=] = input.parse()?;
+            }
 
             if ident == "unique_keys" {
                 let content;
@@ -115,6 +123,9 @@ impl Parse for DaoArgs {
                 // 解析逗号分隔的列表
                 let parsed_args = content.parse_terminated(Expr::parse, Token![,])?;
                 related_tables = parsed_args.into_iter().collect();
+            } else if ident == "mo_crate" {
+                let value: LitStr = input.parse()?;
+                mo_crate = Some(value.value());
             } else {
                 let error_msg = format!("未知的参数：{}", ident);
                 return Err(syn::Error::new_spanned(&ident, error_msg));
@@ -131,6 +142,7 @@ impl Parse for DaoArgs {
             foreign_keys,
             like_columns,
             related_tables,
+            mo_crate,
         })
     }
 }
@@ -141,6 +153,7 @@ pub(super) fn dao_macro(args: DaoArgs, input: ItemStruct) -> TokenStream {
         foreign_keys,
         like_columns,
         related_tables,
+        mo_crate,
     } = args;
 
     let struct_name = &input.ident;
@@ -677,6 +690,9 @@ pub(super) fn dao_macro(args: DaoArgs, input: ItemStruct) -> TokenStream {
         }
     });
 
+    let mo_crate_path = mo_crate.as_deref().unwrap_or("crate");
+    let mo_crate_token: TokenStream = syn::parse_str(mo_crate_path).unwrap_or_else(|_| quote! { crate });
+
     let expanded = quote! {
         use robotech::dao::{add_order_by, DaoError};
         use sea_orm::{
@@ -684,7 +700,7 @@ pub(super) fn dao_macro(args: DaoArgs, input: ItemStruct) -> TokenStream {
         };
         use sea_orm::entity::EntityLoaderTrait;
 
-        use crate::mo::#module::{ActiveModel, Column, Entity, Model, ModelEx};
+        use #mo_crate_token::mo::#module::{ActiveModel, Column, Entity, Model, ModelEx};
 
         #generated_use_linkme
 

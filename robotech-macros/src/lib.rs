@@ -1,6 +1,7 @@
 mod dao;
 mod db;
 mod dto;
+mod feign;
 mod log;
 mod svc;
 mod vo;
@@ -8,10 +9,11 @@ mod web;
 
 use crate::dao::{dao_macro, DaoArgs};
 use crate::db::MigrateArgs;
-use crate::dto::crud_dto_macro;
+use crate::dto::{crud_dto_macro, CrudDtoArgs};
+use crate::feign::feign_macro;
 use crate::log::{log_call_macro, LogCallArgs};
 use crate::svc::{db_unwrap_macro, svc_macro, DbUnwrapArgs};
-use crate::vo::vo_macro;
+use crate::vo::{vo_macro, VoArgs};
 use crate::web::{api_doc_macro, ctrl_macro, router_macro, ApiDocArgs, RouterArgs};
 use proc_macro::TokenStream;
 use syn::{parse_macro_input, DeriveInput, ItemFn, ItemStruct};
@@ -71,9 +73,10 @@ pub fn db_migrate(args: TokenStream) -> TokenStream {
 /// - OssBucketModifyDto（不带验证）
 /// - OssBucketSaveDto（不带验证）
 #[proc_macro_attribute]
-pub fn crud_dto(_args: TokenStream, input: TokenStream) -> TokenStream {
+pub fn crud_dto(args: TokenStream, input: TokenStream) -> TokenStream {
+    let args = parse_macro_input!(args as CrudDtoArgs);
     let input = parse_macro_input!(input as ItemStruct);
-    crud_dto_macro(input).into()
+    crud_dto_macro(args, input).into()
 }
 
 /// 属性宏：为 VO 结构体自动生成标准属性
@@ -121,9 +124,10 @@ pub fn crud_dto(_args: TokenStream, input: TokenStream) -> TokenStream {
 /// }
 /// ```
 #[proc_macro_attribute]
-pub fn vo(_args: TokenStream, input: TokenStream) -> TokenStream {
+pub fn vo(args: TokenStream, input: TokenStream) -> TokenStream {
+    let args = parse_macro_input!(args as VoArgs);
     let input = parse_macro_input!(input as DeriveInput);
-    vo_macro(input).into()
+    vo_macro(args, input).into()
 }
 
 /// 属性宏：为DAO结构体生成标准的CRUD方法
@@ -206,4 +210,35 @@ pub fn api_doc(args: TokenStream, input: TokenStream) -> TokenStream {
     let args = parse_macro_input!(args as ApiDocArgs);
     let input = parse_macro_input!(input as ItemStruct);
     api_doc_macro(args, input).into()
+}
+
+/// 属性宏：为 Feign API 客户端结构体自动生成 `build_headers` 辅助方法
+///
+/// 该宏会为包装了 `FeignApiClient` 的结构体生成一个 `build_headers` 方法，
+/// 用于构建包含当前用户 ID 的请求头，避免在每个方法中重复编写 header 构建逻辑。
+///
+/// # 使用示例
+/// ```
+/// use robotech::macros::feign_client;
+///
+/// #[feign_client]
+/// pub struct OssFileApiClient {
+///     client: FeignApiClient,
+/// }
+/// ```
+///
+/// 展开后会生成：
+/// ```
+/// impl OssFileApiClient {
+///     fn build_headers(
+///         current_user_id: u64,
+///     ) -> Result<HeaderMap, ApiClientError> {
+///         // ... 构建包含 USER_ID_HEADER_NAME 的 HeaderMap
+///     }
+/// }
+/// ```
+#[proc_macro_attribute]
+pub fn feign(_args: TokenStream, input: TokenStream) -> TokenStream {
+    let input = parse_macro_input!(input as ItemStruct);
+    feign_macro(input).into()
 }

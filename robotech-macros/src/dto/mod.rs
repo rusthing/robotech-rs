@@ -1,10 +1,33 @@
 use proc_macro2::TokenStream;
 use quote::{format_ident, quote};
-use syn::{Attribute, Field, Fields, ItemStruct};
+use syn::{Attribute, Field, Fields, ItemStruct, parse::{Parse, ParseStream}, Token, LitStr};
 use wheel_rs::str_utils::{CamelFormat, snake_to_pascal, split_camel_case};
 
-/// crud_dto宏：自动生成XxxAddDto、XxxModifyDto、XxxSaveDto
-pub fn crud_dto_macro(input: ItemStruct) -> TokenStream {
+/// crud_dto宏参数
+pub struct CrudDtoArgs {
+    pub mo_crate: Option<String>,
+}
+
+impl Parse for CrudDtoArgs {
+    fn parse(input: ParseStream) -> syn::Result<Self> {
+        let mut mo_crate = None;
+        while !input.is_empty() {
+            let key: syn::Ident = input.parse()?;
+            let _: Token![=] = input.parse()?;
+            if key == "mo_crate" {
+                let value: LitStr = input.parse()?;
+                mo_crate = Some(value.value());
+            }
+            if !input.is_empty() {
+                let _: Token![,] = input.parse()?;
+            }
+        }
+        Ok(CrudDtoArgs { mo_crate })
+    }
+}
+
+/// crud_dto宏：自动生成XxxAddDto、XxxModifyDto、XxxSaveDto、XxxQueryDto
+pub fn crud_dto_macro(args: CrudDtoArgs, input: ItemStruct) -> TokenStream {
     let struct_name = &input.ident;
     let struct_name_str = struct_name.to_string();
 
@@ -68,16 +91,53 @@ pub fn crud_dto_macro(input: ItemStruct) -> TokenStream {
             _ => (quote! {}, quote! {}, quote! {}, quote! {}, quote! {}),
         };
 
+    // 处理字段 - 客户端模式（不含o2o/validator相关属性）
+    let (client_add_fields, client_modify_fields, client_save_fields, client_query_fields) =
+        match &input.fields {
+            Fields::Named(named_fields) => {
+                let mut add_field_tokens = Vec::new();
+                let mut modify_field_tokens = Vec::new();
+                let mut save_field_tokens = Vec::new();
+                let mut query_field_tokens = Vec::new();
+
+                for field in &named_fields.named {
+                    if field.ident.as_ref().unwrap() == "id" {
+                        continue;
+                    }
+                    add_field_tokens.push(process_field_client(field, "add"));
+                    modify_field_tokens.push(process_field_client(field, "modify"));
+                    save_field_tokens.push(process_field_client(field, "save"));
+                    query_field_tokens.push(process_field_client(field, "query"));
+                }
+                (
+                    quote! { #(#add_field_tokens)* },
+                    quote! { #(#modify_field_tokens)* },
+                    quote! { #(#save_field_tokens)* },
+                    quote! { #(#query_field_tokens)* },
+                )
+            }
+            _ => (quote! {}, quote! {}, quote! {}, quote! {}),
+        };
+
+    let mo_crate_path = args.mo_crate.as_deref().unwrap_or("crate");
+    let mo_crate_token: TokenStream = syn::parse_str(mo_crate_path).unwrap_or_else(|_| quote! { crate });
+
     let expanded = quote! {
-        use std::fmt::{Display, Formatter};
         use derive_setters::Setters;
-        use sea_orm::{ActiveValue, ColumnTrait, Condition};
         use typed_builder::TypedBuilder;
         use wheel_rs::serde::{option_option_serde, u64_option_serde};
-        use crate::mo::#module_name::{ActiveModel, Column};
+
+        // ========== Server mode: full sea_orm/o2o code ==========
+        #[cfg(feature = "server")]
+        use std::fmt::{Display, Formatter};
+        #[cfg(feature = "server")]
+        use sea_orm::{ActiveValue, ColumnTrait, Condition};
+        #[cfg(feature = "server")]
+        use #mo_crate_token::mo::#module_name::{ActiveModel, Column};
 
         // AddDto
-        #[derive(o2o::o2o, utoipa::ToSchema, Debug, Default, serde::Deserialize, validator::Validate, Setters, TypedBuilder)]
+        #[cfg(feature = "server")]
+        #[derive(o2o::o2o, utoipa::ToSchema, Debug, Default, serde::Serialize, serde::Deserialize, validator::Validate, Setters, TypedBuilder)]
         #[serde(default, rename_all = "camelCase")]
         #[owned_into(ActiveModel)]
         #[ghosts(
@@ -98,7 +158,8 @@ pub fn crud_dto_macro(input: ItemStruct) -> TokenStream {
         }
 
         // ModifyDto
-        #[derive(o2o::o2o, utoipa::ToSchema, Debug, Default, serde::Deserialize, validator::Validate, Setters, TypedBuilder)]
+        #[cfg(feature = "server")]
+        #[derive(o2o::o2o, utoipa::ToSchema, Debug, Default, serde::Serialize, serde::Deserialize, validator::Validate, Setters, TypedBuilder)]
         #[serde(default, rename_all = "camelCase")]
         #[owned_into(ActiveModel)]
         #[ghosts(
@@ -120,7 +181,8 @@ pub fn crud_dto_macro(input: ItemStruct) -> TokenStream {
         }
 
         // SaveDto
-        #[derive(o2o::o2o, utoipa::ToSchema, Debug, Default, serde::Deserialize, Setters, TypedBuilder)]
+        #[cfg(feature = "server")]
+        #[derive(o2o::o2o, utoipa::ToSchema, Debug, Default, serde::Serialize, serde::Deserialize, Setters, TypedBuilder)]
         #[serde(default, rename_all = "camelCase")]
         #[owned_into(#add_dto_name)]
         #[owned_into(#modify_dto_name)]
@@ -135,7 +197,8 @@ pub fn crud_dto_macro(input: ItemStruct) -> TokenStream {
         }
 
         // QueryDto
-        #[derive(utoipa::ToSchema, utoipa::IntoParams, Debug, Default, serde::Deserialize, Setters, TypedBuilder)]
+        #[cfg(feature = "server")]
+        #[derive(utoipa::ToSchema, utoipa::IntoParams, Debug, Default, serde::Serialize, serde::Deserialize, Setters, TypedBuilder)]
         #[serde(default, rename_all = "camelCase")]
         #[builder]
         #vis struct #query_dto_name {
@@ -160,17 +223,18 @@ pub fn crud_dto_macro(input: ItemStruct) -> TokenStream {
             pub _size: Option<u64>,
         }
 
+        #[cfg(feature = "server")]
         impl Display for #query_dto_name {
             fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
                 write!(f, "{:?}", self)
             }
         }
 
+        #[cfg(feature = "server")]
         impl #query_dto_name {
             pub fn to_condition(&self) -> Condition {
                 let mut condition = Condition::all();
 
-                // 处理 id 字段
                 if let Some(id) = self.id {
                     condition = condition.add(Column::Id.eq(id as i64));
                 }
@@ -180,12 +244,113 @@ pub fn crud_dto_macro(input: ItemStruct) -> TokenStream {
                 condition
             }
         }
+
+        // ========== Client mode: pure data structures ==========
+        #[cfg(not(feature = "server"))]
+        #[derive(utoipa::ToSchema, Debug, Default, serde::Serialize, serde::Deserialize, Setters, TypedBuilder)]
+        #[serde(default, rename_all = "camelCase")]
+        #[builder]
+        #vis struct #add_dto_name {
+            #[serde(with = "u64_option_serde")]
+            #[builder(default, setter(strip_option))]
+            pub id: Option<u64>,
+            #client_add_fields
+        }
+
+        #[cfg(not(feature = "server"))]
+        #[derive(utoipa::ToSchema, Debug, Default, serde::Serialize, serde::Deserialize, Setters, TypedBuilder)]
+        #[serde(default, rename_all = "camelCase")]
+        #[builder]
+        #vis struct #modify_dto_name {
+            #[serde(with = "u64_option_serde")]
+            #[builder(default, setter(strip_option))]
+            pub id: Option<u64>,
+            #client_modify_fields
+        }
+
+        #[cfg(not(feature = "server"))]
+        #[derive(utoipa::ToSchema, Debug, Default, serde::Serialize, serde::Deserialize, Setters, TypedBuilder)]
+        #[serde(default, rename_all = "camelCase")]
+        #[builder]
+        #vis struct #save_dto_name {
+            #[serde(with = "u64_option_serde")]
+            #[builder(default, setter(strip_option))]
+            pub id: Option<u64>,
+            #client_save_fields
+        }
+
+        #[cfg(not(feature = "server"))]
+        #[derive(utoipa::ToSchema, Debug, Default, serde::Serialize, serde::Deserialize, Setters, TypedBuilder)]
+        #[serde(default, rename_all = "camelCase")]
+        #[builder]
+        #vis struct #query_dto_name {
+            #[serde(with = "u64_option_serde")]
+            #[builder(default, setter(strip_option))]
+            pub id: Option<u64>,
+            #client_query_fields
+            #[serde(rename = "_keyword")]
+            #[builder(default, setter(strip_option))]
+            pub _keyword: Option<String>,
+            #[serde(rename = "_orderBy")]
+            #[builder(default, setter(strip_option))]
+            pub _order_by: Option<String>,
+            #[serde(rename = "_page")]
+            #[builder(default, setter(strip_option))]
+            pub _page: Option<u64>,
+            #[serde(rename = "_size")]
+            #[builder(default, setter(strip_option))]
+            pub _size: Option<u64>,
+        }
     };
 
     // 调试：打印完整展开的代码
     // println!("Full expanded code:\n{expanded}");
 
     TokenStream::from(expanded)
+}
+
+/// 处理单个字段，生成对应DTO的字段定义（客户端模式，不含o2o/validator相关属性）
+fn process_field_client(field: &Field, _target: &str) -> TokenStream {
+    let field_name = &field.ident;
+    let field_ty = &field.ty;
+    let original_attrs = &field.attrs;
+
+    let has_builder = has_attr(original_attrs, "builder");
+    let has_serde = has_attr(original_attrs, "serde");
+
+    let mut new_attrs: Vec<Attribute> = Vec::new();
+
+    // 保留原有属性（除了validate/into/owned_into/ghosts）
+    for attr in original_attrs {
+        let path = attr.path();
+        if !path.is_ident("validate")
+            && !path.is_ident("into")
+            && !path.is_ident("owned_into")
+            && !path.is_ident("ghosts")
+        {
+            new_attrs.push(attr.clone());
+        }
+    }
+
+    // 如果没有builder，自动生成builder属性
+    if !has_builder {
+        new_attrs.push(generate_builder_attr());
+    }
+
+    // 如果没有serde，自动生成serde属性
+    if !has_serde {
+        if let Some(attr) = generate_serde_attr(field) {
+            new_attrs.push(attr);
+        }
+    }
+
+    // 包装类型（添加Option）
+    let wrapped_ty = wrap_type(field_ty);
+
+    quote! {
+        #(#new_attrs)*
+        pub #field_name: #wrapped_ty,
+    }
 }
 
 /// 处理单个字段，生成对应DTO的字段定义

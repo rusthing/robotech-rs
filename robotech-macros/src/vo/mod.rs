@@ -1,7 +1,30 @@
 use proc_macro2::TokenStream;
 use quote::{format_ident, quote};
-use syn::{Attribute, Data, DeriveInput, Field, Fields};
+use syn::{Attribute, Data, DeriveInput, Field, Fields, parse::{Parse, ParseStream}, Token, LitStr};
 use wheel_rs::str_utils::{split_camel_case, CamelFormat};
+
+/// vo宏参数
+pub struct VoArgs {
+    pub mo_crate: Option<String>,
+}
+
+impl Parse for VoArgs {
+    fn parse(input: ParseStream) -> syn::Result<Self> {
+        let mut mo_crate = None;
+        while !input.is_empty() {
+            let key: syn::Ident = input.parse()?;
+            let _: Token![=] = input.parse()?;
+            if key == "mo_crate" {
+                let value: LitStr = input.parse()?;
+                mo_crate = Some(value.value());
+            }
+            if !input.is_empty() {
+                let _: Token![,] = input.parse()?;
+            }
+        }
+        Ok(VoArgs { mo_crate })
+    }
+}
 
 /// 检查字段是否已经有某个属性
 fn has_attribute(attrs: &[Attribute], name: &str) -> bool {
@@ -223,7 +246,82 @@ fn handle_fields(input: &DeriveInput, is_ex: bool) -> Result<TokenStream, TokenS
     })
 }
 
-pub fn vo_macro(input: DeriveInput) -> TokenStream {
+/// 为客户端模式处理字段（不包含 o2o/sea_orm 相关属性）
+fn handle_fields_client(input: &DeriveInput, is_ex: bool) -> Result<TokenStream, TokenStream> {
+    Ok(match &input.data {
+        Data::Struct(data_struct) => match &data_struct.fields {
+            Fields::Named(fields_named) => {
+                let processed_fields: Vec<_> = fields_named
+                    .named
+                    .iter()
+                    .filter_map(|field| {
+                        let field_name = &field.ident;
+                        let field_ty = &field.ty;
+
+                        // 获取类型名称，判断后缀是不是Vo
+                        let is_vo_field =
+                            get_type_name(field_ty).map_or(false, |name| name.ends_with("Vo"));
+
+                        // 如果是Vo类型字段且不是ExVo，则跳过
+                        if is_vo_field && !is_ex {
+                            return None;
+                        }
+
+                        // Vo 类型字段自动转为 ExVo
+                        let field_ty = if is_vo_field {
+                            if let syn::Type::Path(type_path) = field_ty {
+                                if let Some(segment) = type_path.path.segments.last() {
+                                    let ident_str = segment.ident.to_string();
+                                    if ident_str.ends_with("Vo") {
+                                        let ex_vo_type = format_ident!("{}", &ident_str.replace("Vo", "ExVo"));
+                                        return Some(quote! {
+                                            #field_name: #ex_vo_type,
+                                        });
+                                    }
+                                }
+                            }
+                            quote! { #field_ty }
+                        } else {
+                            quote! { #field_ty }
+                        };
+
+                        let original_attrs: Vec<_> = field
+                            .attrs
+                            .iter()
+                            .filter(|attr| {
+                                !attr.path().is_ident("from")
+                                    && !attr.path().is_ident("builder")
+                                    && !attr.path().is_ident("serde")
+                            })
+                            .collect();
+
+                        Some(quote! {
+                            #(#original_attrs)*
+                            #[builder(default, setter(into))]
+                            pub #field_name: #field_ty,
+                        })
+                    })
+                    .collect();
+
+                quote! {
+                    { #(#processed_fields)* }
+                }
+            }
+            Fields::Unnamed(_) | Fields::Unit => {
+                return Err(quote! {
+                    compile_error!("VO macro only supports named fields");
+                });
+            }
+        },
+        _ => {
+            return Err(quote! {
+                compile_error!("VO macro can only be used on structs");
+            });
+        }
+    })
+}
+
+pub fn vo_macro(args: VoArgs, input: DeriveInput) -> TokenStream {
     let struct_name = &input.ident;
     let vis = &input.vis;
     let struct_name_str = struct_name.to_string();
@@ -248,7 +346,7 @@ pub fn vo_macro(input: DeriveInput) -> TokenStream {
     let module_name = format_ident!("{}", struct_name_split.join("_").to_lowercase());
     let ex_struct_name = format_ident!("{}ExVo", struct_name_split.join(""));
 
-    // 处理字段
+    // 处理字段 - server mode
     let fields = match handle_fields(&input, false) {
         Ok(value) => value,
         Err(value) => return value,
@@ -258,22 +356,44 @@ pub fn vo_macro(input: DeriveInput) -> TokenStream {
         Err(value) => return value,
     };
 
+    // 处理字段 - client mode (不包含 o2o/sea_orm 相关属性)
+    let client_fields = match handle_fields_client(&input, false) {
+        Ok(value) => value,
+        Err(value) => return value,
+    };
+    let client_ex_fields = match handle_fields_client(&input, true) {
+        Ok(value) => value,
+        Err(value) => return value,
+    };
+
+    let mo_crate_path = args.mo_crate.as_deref().unwrap_or("crate");
+    let mo_crate_token: TokenStream = syn::parse_str(mo_crate_path).unwrap_or_else(|_| quote! { crate });
+
     // 生成完整的结构体定义，包含所有必要的属性和派生宏
     let expanded = quote! {
-        use o2o::o2o;
-        use serde::Serialize;
+        use serde::{Serialize, Deserialize};
         use serde_with::{serde_as, skip_serializing_none};
         use utoipa::ToSchema;
         use derive_setters::Setters;
         use typed_builder::TypedBuilder;
-        use sea_orm::DerivePartialModel;
         use wheel_rs::serde::{u64_serde, u64_option_serde};
-        use robotech::dao::{belongs_to_owned, U8, U16, U32, U64, U128};
-        use crate::mo::#module_name::{Entity, Model, ModelEx};
-        use crate::vo::*;
 
-        #[skip_serializing_none]            // 忽略空字段(好像必须放在#[derive(o2o, Serialize)]的上方才能起效)
-        #[derive(o2o, ToSchema, DerivePartialModel, Debug, Serialize, Clone, Setters, TypedBuilder)]
+        // ========== Server mode: full o2o/sea_orm code ==========
+        #[cfg(feature = "server")]
+        use o2o::o2o;
+        #[cfg(feature = "server")]
+        use sea_orm::DerivePartialModel;
+        #[cfg(feature = "server")]
+        use robotech::dao::{belongs_to_owned, U8, U16, U32, U64, U128};
+        #[cfg(feature = "server")]
+        use #mo_crate_token::mo::#module_name::{Entity, Model, ModelEx};
+
+        // Import other VO types (needed by both server and client for ExVo references)
+        use #mo_crate_token::vo::*;
+
+        #[cfg(feature = "server")]
+        #[skip_serializing_none]
+        #[derive(o2o, ToSchema, DerivePartialModel, Debug, Serialize, Deserialize, Clone, Setters, TypedBuilder)]
         #[from_owned(Model)]
         #[serde(rename_all = "camelCase")]
         #[serde_as]
@@ -281,13 +401,31 @@ pub fn vo_macro(input: DeriveInput) -> TokenStream {
         #[sea_orm(entity = "Entity")]
         #vis struct #struct_name #fields
 
-        #[skip_serializing_none]            // 忽略空字段(好像必须放在#[derive(o2o, Serialize)]的上方才能起效)
-        #[derive(o2o, ToSchema, Debug, Serialize, Clone, Setters, TypedBuilder)]
+        #[cfg(feature = "server")]
+        #[skip_serializing_none]
+        #[derive(o2o, ToSchema, Debug, Serialize, Deserialize, Clone, Setters, TypedBuilder)]
         #[from_owned(ModelEx)]
         #[serde(rename_all = "camelCase")]
         #[serde_as]
         #[builder]
         #vis struct #ex_struct_name #ex_fields
+
+        // ========== Client mode: pure data structures ==========
+        #[cfg(not(feature = "server"))]
+        #[skip_serializing_none]
+        #[derive(ToSchema, Debug, Serialize, Deserialize, Clone, Setters, TypedBuilder)]
+        #[serde(rename_all = "camelCase")]
+        #[serde_as]
+        #[builder]
+        #vis struct #struct_name #client_fields
+
+        #[cfg(not(feature = "server"))]
+        #[skip_serializing_none]
+        #[derive(ToSchema, Debug, Serialize, Deserialize, Clone, Setters, TypedBuilder)]
+        #[serde(rename_all = "camelCase")]
+        #[serde_as]
+        #[builder]
+        #vis struct #ex_struct_name #client_ex_fields
     };
 
     // 调试：打印完整展开的代码
