@@ -1,3 +1,4 @@
+use crate::api_client::ApiAuthStrategy;
 use crate::api_client::ApiClientError;
 use crate::api_client::ApiClientUtils;
 use crate::micro_svc::feign::load_balancer::{LoadBalancer, RoundRobinBalancer};
@@ -68,16 +69,26 @@ impl FailureTracker {
     }
 }
 
+enum FeignMode {
+    Feign {
+        service_discovery: Arc<ServiceDiscovery>,
+        load_balancer: Box<dyn LoadBalancer>,
+        failure_tracker: Arc<Mutex<FailureTracker>>,
+        max_failures: usize,
+        cooldown_duration: Duration,
+    },
+    Static {
+        base_url: String,
+        auth: Option<ApiAuthStrategy>,
+    },
+}
+
 pub struct FeignApiClient {
-    service_discovery: Arc<ServiceDiscovery>,
-    load_balancer: Box<dyn LoadBalancer>,
-    failure_tracker: Arc<Mutex<FailureTracker>>,
-    max_failures: usize,
-    cooldown_duration: Duration,
+    mode: FeignMode,
 }
 
 impl FeignApiClient {
-    pub async fn new(svc_name: &str) -> Self {
+    pub async fn new_feign(svc_name: &str) -> Self {
         let service_discovery = Arc::new(ServiceDiscovery::new(svc_name, Duration::from_secs(30)));
         if let Err(e) = service_discovery.init().await {
             warn!(
@@ -88,26 +99,52 @@ impl FeignApiClient {
         let sd_clone = Arc::clone(&service_discovery);
         sd_clone.start_refresh_loop();
         Self {
-            service_discovery,
-            load_balancer: Box::new(RoundRobinBalancer::new()),
-            failure_tracker: Arc::new(Mutex::new(FailureTracker::new())),
-            max_failures: 3,
-            cooldown_duration: Duration::from_secs(30),
+            mode: FeignMode::Feign {
+                service_discovery,
+                load_balancer: Box::new(RoundRobinBalancer::new()),
+                failure_tracker: Arc::new(Mutex::new(FailureTracker::new())),
+                max_failures: 3,
+                cooldown_duration: Duration::from_secs(30),
+            },
+        }
+    }
+
+    pub fn new_static(base_url: String, auth: Option<ApiAuthStrategy>) -> Self {
+        Self {
+            mode: FeignMode::Static { base_url, auth },
         }
     }
 
     pub fn with_load_balancer(mut self, load_balancer: impl LoadBalancer + 'static) -> Self {
-        self.load_balancer = Box::new(load_balancer);
+        if let FeignMode::Feign {
+            load_balancer: ref mut lb,
+            ..
+        } = self.mode
+        {
+            *lb = Box::new(load_balancer);
+        }
         self
     }
 
     pub fn with_max_failures(mut self, max_failures: usize) -> Self {
-        self.max_failures = max_failures;
+        if let FeignMode::Feign {
+            max_failures: ref mut mf,
+            ..
+        } = self.mode
+        {
+            *mf = max_failures;
+        }
         self
     }
 
     pub fn with_cooldown_duration(mut self, cooldown_duration: Duration) -> Self {
-        self.cooldown_duration = cooldown_duration;
+        if let FeignMode::Feign {
+            cooldown_duration: ref mut cd,
+            ..
+        } = self.mode
+        {
+            *cd = cooldown_duration;
+        }
         self
     }
 
@@ -116,13 +153,20 @@ impl FeignApiClient {
         format!("{}://{}:{}", protocol, host, port)
     }
 
-    pub fn service_discovery(&self) -> &Arc<ServiceDiscovery> {
-        &self.service_discovery
+    pub fn service_discovery(&self) -> Option<&Arc<ServiceDiscovery>> {
+        match &self.mode {
+            FeignMode::Feign {
+                service_discovery, ..
+            } => Some(service_discovery),
+            FeignMode::Static { .. } => None,
+        }
     }
 
-    fn get_available_instances(&self) -> Vec<ServiceInstance> {
-        let instances = self.service_discovery.get_instances();
-        let tracker = self.failure_tracker.lock().unwrap();
+    fn get_available_instances(
+        instances: &[ServiceInstance],
+        failure_tracker: &Mutex<FailureTracker>,
+    ) -> Vec<ServiceInstance> {
+        let tracker = failure_tracker.lock().unwrap();
         let now = Instant::now();
         instances
             .iter()
@@ -131,26 +175,36 @@ impl FeignApiClient {
             .collect()
     }
 
-    fn try_select_instance(&self, tried_ids: &mut Vec<String>) -> Option<(String, String)> {
-        let available = self.get_available_instances();
+    fn try_select_instance(
+        instances: &[ServiceInstance],
+        failure_tracker: &Mutex<FailureTracker>,
+        load_balancer: &Box<dyn LoadBalancer>,
+        tried_ids: &mut Vec<String>,
+    ) -> Option<(String, String)> {
+        let available = Self::get_available_instances(instances, failure_tracker);
         let candidates: Vec<ServiceInstance> = available
             .into_iter()
             .filter(|i| !tried_ids.contains(&i.instance_id))
             .collect();
-        let instance = self.load_balancer.choose(&candidates)?;
+        let instance = load_balancer.choose(&candidates)?;
         let instance_id = instance.instance_id.clone();
         let base_url = Self::get_base_url(&instance.ip, &instance.port);
         tried_ids.push(instance_id.clone());
         Some((base_url, instance_id))
     }
 
-    fn record_failure(&self, instance_id: &str) {
-        let mut tracker = self.failure_tracker.lock().unwrap();
-        tracker.record_failure(instance_id, self.max_failures, self.cooldown_duration);
+    fn record_failure(
+        failure_tracker: &Mutex<FailureTracker>,
+        instance_id: &str,
+        max_failures: usize,
+        cooldown_duration: Duration,
+    ) {
+        let mut tracker = failure_tracker.lock().unwrap();
+        tracker.record_failure(instance_id, max_failures, cooldown_duration);
     }
 
-    fn record_success(&self, instance_id: &str) {
-        let mut tracker = self.failure_tracker.lock().unwrap();
+    fn record_success(failure_tracker: &Mutex<FailureTracker>, instance_id: &str) {
+        let mut tracker = failure_tracker.lock().unwrap();
         tracker.record_success(instance_id);
     }
 
@@ -166,44 +220,69 @@ impl FeignApiClient {
         D: Serialize + ?Sized + Debug,
         E: DeserializeOwned + Debug,
     {
-        let max_retries = self.service_discovery.get_instances().len().max(1);
-        let mut tried_ids = Vec::new();
+        match &self.mode {
+            FeignMode::Static { base_url, auth } => {
+                ApiClientUtils::request(method, base_url, uri, params, body, headers, auth.as_ref())
+                    .await
+            }
+            FeignMode::Feign {
+                service_discovery,
+                load_balancer,
+                failure_tracker,
+                max_failures,
+                cooldown_duration,
+            } => {
+                let instances = service_discovery.get_instances();
+                let max_retries = instances.len().max(1);
+                let mut tried_ids = Vec::new();
 
-        for _ in 0..max_retries {
-            let (base_url, instance_id) = match self.try_select_instance(&mut tried_ids) {
-                Some(x) => x,
-                None => break,
-            };
+                for _ in 0..max_retries {
+                    let (base_url, instance_id) = match Self::try_select_instance(
+                        &instances,
+                        failure_tracker,
+                        load_balancer,
+                        &mut tried_ids,
+                    ) {
+                        Some(x) => x,
+                        None => break,
+                    };
 
-            let result = ApiClientUtils::request(
-                method.clone(),
-                &base_url,
-                uri,
-                params,
-                body,
-                headers,
-                None,
-            )
-            .await;
+                    let result = ApiClientUtils::request(
+                        method.clone(),
+                        &base_url,
+                        uri,
+                        params,
+                        body,
+                        headers,
+                        None,
+                    )
+                    .await;
 
-            match result {
-                Ok(resp) => {
-                    self.record_success(&instance_id);
-                    return Ok(resp);
+                    match result {
+                        Ok(resp) => {
+                            Self::record_success(failure_tracker, &instance_id);
+                            return Ok(resp);
+                        }
+                        Err(e) => {
+                            warn!(
+                                "feign call failed for instance {} ({}) on {}: {:?}",
+                                instance_id, base_url, uri, e
+                            );
+                            Self::record_failure(
+                                failure_tracker,
+                                &instance_id,
+                                *max_failures,
+                                *cooldown_duration,
+                            );
+                        }
+                    }
                 }
-                Err(e) => {
-                    warn!(
-                        "feign call failed for instance {} ({}) on {}: {:?}",
-                        instance_id, base_url, uri, e
-                    );
-                    self.record_failure(&instance_id);
-                }
+
+                Err(ApiClientError::NotInit(
+                    FeignError::NoAvailableInstance.to_string(),
+                ))
             }
         }
-
-        Err(ApiClientError::NotInit(
-            FeignError::NoAvailableInstance.to_string(),
-        ))
     }
 
     pub async fn request<D, E>(
@@ -254,35 +333,60 @@ impl FeignApiClient {
         params: Option<&D>,
         headers: Option<&HeaderMap>,
     ) -> Result<Vec<u8>, ApiClientError> {
-        let max_retries = self.service_discovery.get_instances().len().max(1);
-        let mut tried_ids = Vec::new();
+        match &self.mode {
+            FeignMode::Static { base_url, auth } => {
+                ApiClientUtils::get_bytes(base_url, uri, params, headers, auth.as_ref()).await
+            }
+            FeignMode::Feign {
+                service_discovery,
+                load_balancer,
+                failure_tracker,
+                max_failures,
+                cooldown_duration,
+            } => {
+                let instances = service_discovery.get_instances();
+                let max_retries = instances.len().max(1);
+                let mut tried_ids = Vec::new();
 
-        for _ in 0..max_retries {
-            let (base_url, instance_id) = match self.try_select_instance(&mut tried_ids) {
-                Some(x) => x,
-                None => break,
-            };
+                for _ in 0..max_retries {
+                    let (base_url, instance_id) = match Self::try_select_instance(
+                        &instances,
+                        failure_tracker,
+                        load_balancer,
+                        &mut tried_ids,
+                    ) {
+                        Some(x) => x,
+                        None => break,
+                    };
 
-            let result = ApiClientUtils::get_bytes(&base_url, uri, params, headers, None).await;
+                    let result =
+                        ApiClientUtils::get_bytes(&base_url, uri, params, headers, None).await;
 
-            match result {
-                Ok(bytes) => {
-                    self.record_success(&instance_id);
-                    return Ok(bytes);
+                    match result {
+                        Ok(bytes) => {
+                            Self::record_success(failure_tracker, &instance_id);
+                            return Ok(bytes);
+                        }
+                        Err(e) => {
+                            warn!(
+                                "feign get_bytes failed for instance {} ({}): {:?}",
+                                instance_id, base_url, e
+                            );
+                            Self::record_failure(
+                                failure_tracker,
+                                &instance_id,
+                                *max_failures,
+                                *cooldown_duration,
+                            );
+                        }
+                    }
                 }
-                Err(e) => {
-                    warn!(
-                        "feign get_bytes failed for instance {} ({}): {:?}",
-                        instance_id, base_url, e
-                    );
-                    self.record_failure(&instance_id);
-                }
+
+                Err(ApiClientError::NotInit(
+                    FeignError::NoAvailableInstance.to_string(),
+                ))
             }
         }
-
-        Err(ApiClientError::NotInit(
-            FeignError::NoAvailableInstance.to_string(),
-        ))
     }
 
     pub async fn post<D: Serialize + ?Sized + Debug>(
@@ -321,30 +425,54 @@ impl FeignApiClient {
         form: reqwest::multipart::Form,
         headers: Option<&HeaderMap>,
     ) -> Result<Ro<serde_json::Value>, ApiClientError> {
-        let mut tried_ids = Vec::new();
-        let (base_url, instance_id) = match self.try_select_instance(&mut tried_ids) {
-            Some(x) => x,
-            None => {
-                return Err(ApiClientError::NotInit(
-                    FeignError::NoAvailableInstance.to_string(),
-                ));
+        match &self.mode {
+            FeignMode::Static { base_url, auth } => {
+                ApiClientUtils::multipart(base_url, uri, form, headers, auth.as_ref()).await
             }
-        };
+            FeignMode::Feign {
+                service_discovery,
+                load_balancer,
+                failure_tracker,
+                max_failures,
+                cooldown_duration,
+            } => {
+                let instances = service_discovery.get_instances();
+                let mut tried_ids = Vec::new();
+                let (base_url, instance_id) = match Self::try_select_instance(
+                    &instances,
+                    failure_tracker,
+                    load_balancer,
+                    &mut tried_ids,
+                ) {
+                    Some(x) => x,
+                    None => {
+                        return Err(ApiClientError::NotInit(
+                            FeignError::NoAvailableInstance.to_string(),
+                        ));
+                    }
+                };
 
-        let result = ApiClientUtils::multipart(&base_url, uri, form, headers, None).await;
+                let result = ApiClientUtils::multipart(&base_url, uri, form, headers, None).await;
 
-        match result {
-            Ok(resp) => {
-                self.record_success(&instance_id);
-                Ok(resp)
-            }
-            Err(e) => {
-                warn!(
-                    "feign multipart failed for instance {} ({}): {:?}",
-                    instance_id, base_url, e
-                );
-                self.record_failure(&instance_id);
-                Err(e)
+                match result {
+                    Ok(resp) => {
+                        Self::record_success(failure_tracker, &instance_id);
+                        Ok(resp)
+                    }
+                    Err(e) => {
+                        warn!(
+                            "feign multipart failed for instance {} ({}): {:?}",
+                            instance_id, base_url, e
+                        );
+                        Self::record_failure(
+                            failure_tracker,
+                            &instance_id,
+                            *max_failures,
+                            *cooldown_duration,
+                        );
+                        Err(e)
+                    }
+                }
             }
         }
     }
