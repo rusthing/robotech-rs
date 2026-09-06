@@ -29,6 +29,33 @@ pub struct ApiClientConfig {
     /// 用于定义API请求的认证策略，包括 Token、Basic、Bearer 等
     #[serde(default)]
     pub auth: Option<ApiAuthStrategy>,
+    /// 最大失败次数，超过后进入冷却期
+    ///
+    /// 仅 feign 模式有效，默认 3
+    #[serde(default = "default_max_failures")]
+    pub max_failures: usize,
+    /// 失败冷却时间
+    ///
+    /// 仅 feign 模式有效，默认 30s
+    #[serde(default = "default_cooldown_duration", with = "duration_serde")]
+    pub cooldown_duration: Duration,
+    /// 服务发现刷新间隔
+    ///
+    /// 仅 feign 模式有效，默认 30s
+    #[serde(default = "default_refresh_interval", with = "duration_serde")]
+    pub refresh_interval: Duration,
+}
+
+fn default_max_failures() -> usize {
+    3
+}
+
+fn default_cooldown_duration() -> Duration {
+    Duration::from_secs(30)
+}
+
+fn default_refresh_interval() -> Duration {
+    Duration::from_secs(30)
 }
 
 /// # API认证策略枚举

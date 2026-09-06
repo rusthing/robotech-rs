@@ -1,4 +1,5 @@
 use crate::api_client::ApiAuthStrategy;
+use crate::api_client::ApiClientConfig;
 use crate::api_client::ApiClientError;
 use crate::api_client::ApiClientUtils;
 use crate::micro_svc::feign::load_balancer::{LoadBalancer, RoundRobinBalancer};
@@ -88,30 +89,36 @@ pub struct FeignApiClient {
 }
 
 impl FeignApiClient {
-    pub async fn new_feign(svc_name: &str) -> Self {
-        let service_discovery = Arc::new(ServiceDiscovery::new(svc_name, Duration::from_secs(30)));
-        if let Err(e) = service_discovery.init().await {
-            warn!(
-                "service discovery init failed for '{}': {:?}, will retry on first request",
-                svc_name, e
-            );
-        }
-        let sd_clone = Arc::clone(&service_discovery);
-        sd_clone.start_refresh_loop();
-        Self {
-            mode: FeignMode::Feign {
-                service_discovery,
-                load_balancer: Box::new(RoundRobinBalancer::new()),
-                failure_tracker: Arc::new(Mutex::new(FailureTracker::new())),
-                max_failures: 3,
-                cooldown_duration: Duration::from_secs(30),
-            },
-        }
-    }
-
-    pub fn new_static(base_url: String, auth: Option<ApiAuthStrategy>) -> Self {
-        Self {
-            mode: FeignMode::Static { base_url, auth },
+    pub async fn new(config: ApiClientConfig) -> Self {
+        if let Some(svc_name) = &config.svc_name {
+            let service_discovery = Arc::new(ServiceDiscovery::new(
+                svc_name,
+                config.refresh_interval,
+            ));
+            if let Err(e) = service_discovery.init().await {
+                warn!(
+                    "service discovery init failed for '{}': {:?}, will retry on first request",
+                    svc_name, e
+                );
+            }
+            let sd_clone = Arc::clone(&service_discovery);
+            sd_clone.start_refresh_loop();
+            Self {
+                mode: FeignMode::Feign {
+                    service_discovery,
+                    load_balancer: Box::new(RoundRobinBalancer::new()),
+                    failure_tracker: Arc::new(Mutex::new(FailureTracker::new())),
+                    max_failures: config.max_failures,
+                    cooldown_duration: config.cooldown_duration,
+                },
+            }
+        } else {
+            Self {
+                mode: FeignMode::Static {
+                    base_url: config.base_url.unwrap_or_default(),
+                    auth: config.auth,
+                },
+            }
         }
     }
 
