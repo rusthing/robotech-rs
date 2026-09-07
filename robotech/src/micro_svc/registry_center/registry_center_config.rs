@@ -10,7 +10,7 @@ pub struct RegistryCenterConfig {
     pub retry_interval: Duration,
     #[serde(with = "duration_serde", default = "refresh_interval_default")]
     pub refresh_interval: Duration,
-    #[serde(with = "ipnet_option_serde")]
+    #[serde(with = "ipnet_option_serde", default)]
     pub sub_net: Option<IpNet>,
 }
 
