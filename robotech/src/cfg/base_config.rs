@@ -6,6 +6,9 @@ use wheel_rs::serde::duration_serde;
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[serde(rename_all = "kebab-case")]
 pub struct BaseConfig {
+    /// 应用名称
+    #[serde(default)]
+    pub app_name: Option<String>,
     /// 环境(dev/test/prod)
     #[serde(default)]
     pub profile: Option<String>,

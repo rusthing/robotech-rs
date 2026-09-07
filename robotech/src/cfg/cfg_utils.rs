@@ -26,7 +26,9 @@ pub async fn build_cfg(
         &cfg_file_path,
         config_builder,
     )?;
-    let base_config: BaseConfig = config_builder
+    let BaseConfig {
+        app_name, profile, ..
+    } = config_builder
         .build()
         .map_err(CfgError::Build)?
         .try_deserialize()
@@ -43,7 +45,7 @@ pub async fn build_cfg(
     )?;
 
     // 加载profile对应的配置文件
-    let (mut config_builder, files) = if let Some(profile) = &base_config.profile {
+    let (mut config_builder, files) = if let Some(profile) = &profile {
         let (config_builder, profile_files) = add_cfg_files(
             app_dir,
             format!("{}-{}", cfg_file_name_without_ext, profile).as_str(),
@@ -59,10 +61,15 @@ pub async fn build_cfg(
     // 初始化配置中心和注册中心的客户端
     // 如果传入app_file_name_without_ext为None，说明是构建log配置，不需要通过配置中心初始化配置
     #[cfg(any(feature = "config-center", feature = "registry-center"))]
-    if let Some(app_name) = app_file_name_without_ext {
+    if let Some(app_file_name_without_ext) = app_file_name_without_ext {
         // 初始化配置中心和注册中心的客户端
         #[cfg(any(feature = "config-center", feature = "registry-center"))]
-        init_hub_client(config_builder.clone(), app_name, &base_config.profile).await?;
+        init_hub_client(
+            config_builder.clone(),
+            app_name.unwrap_or(app_file_name_without_ext.to_string()),
+            &profile,
+        )
+        .await?;
         // 从配置中心获取配置文件内容并加载到config中
         #[cfg(feature = "config-center")]
         match get_configs().await {
@@ -99,7 +106,7 @@ where
 #[cfg(any(feature = "config-center", feature = "registry-center"))]
 async fn init_hub_client(
     config: ConfigBuilder<DefaultState>,
-    app_name: &str,
+    app_name: String,
     profile: &Option<String>,
 ) -> Result<()> {
     // 如果 micro-svc 没配置，直接返回 None，跳过 hub client 初始化
