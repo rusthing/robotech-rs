@@ -11,6 +11,7 @@ use crate::micro_svc::{
 use crate::web::{get_health_check_uri, get_health_check_url_http_protocol, get_web_listen_port};
 use arc_swap::ArcSwapOption;
 use config::FileFormat;
+use ipnet::IpNet;
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex, OnceLock};
@@ -151,6 +152,7 @@ pub struct HubClient {
     snapshot_dir: Option<PathBuf>,
     registry: Option<Arc<dyn RegistryCenterClient>>,
     registry_key: Option<RegistryKey>,
+    registry_sub_net: Option<IpNet>,
     service_instance: OnceLock<ServiceInstance>,
     retry_interval: Duration,
     refresh_interval: Duration,
@@ -176,6 +178,7 @@ impl HubClient {
             registry_key,
             retry_interval,
             refresh_interval,
+            ip_net,
         ) = {
             if let Some(consul_config) = micro_svc_config.clone().consul {
                 let client = ConsulClient::new(micro_svc_config.clone())
@@ -239,6 +242,7 @@ impl HubClient {
             config_keys,
             snapshot_dir,
             registry_key,
+            registry_sub_net: ip_net,
             service_instance: OnceLock::new(),
             retry_interval,
             refresh_interval,
@@ -386,7 +390,8 @@ impl HubClient {
             self.registry.as_ref().map(Arc::clone),
             self.registry_key.clone(),
         ) {
-            let service_instance = build_service_instance(registry_key)?;
+            let service_instance =
+                build_service_instance(registry_key, self.registry_sub_net.clone())?;
             self.service_instance.set(service_instance.clone()).ok();
             registry.register(&service_instance).await?;
         }
@@ -425,11 +430,12 @@ impl HubClient {
 
 fn build_service_instance(
     registry_key: RegistryKey,
+    sub_net: Option<IpNet>,
 ) -> Result<ServiceInstance, RegistryCenterError> {
     let namespace = registry_key.namespace.clone();
     let group = registry_key.group.clone();
     let svc_name = registry_key.svc_name.clone();
-    let ip = get_local_ip()?;
+    let ip = get_local_ip(sub_net)?;
     let port = get_web_listen_port().ok_or(RegistryCenterError::WebServerNotRunning)?;
     let instance_id = format!("{svc_name}-{}-{port}", ip.replace('.', "-"));
     let health_check_url = get_health_check_url_http_protocol()
@@ -490,6 +496,7 @@ fn build_branch<C: ConfigCenterClient + RegistryCenterClient + 'static>(
         Option<RegistryKey>,
         Duration,
         Duration,
+        Option<IpNet>,
     ),
     CfgError,
 > {
@@ -545,9 +552,9 @@ fn build_branch<C: ConfigCenterClient + RegistryCenterClient + 'static>(
         let tmp: Arc<dyn RegistryCenterClient> = c.clone();
         tmp
     });
-    let (retry_interval, refresh_interval) = registry_center_config
+    let (retry_interval, refresh_interval, ip_net) = registry_center_config
         .as_ref()
-        .map(|c| (c.retry_interval, c.refresh_interval))
+        .map(|c| (c.retry_interval, c.refresh_interval, c.sub_net))
         .unwrap_or_default();
     Ok((
         config_center_client,
@@ -557,5 +564,6 @@ fn build_branch<C: ConfigCenterClient + RegistryCenterClient + 'static>(
         registry_key,
         retry_interval,
         refresh_interval,
+        ip_net,
     ))
 }

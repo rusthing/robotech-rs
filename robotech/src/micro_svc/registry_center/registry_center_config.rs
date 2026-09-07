@@ -1,6 +1,7 @@
+use ipnet::IpNet;
 use serde::{Deserialize, Serialize};
 use std::time::Duration;
-use wheel_rs::serde::duration_serde;
+use wheel_rs::serde::{duration_serde, ipnet_option_serde};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "kebab-case")]
@@ -9,6 +10,8 @@ pub struct RegistryCenterConfig {
     pub retry_interval: Duration,
     #[serde(with = "duration_serde", default = "refresh_interval_default")]
     pub refresh_interval: Duration,
+    #[serde(with = "ipnet_option_serde")]
+    pub sub_net: Option<IpNet>,
 }
 
 impl Default for RegistryCenterConfig {
@@ -16,6 +19,7 @@ impl Default for RegistryCenterConfig {
         Self {
             retry_interval: retry_interval_default(),
             refresh_interval: refresh_interval_default(),
+            sub_net: None,
         }
     }
 }
