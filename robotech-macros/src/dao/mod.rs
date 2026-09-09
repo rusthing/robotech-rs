@@ -273,12 +273,10 @@ pub(super) fn dao_macro(args: DaoArgs, input: ItemStruct) -> TokenStream {
     let mut generated_members = Vec::new();
 
     // 生成 LIKE_COLUMNS
-    if !like_columns.is_empty() {
-        generated_members.push(quote! {
-            /// # 模糊查询列
-            pub const LIKE_COLUMNS: &[Column] = &[#(#like_columns),*];
-        });
-    }
+    generated_members.push(quote! {
+        /// # 模糊查询列
+        pub const LIKE_COLUMNS: &[Column] = &[#(#like_columns),*];
+    });
     // 生成 RELATED_TABLES
     if !related_tables.is_empty() {
         generated_members.push(quote! {
