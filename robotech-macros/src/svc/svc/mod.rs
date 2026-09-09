@@ -147,7 +147,7 @@ pub(crate) fn svc_macro(input: ItemStruct) -> TokenStream {
         #[db_unwrap(transaction_required)]
         #[log_call]
         pub async fn del_by_id<C>(
-            id: u64,
+            id: U64,
             #[skip_log]
             db: Option<&C>,
         ) -> Result<Ro<#vo_name>, SvcError>
@@ -160,7 +160,7 @@ pub(crate) fn svc_macro(input: ItemStruct) -> TokenStream {
                 .ok_or(SvcError::NotFound(id.to_string()))?;
             let rows_affected = #dao_name::delete(
                 ActiveModel {
-                    id: sea_orm::ActiveValue::Set(id as i64),
+                    id: sea_orm::ActiveValue::Set(id.into()),
                     ..Default::default()
                 },
                 db,
@@ -224,7 +224,7 @@ pub(crate) fn svc_macro(input: ItemStruct) -> TokenStream {
         #[db_unwrap]
         #[log_call]
         pub async fn get_by_id<C>(
-            id: u64,
+            id: U64,
             #[skip_log]
             db: Option<&C>
         ) -> Result<Ro<#vo_name>, SvcError>
@@ -326,8 +326,8 @@ pub(crate) fn svc_macro(input: ItemStruct) -> TokenStream {
         {
             let keyword = &dto._keyword;
             let order_by = &dto._order_by;
-            let page_num = dto._page.unwrap_or(1);
-            let page_size = dto._size.unwrap_or(10);
+            let page_num = dto._page.unwrap_or(U64(1));
+            let page_size = dto._size.unwrap_or(U64(10));
 
             let mut condition = dto.to_condition();
             if let Some(keyword) = keyword {
@@ -366,7 +366,7 @@ pub(crate) fn svc_macro(input: ItemStruct) -> TokenStream {
         #[db_unwrap]
         #[log_call]
         pub async fn get_ex_by_id<C>(
-            id: u64,
+            id: U64,
             #[skip_log]
             db: Option<&C>
         ) -> Result<Ro<#ex_vo_name>, SvcError>
@@ -476,8 +476,8 @@ pub(crate) fn svc_macro(input: ItemStruct) -> TokenStream {
         {
             let keyword = &dto._keyword;
             let order_by = &dto._order_by;
-            let page_num = dto._page.unwrap_or(1);
-            let page_size = dto._size.unwrap_or(10);
+            let page_num = dto._page.unwrap_or(U64(1));
+            let page_size = dto._size.unwrap_or(U64(10));
 
             let mut condition = dto.to_condition();
             if let Some(keyword) = keyword {
@@ -502,7 +502,7 @@ pub(crate) fn svc_macro(input: ItemStruct) -> TokenStream {
     });
 
     let expanded = quote! {
-        use robotech::dao::{begin_transaction, build_like_condition};
+        use robotech::dao::{begin_transaction, build_like_condition, U64};
         use robotech::ro::Ro;
         use robotech::rx::PageRx;
         use robotech::svc::SvcError;

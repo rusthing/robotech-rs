@@ -1,7 +1,10 @@
 use proc_macro2::TokenStream;
 use quote::{format_ident, quote};
-use syn::{Attribute, Field, Fields, ItemStruct, parse::{Parse, ParseStream}, Token, LitStr};
-use wheel_rs::str_utils::{CamelFormat, snake_to_pascal, split_camel_case};
+use syn::{
+    parse::{Parse, ParseStream}, Attribute, Field, Fields, ItemStruct, LitStr,
+    Token,
+};
+use wheel_rs::str_utils::{snake_to_pascal, split_camel_case, CamelFormat};
 
 /// crud_dto宏参数
 pub struct CrudDtoArgs {
@@ -120,12 +123,15 @@ pub fn crud_dto_macro(args: CrudDtoArgs, input: ItemStruct) -> TokenStream {
         };
 
     let mo_crate_path = args.mo_crate.as_deref().unwrap_or("crate");
-    let mo_crate_token: TokenStream = syn::parse_str(mo_crate_path).unwrap_or_else(|_| quote! { crate });
+    let mo_crate_token: TokenStream =
+        syn::parse_str(mo_crate_path).unwrap_or_else(|_| quote! { crate });
 
     let expanded = quote! {
         use derive_setters::Setters;
         use typed_builder::TypedBuilder;
-        use wheel_rs::serde::{option_option_serde, u64_option_serde};
+        use wheel_rs::serde::option_option_serde;
+
+        use robotech::dao::{U8, U16, U32, U64, U128};
 
         // ========== Server mode: full sea_orm/o2o code ==========
         #[cfg(feature = "server")]
@@ -147,14 +153,13 @@ pub fn crud_dto_macro(args: CrudDtoArgs, input: ItemStruct) -> TokenStream {
         )]
         #[builder]
         #vis struct #add_dto_name {
-            #[into(match ~ {Some(v)=>ActiveValue::Set(v as i64),None=>ActiveValue::NotSet})]
-            #[serde(with = "u64_option_serde")]
+            #[into(match ~ {Some(v)=>ActiveValue::Set(v.into()),None=>ActiveValue::NotSet})]
             #[builder(default, setter(strip_option))]
-            pub id: Option<u64>,
+            pub id: Option<U64>,
             #add_fields
             #[serde(skip_deserializing)]
-            #[into(creator_id, ActiveValue::Set(~ as i64))]
-            pub _current_user_id: u64,
+            #[into(creator_id, ActiveValue::Set(~.into()))]
+            pub _current_user_id: U64,
         }
 
         // ModifyDto
@@ -170,14 +175,13 @@ pub fn crud_dto_macro(args: CrudDtoArgs, input: ItemStruct) -> TokenStream {
         #[builder]
         #vis struct #modify_dto_name {
             #[validate(required(message = "id不能为空"))]
-            #[into(match ~ {Some(v)=>ActiveValue::Set(v as i64),None=>ActiveValue::NotSet})]
+            #[into(match ~ {Some(v)=>ActiveValue::Set(v.into()),None=>ActiveValue::NotSet})]
             #[builder(default, setter(strip_option))]
-            #[serde(with = "u64_option_serde")]
-            pub id: Option<u64>,
+            pub id: Option<U64>,
             #modify_fields
             #[serde(skip_deserializing)]
-            #[into(updator_id, ActiveValue::Set(~ as i64))]
-            pub _current_user_id: u64,
+            #[into(updator_id, ActiveValue::Set(~.into()))]
+            pub _current_user_id: U64,
         }
 
         // SaveDto
@@ -188,12 +192,11 @@ pub fn crud_dto_macro(args: CrudDtoArgs, input: ItemStruct) -> TokenStream {
         #[owned_into(#modify_dto_name)]
         #[builder]
         #vis struct #save_dto_name {
-            #[serde(with = "u64_option_serde")]
             #[builder(default, setter(strip_option))]
-            pub id: Option<u64>,
+            pub id: Option<U64>,
             #save_fields
             #[serde(skip_deserializing)]
-            pub _current_user_id: u64,
+            pub _current_user_id: U64,
         }
 
         // QueryDto
@@ -202,25 +205,24 @@ pub fn crud_dto_macro(args: CrudDtoArgs, input: ItemStruct) -> TokenStream {
         #[serde(default, rename_all = "camelCase")]
         #[builder]
         #vis struct #query_dto_name {
-            #[serde(with = "u64_option_serde")]
             #[builder(default, setter(strip_option))]
-            pub id: Option<u64>,
+            pub id: Option<U64>,
             #query_fields
             #[serde(rename = "_keyword")]
             #[builder(default, setter(strip_option))]
             pub _keyword: Option<String>,
             #[serde(skip_deserializing)]
             #[builder(default, setter(strip_option))]
-            pub _current_user_id: Option<u64>,
+            pub _current_user_id: Option<U64>,
             #[serde(rename = "_orderBy")]
             #[builder(default, setter(strip_option))]
             pub _order_by: Option<String>,
             #[serde(rename = "_page")]
             #[builder(default, setter(strip_option))]
-            pub _page: Option<u64>,
+            pub _page: Option<U64>,
             #[serde(rename = "_size")]
             #[builder(default, setter(strip_option))]
-            pub _size: Option<u64>,
+            pub _size: Option<U64>,
         }
 
         #[cfg(feature = "server")]
@@ -236,7 +238,7 @@ pub fn crud_dto_macro(args: CrudDtoArgs, input: ItemStruct) -> TokenStream {
                 let mut condition = Condition::all();
 
                 if let Some(id) = self.id {
-                    condition = condition.add(Column::Id.eq(id as i64));
+                    condition = condition.add(Column::Id.eq(id.value()));
                 }
 
                 #query_field_to_condition
@@ -251,9 +253,8 @@ pub fn crud_dto_macro(args: CrudDtoArgs, input: ItemStruct) -> TokenStream {
         #[serde(default, rename_all = "camelCase")]
         #[builder]
         #vis struct #add_dto_name {
-            #[serde(with = "u64_option_serde")]
             #[builder(default, setter(strip_option))]
-            pub id: Option<u64>,
+            pub id: Option<U64>,
             #client_add_fields
         }
 
@@ -262,9 +263,8 @@ pub fn crud_dto_macro(args: CrudDtoArgs, input: ItemStruct) -> TokenStream {
         #[serde(default, rename_all = "camelCase")]
         #[builder]
         #vis struct #modify_dto_name {
-            #[serde(with = "u64_option_serde")]
             #[builder(default, setter(strip_option))]
-            pub id: Option<u64>,
+            pub id: Option<U64>,
             #client_modify_fields
         }
 
@@ -273,9 +273,8 @@ pub fn crud_dto_macro(args: CrudDtoArgs, input: ItemStruct) -> TokenStream {
         #[serde(default, rename_all = "camelCase")]
         #[builder]
         #vis struct #save_dto_name {
-            #[serde(with = "u64_option_serde")]
             #[builder(default, setter(strip_option))]
-            pub id: Option<u64>,
+            pub id: Option<U64>,
             #client_save_fields
         }
 
@@ -284,9 +283,8 @@ pub fn crud_dto_macro(args: CrudDtoArgs, input: ItemStruct) -> TokenStream {
         #[serde(default, rename_all = "camelCase")]
         #[builder]
         #vis struct #query_dto_name {
-            #[serde(with = "u64_option_serde")]
             #[builder(default, setter(strip_option))]
-            pub id: Option<u64>,
+            pub id: Option<U64>,
             #client_query_fields
             #[serde(rename = "_keyword")]
             #[builder(default, setter(strip_option))]
@@ -296,10 +294,10 @@ pub fn crud_dto_macro(args: CrudDtoArgs, input: ItemStruct) -> TokenStream {
             pub _order_by: Option<String>,
             #[serde(rename = "_page")]
             #[builder(default, setter(strip_option))]
-            pub _page: Option<u64>,
+            pub _page: Option<U64>,
             #[serde(rename = "_size")]
             #[builder(default, setter(strip_option))]
-            pub _size: Option<u64>,
+            pub _size: Option<U64>,
         }
     };
 
@@ -344,12 +342,12 @@ fn process_field_client(field: &Field, _target: &str) -> TokenStream {
         }
     }
 
-    // 包装类型（添加Option）
-    let wrapped_ty = wrap_type(field_ty);
+    // 映射无符号类型
+    let mapped_ty = map_unsigned_type(field_ty);
 
     quote! {
         #(#new_attrs)*
-        pub #field_name: #wrapped_ty,
+        pub #field_name: Option<#mapped_ty>,
     }
 }
 
@@ -405,13 +403,13 @@ fn process_field(field: &Field, target: &str) -> TokenStream {
         }
     }
 
-    // 包装类型（添加Option）
-    let wrapped_ty = wrap_type(field_ty);
+    // 映射无符号类型
+    let mapped_ty = map_unsigned_type(field_ty);
 
     // 生成字段代码
     quote! {
         #(#new_attrs)*
-        pub #field_name: #wrapped_ty,
+        pub #field_name: Option<#mapped_ty>,
     }
 }
 
@@ -497,11 +495,12 @@ fn generate_into_attr(field: &Field) -> Attribute {
                             if let Some(inner_segment) = inner_path.path.segments.last() {
                                 let inner_type_name = inner_segment.ident.to_string();
                                 return match inner_type_name.as_str() {
-                                    "u64" | "u32" | "u16" | "u8" => {
-                                        // Option<Option<u64>> -> ActiveValue<Option<i64>>
-                                        // ~ 是 Option<u64>，需要转换为 Option<i64>
+                                    "u64" | "u32" | "u16" | "u8" | "U64" | "U32" | "U16" | "U8"
+                                    | "U128" => {
+                                        // Option<Option<U64>> -> ActiveValue<Option<i64>>
+                                        // ~ 是 Option<U64>，需要转换为 Option<i64>
                                         syn::parse_quote!(
-                                            #[into(match ~ {Some(v)=>ActiveValue::Set(v.map(|x| x as i64)),None=>ActiveValue::NotSet})]
+                                            #[into(match ~ {Some(v)=>ActiveValue::Set(v.map(|x| x.into())),None=>ActiveValue::NotSet})]
                                         )
                                     }
                                     "i64" | "i32" | "i16" | "i8" => {
@@ -537,11 +536,11 @@ fn generate_into_attr(field: &Field) -> Attribute {
             if let Some(segment) = type_path.path.segments.last() {
                 let type_name = segment.ident.to_string();
                 return match type_name.as_str() {
-                    "u64" | "u32" | "u16" | "u8" => {
-                        // Option<u64> -> ActiveValue<i64>
-                        // ~ 是 Option<u64>，需要转换为 i64
+                    "u64" | "u32" | "u16" | "u8" | "U64" | "U32" | "U16" | "U8" | "U128" => {
+                        // Option<U64> -> ActiveValue<i64>
+                        // ~ 是 Option<U64>，需要转换为 i64
                         syn::parse_quote!(
-                            #[into(match ~ {Some(v)=>ActiveValue::Set(v as i64),None=>ActiveValue::NotSet})]
+                            #[into(match ~ {Some(v)=>ActiveValue::Set(v.into()),None=>ActiveValue::NotSet})]
                         )
                     }
                     "i64" | "i32" | "i16" | "i8" => {
@@ -587,11 +586,6 @@ fn generate_serde_attr(field: &Field) -> Option<Attribute> {
         if let Some(segment) = type_path.path.segments.last() {
             let type_name = segment.ident.to_string();
             match type_name.as_str() {
-                "u64" => {
-                    return Some(syn::parse_quote!(
-                        #[serde(with = "u64_option_serde")]
-                    ));
-                }
                 "Option" => {
                     if let syn::PathArguments::AngleBracketed(args) = &segment.arguments {
                         if let Some(syn::GenericArgument::Type(inner_ty)) = args.args.first() {
@@ -622,14 +616,6 @@ fn is_option_type(ty: &syn::Type) -> bool {
         }
     }
     false
-}
-
-/// 包装类型（添加Option）
-/// T -> Option<T>，Option<T> -> Option<Option<T>>
-fn wrap_type(ty: &syn::Type) -> syn::Type {
-    let type_str = quote! { #ty }.to_string();
-    let wrapped_str = format!("Option<{}>", type_str);
-    syn::parse_str(&wrapped_str).unwrap_or_else(|_| ty.clone())
 }
 
 fn add_query_field_to_condition_tokens(field: &Field) -> TokenStream {
@@ -691,20 +677,8 @@ fn add_query_field_to_condition_tokens(field: &Field) -> TokenStream {
 
 fn get_value_token_stream(type_name: &str) -> TokenStream {
     match type_name {
-        "u8" => {
-            quote! { *v as i8 }
-        }
-        "u16" => {
-            quote! { *v as i16 }
-        }
-        "u32" => {
-            quote! { *v as i32 }
-        }
-        "u64" => {
-            quote! { *v as i64 }
-        }
-        "u128" => {
-            quote! { *v as i128 }
+        "u8" | "u16" | "u32" | "u64" | "u128" => {
+            quote! { v.value() }
         }
         "bool" => {
             quote! { *v }
@@ -713,4 +687,50 @@ fn get_value_token_stream(type_name: &str) -> TokenStream {
             quote! { v }
         }
     }
+}
+
+fn map_unsigned_type(ty: &syn::Type) -> TokenStream {
+    match ty {
+        syn::Type::Path(type_path) => {
+            if let Some(segment) = type_path.path.segments.last() {
+                let ident_str = segment.ident.to_string();
+
+                if ident_str == "Option" {
+                    if let Some(inner) = extract_option_inner_type(type_path) {
+                        return match inner.as_str() {
+                            "u8" => quote! { Option<U8> },
+                            "u16" => quote! { Option<U16> },
+                            "u32" => quote! { Option<U32> },
+                            "u64" => quote! { Option<U64> },
+                            "u128" => quote! { Option<U128> },
+                            _ => quote! { #ty },
+                        };
+                    }
+                    return quote! { #ty };
+                }
+
+                match ident_str.as_str() {
+                    "u8" => return quote! { U8 },
+                    "u16" => return quote! { U16 },
+                    "u32" => return quote! { U32 },
+                    "u64" => return quote! { U64 },
+                    "u128" => return quote! { U128 },
+                    _ => {}
+                }
+            }
+        }
+        _ => {}
+    }
+    quote! { #ty }
+}
+
+fn extract_option_inner_type(type_path: &syn::TypePath) -> Option<String> {
+    if let syn::PathArguments::AngleBracketed(args) = &type_path.path.segments.last()?.arguments {
+        if let Some(syn::GenericArgument::Type(inner_ty)) = args.args.first() {
+            if let syn::Type::Path(inner_path) = inner_ty {
+                return inner_path.path.segments.last().map(|s| s.ident.to_string());
+            }
+        }
+    }
+    None
 }

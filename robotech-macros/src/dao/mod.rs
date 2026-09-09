@@ -420,12 +420,12 @@ pub(super) fn dao_macro(args: DaoArgs, input: ItemStruct) -> TokenStream {
         ///
         /// ## 返回值
         /// 查询成功，如果记录存在，返回查询到的完整 Model 实例，如果不存在返回None; 查询失败则返回相应的错误信息
-        pub async fn get_by_id<C, M>(id: u64, db: &C) -> Result<Option<M>, DaoError>
+        pub async fn get_by_id<C, M>(id: U64, db: &C) -> Result<Option<M>, DaoError>
         where
             C: ConnectionTrait,
             M: FromQueryResult,
         {
-            Entity::find_by_id(id as i64)
+            Entity::find_by_id(id.value() as i64)
                 .into_model::<M>()
                 .one(db)
                 .await
@@ -503,33 +503,33 @@ pub(super) fn dao_macro(args: DaoArgs, input: ItemStruct) -> TokenStream {
         pub async fn page_by_condition<C, M>(
             condition: Condition,
             order_by: &Option<String>,
-            mut page_num: u64,
-            page_size: u64,
+            mut page_num: U64,
+            page_size: U64,
             db: &C
-        ) -> Result<(u64, u64, Vec<M>), DaoError>
+        ) -> Result<(U64, U64, Vec<M>), DaoError>
         where
             C: ConnectionTrait,
             M: FromQueryResult + Send + Sync,
         {
-            if page_num < 1 {
-                page_num = 1;
+            if page_num.value() < 1 {
+                page_num = U64(1);
             }
             let paginator = add_order_by(Entity::find().filter(condition), order_by)?
                 .into_model::<M>()
-                .paginate(db, page_size);
+                .paginate(db, page_size.value());
             let total  = paginator.num_items().await.map_err(DaoError::from)?;
             if total == 0 {
-                return Ok((1, 0, vec![]));
+                return Ok((U64(1), U64(0), vec![]));
             }
-            let total_pages = total / page_size + if total % page_size > 0 { 1 } else { 0 };
-            if page_num > total_pages {
-                page_num = total_pages;
+            let total_pages = total / page_size.value() + if total % page_size.value() > 0 { 1 } else { 0 };
+            if page_num.value() > total_pages {
+                page_num = U64(total_pages);
             }
             let models = paginator
-                .fetch_page(page_num - 1)
+                .fetch_page(page_num.value() - 1)
                 .await
                 .map_err(|e| DaoError::parse_db_err(e))?;
-            Ok((page_num, total, models))
+            Ok((page_num, U64(total), models))
         }
     });
 
@@ -576,14 +576,14 @@ pub(super) fn dao_macro(args: DaoArgs, input: ItemStruct) -> TokenStream {
         /// 返回一个包含主记录和关联记录的元组的 Option，如果查询失败则返回相应的错误信息
         /// 如果未找到匹配记录，则返回 None
         pub async fn get_ex_by_id<C>(
-            id: u64,
+            id: U64,
             db: &C,
         ) -> Result<Option<ModelEx>, DaoError>
         where
             C: ConnectionTrait,
         {
             Entity::load()
-                .filter_by_id(id as i64)
+                .filter_by_id(id.value() as i64)
                 #(#find_with_related_calls)*
                 .one(db)
                 .await
@@ -659,32 +659,32 @@ pub(super) fn dao_macro(args: DaoArgs, input: ItemStruct) -> TokenStream {
         pub async fn page_ex_by_condition<C>(
             condition: Condition,
             order_by: &Option<String>,
-            mut page_num: u64,
-            page_size: u64,
+            mut page_num: U64,
+            page_size: U64,
             db: &C
-        ) -> Result<(u64, u64, Vec<ModelEx>), DaoError>
+        ) -> Result<(U64, U64, Vec<ModelEx>), DaoError>
         where
             C: ConnectionTrait,
         {
-            if page_num < 1 {
-                page_num = 1;
+            if page_num.value() < 1 {
+                page_num = U64(1);
             }
             let paginator = add_order_by(Entity::load().filter(condition), order_by)?
                 #(#find_with_related_calls)*
-                .paginate(db, page_size);
+                .paginate(db, page_size.value());
             let total  = paginator.num_items().await.map_err(DaoError::from)?;
             if total == 0 {
-                return Ok((1, 0, vec![]));
+                return Ok((U64(1), U64(0), vec![]));
             }
-            let total_pages = total / page_size + if total % page_size > 0 { 1 } else { 0 };
-            if page_num > total_pages {
-                page_num = total_pages;
+            let total_pages = total / page_size.value() + if total % page_size.value() > 0 { 1 } else { 0 };
+            if page_num.value() > total_pages {
+                page_num = U64(total_pages);
             }
             let models = paginator
-                .fetch_page(page_num - 1)
+                .fetch_page(page_num.value() - 1)
                 .await
                 .map_err(|e| DaoError::parse_db_err(e))?;
-            Ok((page_num, total, models))
+            Ok((page_num, U64(total), models))
         }
     });
 
@@ -692,7 +692,7 @@ pub(super) fn dao_macro(args: DaoArgs, input: ItemStruct) -> TokenStream {
     let mo_crate_token: TokenStream = syn::parse_str(mo_crate_path).unwrap_or_else(|_| quote! { crate });
 
     let expanded = quote! {
-        use robotech::dao::{add_order_by, DaoError};
+        use robotech::dao::{add_order_by, DaoError, U64};
         use sea_orm::{
             ActiveModelTrait, ActiveValue, Condition, ConnectionTrait, EntityTrait, FromQueryResult, PaginatorTrait, QueryFilter, DeleteResult
         };

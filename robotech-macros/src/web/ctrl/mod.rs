@@ -175,7 +175,7 @@ pub(crate) fn ctrl_macro(input: ItemStruct) -> TokenStream {
         /// 该接口用于删除一个已存在的记录
         ///
         /// ## 请求参数
-        /// * `id` - 待删除记录的唯一标识符，类型为u64
+        /// * `id` - 待删除记录的唯一标识符，类型为U64
         ///
         /// ## 错误处理
         /// * 当缺少参数`id`时，返回`ValidationError`错误
@@ -185,14 +185,14 @@ pub(crate) fn ctrl_macro(input: ItemStruct) -> TokenStream {
             delete,
             path = #del_by_id_path,
             params(
-                ("id" = u64, Path, description = "记录的唯一标识符")
+                ("id" = U64, Path, description = "记录的唯一标识符")
             ),
             responses((status = OK, body = Ro<#vo_name>))
         )]
         #[debug_handler]
         #[log_call]
         pub async fn del_by_id(
-            Path(id): Path<u64>,
+            Path(id): Path<U64>,
         ) -> Result<Json<Ro<#vo_name>>, CtrlError> {
             let ro = #svc_name::del_by_id::<DatabaseTransaction>(id, None).await?;
             Ok(Json(ro))
@@ -233,7 +233,7 @@ pub(crate) fn ctrl_macro(input: ItemStruct) -> TokenStream {
         /// 该接口通过查询参数中的ID获取对应记录的详细信息
         ///
         /// ## 查询参数
-        /// * `id` - 记录的唯一标识符，类型为u64
+        /// * `id` - 记录的唯一标识符，类型为U64
         ///
         /// ## 返回值
         /// * 成功时返回对应的记录信息的JSON格式数据
@@ -247,7 +247,7 @@ pub(crate) fn ctrl_macro(input: ItemStruct) -> TokenStream {
             get,
             path = #get_by_id_path,
             params(
-                ("id" = u64, Path, description = "记录的唯一标识符")
+                ("id" = U64, Path, description = "记录的唯一标识符")
             ),
             responses(
                 (status = OK, body = Ro<#vo_name>)
@@ -255,7 +255,7 @@ pub(crate) fn ctrl_macro(input: ItemStruct) -> TokenStream {
         )]
         #[debug_handler]
         #[log_call]
-        pub async fn get_by_id(Path(id): Path<u64>) -> Result<Json<Ro<#vo_name>>, CtrlError> {
+        pub async fn get_by_id(Path(id): Path<U64>) -> Result<Json<Ro<#vo_name>>, CtrlError> {
             let ro = #svc_name::get_by_id::<DatabaseConnection>(id, None).await?;
             Ok(Json(ro))
         }
@@ -352,7 +352,7 @@ pub(crate) fn ctrl_macro(input: ItemStruct) -> TokenStream {
         /// 该接口通过查询参数中的ID获取对应记录的详细信息
         ///
         /// ## 查询参数
-        /// * `id` - 记录的唯一标识符，类型为u64
+        /// * `id` - 记录的唯一标识符，类型为U64
         ///
         /// ## 返回值
         /// * 成功时返回对应的记录信息的JSON格式数据
@@ -366,7 +366,7 @@ pub(crate) fn ctrl_macro(input: ItemStruct) -> TokenStream {
             get,
             path = #get_ex_by_id_path,
             params(
-                ("id" = u64, Path, description = "记录的唯一标识符")
+                ("id" = U64, Path, description = "记录的唯一标识符")
             ),
             responses(
                 (status = OK, body = Ro<#ex_vo_name>)
@@ -374,7 +374,7 @@ pub(crate) fn ctrl_macro(input: ItemStruct) -> TokenStream {
         )]
         #[debug_handler]
         #[log_call]
-        pub async fn get_ex_by_id(Path(id): Path<u64>) -> Result<Json<Ro<#ex_vo_name>>, CtrlError> {
+        pub async fn get_ex_by_id(Path(id): Path<U64>) -> Result<Json<Ro<#ex_vo_name>>, CtrlError> {
             let ro = #svc_name::get_ex_by_id::<DatabaseConnection>(id, None).await?;
             Ok(Json(ro))
         }
@@ -472,6 +472,7 @@ pub(crate) fn ctrl_macro(input: ItemStruct) -> TokenStream {
         use robotech::macros::log_call;
         use robotech::ro::Ro;
         use robotech::rx::PageRx;
+        use robotech::dao::U64;
         use robotech::web::ctrl_utils::get_current_user_id;
         use robotech::web::CtrlError;
         use sea_orm::{DatabaseConnection, DatabaseTransaction};

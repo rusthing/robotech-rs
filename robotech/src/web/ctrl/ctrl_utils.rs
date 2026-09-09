@@ -1,4 +1,5 @@
 use crate::cst::user_id_cst::USER_ID_HEADER_NAME;
+use crate::dao::U64;
 use axum::http::HeaderMap;
 use validator;
 
@@ -13,14 +14,14 @@ use validator;
 ///
 /// ## 返回值
 ///
-/// * `Ok(u64)` - 成功解析出的用户ID
+/// * `Ok(U64)` - 成功解析出的用户ID
 /// * `Err(ApiError)` - 解析失败时返回的错误信息
 ///
 /// ## 错误处理
 ///
 /// * 如果请求头中缺少必要的用户ID参数，返回`ValidationError`
 /// * 如果用户ID格式不正确，无法解析为u64类型，返回`ValidationError`
-pub fn get_current_user_id(headers: &HeaderMap) -> Result<u64, validator::ValidationError> {
+pub fn get_current_user_id(headers: &HeaderMap) -> Result<U64, validator::ValidationError> {
     headers
         .get(USER_ID_HEADER_NAME)
         .ok_or_else(|| {
@@ -33,6 +34,7 @@ pub fn get_current_user_id(headers: &HeaderMap) -> Result<u64, validator::Valida
             validator::ValidationError::new(Box::leak(msg.into_boxed_str()))
         })?
         .parse::<u64>()
+        .map(U64)
         .map_err(|_| {
             let msg = format!("参数<{}>格式不正确", USER_ID_HEADER_NAME);
             validator::ValidationError::new(Box::leak(msg.into_boxed_str()))

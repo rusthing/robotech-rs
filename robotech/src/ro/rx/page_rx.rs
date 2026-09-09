@@ -1,3 +1,4 @@
+use crate::dao::U64;
 use derive_setters::Setters;
 use serde::{Deserialize, Serialize};
 use serde_with::skip_serializing_none;
@@ -17,9 +18,9 @@ where
     T: utoipa::ToSchema + serde::Serialize,
 {
     /// 当前页码
-    pub page_num: u64,
+    pub page_num: U64,
     /// 记录总数
-    pub total: u64,
+    pub total: U64,
     /// 记录列表
     pub list: Vec<T>,
 }
