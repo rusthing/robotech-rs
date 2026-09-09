@@ -4,6 +4,17 @@ use std::str::FromStr;
 use tower_http::cors::CorsLayer;
 use tracing::debug;
 
+/// # 构建 CORS 中间件
+///
+/// 根据 CORS 配置构建 tower-http 的 `CorsLayer`；当配置为 `None` 或未启用时返回 `None`。
+///
+/// ## 参数
+/// * `cors_config` - 可选的 CORS 配置
+///
+/// ## 返回值
+/// * `Ok(Some(CorsLayer))` - 配置启用时构建成功的 CORS 层
+/// * `Ok(None)` - 未配置或未启用时
+/// * `Err(WebServerError::ParseCors)` - 来源/方法/请求头解析失败时
 pub fn build_cors(cors_config: &Option<CorsConfig>) -> Result<Option<CorsLayer>, WebServerError> {
     if let Some(cors_config) = cors_config
         && cors_config.enabled

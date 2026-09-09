@@ -3,6 +3,11 @@ use sea_orm::{ColIdx, ColumnType, QueryResult, TryGetError, TryGetable, Value};
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
 use utoipa::ToSchema;
 
+/// # 无符号 8 位整数包装类型
+///
+/// 用于表示数据库中的无符号小整数（如状态、标记等），
+/// 序列化时输出为裸数字而非嵌套对象；支持与 `u8` / `i8` 互转，
+/// 并实现 `Deref` 以便直接作为 `u8` 使用。
 #[derive(
     ToSchema, Clone, Copy, Debug, Default, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize,
 )]
@@ -10,6 +15,7 @@ use utoipa::ToSchema;
 pub struct U8(pub u8);
 
 impl U8 {
+    /// 返回包装的 `u8` 值
     pub fn value(&self) -> u8 {
         self.0
     }
@@ -48,6 +54,10 @@ impl std::ops::Deref for U8 {
     }
 }
 
+/// # 无符号 16 位整数包装类型
+///
+/// 用于表示数据库中的无符号整数，序列化时输出为裸数字而非嵌套对象；
+/// 支持与 `u16` / `i16` 互转，并实现 `Deref` 以便直接作为 `u16` 使用。
 #[derive(
     ToSchema, Clone, Copy, Debug, Default, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize,
 )]
@@ -55,6 +65,7 @@ impl std::ops::Deref for U8 {
 pub struct U16(pub u16);
 
 impl U16 {
+    /// 返回包装的 `u16` 值
     pub fn value(&self) -> u16 {
         self.0
     }
@@ -93,6 +104,10 @@ impl std::ops::Deref for U16 {
     }
 }
 
+/// # 无符号 32 位整数包装类型
+///
+/// 用于表示数据库中的无符号整数，序列化时输出为裸数字而非嵌套对象；
+/// 支持与 `u32` / `i32` 互转，并实现 `Deref` 以便直接作为 `u32` 使用。
 #[derive(
     ToSchema, Clone, Copy, Debug, Default, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize,
 )]
@@ -100,6 +115,7 @@ impl std::ops::Deref for U16 {
 pub struct U32(pub u32);
 
 impl U32 {
+    /// 返回包装的 `u32` 值
     pub fn value(&self) -> u32 {
         self.0
     }
@@ -138,12 +154,18 @@ impl std::ops::Deref for U32 {
     }
 }
 
+/// # 无符号 64 位整数包装类型
+///
+/// 用于表示数据库中的无符号大整数（如主键 ID），
+/// 序列化时输出为字符串以避免 JavaScript 精度丢失；
+/// 支持与 `u64` / `i64` 互转，并实现 `Deref` 以及 SeaORM 的取值/绑定能力。
 #[derive(
     ToSchema, Clone, Copy, Debug, Default, PartialEq, Eq, Hash, PartialOrd, Ord,
 )]
 pub struct U64(pub u64);
 
 impl U64 {
+    /// 返回包装的 `u64` 值
     pub fn value(&self) -> u64 {
         self.0
     }
@@ -257,12 +279,18 @@ impl std::ops::Deref for U64 {
     }
 }
 
+/// # 无符号 128 位整数包装类型
+///
+/// 用于表示数据库中的超大无符号整数，
+/// 序列化时输出为字符串以避免 JavaScript 精度丢失；
+/// 支持与 `u128` / `i128` 互转，并实现 `Deref` 以便直接作为 `u128` 使用。
 #[derive(
     ToSchema, Clone, Copy, Debug, Default, PartialEq, Eq, Hash, PartialOrd, Ord,
 )]
 pub struct U128(pub u128);
 
 impl U128 {
+    /// 返回包装的 `u128` 值
     pub fn value(&self) -> u128 {
         self.0
     }

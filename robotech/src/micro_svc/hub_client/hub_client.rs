@@ -25,6 +25,10 @@ static HUB_CLIENT: ArcSwapOption<HubClient> = ArcSwapOption::const_empty();
 static RETRY_NEW_HUB_CLIENT_JOIN_HANDLE: ArcSwapOption<JoinHandle<()>> =
     ArcSwapOption::const_empty();
 
+/// 初始化全局 Hub 客户端并注册到注册中心。
+///
+/// 先注销旧服务实例，再按配置创建新的 `HubClient`；创建失败或注册中心暂不可用时，
+/// 会在后台每 5 秒重试创建，直到成功。
 pub async fn setup_hub_client(micro_svc_config: MicroSvcConfig) {
     info!("setup hub client...: {micro_svc_config:?}");
     // 先注销旧服务
@@ -77,6 +81,7 @@ fn start_new_hub_client_loop(micro_svc_config: MicroSvcConfig) {
     RETRY_NEW_HUB_CLIENT_JOIN_HANDLE.store(Some(Arc::new(join_handle)));
 }
 
+/// 注销当前服务实例并清空全局 Hub 客户端。
 pub async fn drop_hub_client() {
     #[cfg(feature = "registry-center")]
     if let Ok(hub_client) = get_hub_client().as_ref() {
@@ -87,12 +92,20 @@ pub async fn drop_hub_client() {
     HUB_CLIENT.store(None);
 }
 
+/// 获取全局 Hub 客户端。
+///
+/// ## 错误
+/// 尚未调用 `setup_hub_client` 或初始化失败时返回 `CfgError::NotInit`。
 pub fn get_hub_client() -> Result<Arc<HubClient>, CfgError> {
     HUB_CLIENT
         .load_full()
         .ok_or(CfgError::NotInit("HUB_CLIENT not initialized".to_string()))
 }
 
+/// 拉取配置中心中所有已配置的配置项（公共配置 + 应用配置）。
+///
+/// ## 错误
+/// 后端拉取失败且本地快照也不存在时返回 `CfgError`。
 pub async fn get_configs() -> Result<Vec<ConfigItem>, CfgError> {
     let hub_client = get_hub_client()?;
     let config = hub_client.get_configs().await?;
@@ -100,6 +113,10 @@ pub async fn get_configs() -> Result<Vec<ConfigItem>, CfgError> {
     Ok(config)
 }
 
+/// 发现指定服务的所有健康实例。
+///
+/// ## 错误
+/// 注册中心未配置或后端请求失败时返回 `CfgError::NotInit`。
 pub async fn discover_service(svc_name: &str) -> Result<Vec<ServiceInstance>, CfgError> {
     let hub_client = get_hub_client()?;
     hub_client
@@ -108,6 +125,13 @@ pub async fn discover_service(svc_name: &str) -> Result<Vec<ServiceInstance>, Cf
         .map_err(|e| CfgError::NotInit(format!("discover service failed: {e:?}",)))
 }
 
+/// 订阅所有配置项的变更，配置变化时调用 `on_change` 回调（含公共配置）。
+///
+/// ## 参数
+/// - `on_change`：配置变更时执行的异步回调，返回 `anyhow::Result<()>`。
+///
+/// ## 错误
+/// Hub 客户端未初始化或配置项列表为空时返回 `CfgError`。
 pub async fn watch_config_changed<F, Fut>(on_change: F) -> Result<(), CfgError>
 where
     F: FnMut() -> Fut + Send + 'static,
@@ -120,6 +144,10 @@ where
     hub_client.watch_config_changed(on_change).await
 }
 
+/// 启动后台注册循环：定期向注册中心上报当前实例。
+///
+/// 注册成功则按 `refresh_interval` 周期续报，失败则按 `retry_interval` 重试；
+/// Hub 客户端尚未初始化时每 5 秒探测一次。
 pub async fn register_micro_svc() {
     tokio::spawn(async move {
         loop {
@@ -146,6 +174,11 @@ struct ConfigSnapshot {
     content: String,
 }
 
+/// 配置中心与注册中心的统一门面客户端。
+///
+/// 内部持有配置中心客户端、注册中心客户端、配置项列表、快照目录等信息，
+/// 把不同后端（Consul / Etcd / Nacos）的差异吸收在实现内部，向业务层提供
+/// 一致的配置拉取/订阅、服务注册/注销/发现接口。
 pub struct HubClient {
     config: Option<Arc<dyn ConfigCenterClient>>,
     config_keys: Option<Vec<ConfigKey>>,
@@ -169,6 +202,10 @@ impl Drop for HubClient {
 }
 
 impl HubClient {
+    /// 根据微服务配置创建 HubClient。
+    ///
+    /// 按配置中存在的后端（consul / etcd / nacos）构建客户端，构建失败时记录告警
+    /// 并继续（后续可回退到本地快照）；三个后端都未配置时返回 `CfgError::NotInit`。
     pub async fn new(micro_svc_config: MicroSvcConfig) -> Result<Self, CfgError> {
         let (
             config_center_client,
@@ -250,6 +287,11 @@ impl HubClient {
         })
     }
 
+    /// 拉取所有配置项；单个配置项后端拉取失败时回退到本地快照，快照也不存在则报错。
+    ///
+    /// ## 错误
+    /// 配置中心客户端或配置项列表缺失时返回 `CfgError::NotInit`；
+    /// 拉取失败且无快照可用时返回 `CfgError::Init`。
     pub async fn get_configs(&self) -> Result<Vec<ConfigItem>, CfgError> {
         let config_center_client = match self.config.as_ref() {
             Some(client) => client,
@@ -290,6 +332,10 @@ impl HubClient {
         Ok(all)
     }
 
+    /// 订阅所有配置项变更，配置变化时调用 `on_change` 回调（含公共配置）。
+    ///
+    /// ## 错误
+    /// 配置中心客户端或配置项列表缺失时返回 `CfgError`。
     pub async fn watch_config_changed<F, Fut>(&self, mut on_change: F) -> Result<(), CfgError>
     where
         F: FnMut() -> Fut + Send + 'static,
@@ -385,6 +431,12 @@ impl HubClient {
         })
     }
 
+    /// 向注册中心注册当前服务实例。
+    ///
+    /// 未配置注册中心时为空操作（直接返回 `Ok(())`）。
+    ///
+    /// ## 错误
+    /// 构建服务实例失败或后端注册失败时返回 `RegistryCenterError`。
     pub async fn register(&self) -> Result<(), RegistryCenterError> {
         if let (Some(registry), Some(registry_key)) = (
             self.registry.as_ref().map(Arc::clone),
@@ -398,6 +450,12 @@ impl HubClient {
         Ok(())
     }
 
+    /// 从注册中心注销当前服务实例。
+    ///
+    /// 未注册过实例时为空操作（直接返回 `Ok(())`）。
+    ///
+    /// ## 错误
+    /// 后端注销失败时返回 `RegistryCenterError`。
     pub async fn deregister(&self) -> Result<(), RegistryCenterError> {
         if let (Some(registry), Some(service_instance)) = (
             self.registry.as_ref().map(Arc::clone),
@@ -408,6 +466,10 @@ impl HubClient {
         Ok(())
     }
 
+    /// 发现指定服务的健康实例列表。
+    ///
+    /// ## 错误
+    /// 注册中心未配置时返回 `RegistryCenterError::BackendNotEnabled`。
     pub async fn discover(
         &self,
         svc_name: &str,

@@ -45,6 +45,7 @@ impl ConfigChangeListener for Bridge {
     }
 }
 
+/// Nacos 后端客户端：同时实现配置中心（ConfigService）与注册中心（NamingService）能力。
 pub struct NacosClient {
     service: ConfigService,
     naming_service: NamingService,
@@ -70,6 +71,17 @@ impl Drop for NacosClient {
 impl NacosClient {
     const CLIENT_NAME: &'static str = "nacos";
 
+    /// 根据微服务配置创建 Nacos 客户端。
+    ///
+    /// 命名空间缺省时使用 `public`；取 `nacos.hub_client.base_url` 的第一个地址
+    /// （去掉末尾 `/`）作为服务端地址。
+    ///
+    /// ## Panics
+    /// 调用方需保证 `micro_svc_config.nacos` 为 `Some`（`HubClient::new` 内部会先判断），
+    /// 否则此处 `unwrap` 会 panic。
+    ///
+    /// ## 错误
+    /// 配置服务或命名服务构建失败时返回 `HubClientError::Connection`。
     pub async fn new(micro_svc_config: MicroSvcConfig) -> Result<Self, HubClientError> {
         let MicroSvcConfig {
             nacos: nacos_config,

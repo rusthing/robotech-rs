@@ -24,6 +24,7 @@ use tokio::sync::watch;
 use tokio::task::JoinHandle;
 use tracing::{error, warn};
 
+/// Etcd 后端客户端：同时实现配置中心（KV + watch）与注册中心（租约注册）能力。
 pub struct EtcdClient {
     etcd_client: etcd_client::Client,
     /// 当前活跃的租约状态。
@@ -48,6 +49,14 @@ impl EtcdClient {
     /// 租约 TTL（秒）。续租失败超过这个时间 etcd 会自动删除绑定 key，保证不会有脏实例。
     const LEASE_TTL_SECS: i64 = 30;
 
+    /// 根据微服务配置创建 Etcd 客户端。
+    ///
+    /// ## Panics
+    /// 调用方需保证 `micro_svc_config.etcd` 为 `Some`（`HubClient::new` 内部会先判断），
+    /// 否则此处 `unwrap` 会 panic。
+    ///
+    /// ## 错误
+    /// 连接 etcd 失败时返回 `HubClientError::Connection`。
     pub async fn new(micro_svc_config: MicroSvcConfig) -> Result<Self, HubClientError> {
         let MicroSvcConfig {
             etcd: etcd_config, ..

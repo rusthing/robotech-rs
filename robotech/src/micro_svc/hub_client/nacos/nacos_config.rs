@@ -4,6 +4,7 @@ use crate::micro_svc::ConfigCenterConfig;
 use crate::micro_svc::RegistryCenterConfig;
 use serde::{Deserialize, Serialize};
 
+/// Nacos 后端配置：Hub 客户端通用配置 + 配置/注册中心开关。
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "kebab-case")]
 pub struct NacosConfig {

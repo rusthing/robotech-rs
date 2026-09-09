@@ -5,6 +5,13 @@ use serde_with::skip_serializing_none;
 use typed_builder::TypedBuilder;
 use utoipa::ToSchema;
 
+/// # 分页响应结构体
+///
+/// 用于封装分页查询结果，包含当前页码、记录总数与记录列表；
+/// JSON 序列化时字段名使用 camelCase 风格。
+///
+/// ## 泛型参数
+/// * `T` - 列表元素的类型，需实现 `ToSchema` 与 `Serialize`
 #[skip_serializing_none]
 #[derive(ToSchema, Debug, Serialize, Deserialize, Clone, Setters, TypedBuilder)]
 #[builder]

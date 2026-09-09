@@ -6,6 +6,7 @@ use serde::{Deserialize, Serialize};
 use std::time::Duration;
 use wheel_rs::serde::duration_serde;
 
+/// Consul 后端配置：Hub 客户端通用配置 + 阻塞查询超时 + 配置/注册中心开关。
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "kebab-case")]
 pub struct ConsulConfig {

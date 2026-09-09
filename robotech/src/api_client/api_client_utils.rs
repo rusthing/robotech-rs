@@ -14,8 +14,15 @@ use std::str::FromStr;
 use std::sync::LazyLock;
 use wheel_rs::urn_utils::Urn;
 
+/// # 全局 HTTP 客户端
+///
+/// 基于 reqwest 的全局复用客户端，供所有 API 请求使用。
 pub static REQWEST_CLIENT: LazyLock<Client> = LazyLock::new(|| Client::new());
 
+/// # API 客户端工具
+///
+/// 提供基于 URN 约定的 GET/POST/PUT/DELETE、multipart 与 webhook 等请求封装，
+/// 统一返回 `Ro<E>` 结构；支持 Token、Basic、Bearer 三种认证策略。
 #[derive(Debug, Clone)]
 pub struct ApiClientUtils;
 

@@ -1,3 +1,8 @@
+//! # 日志属性宏
+//!
+//! 实现 `#[log_call]` 属性宏的参数解析与代码生成，在方法进入/退出时记录
+//! 方法名、参数及返回值，支持自定义日志级别与记录模式。
+
 use proc_macro2::{Ident, Span, TokenStream};
 use quote::{format_ident, quote};
 use syn::parse::{Parse, ParseStream};

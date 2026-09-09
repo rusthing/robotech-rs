@@ -1,3 +1,8 @@
+//! # DAO 属性宏
+//!
+//! 实现 `#[dao(...)]` 属性宏的参数解析与代码生成，为 DAO 结构体生成标准的
+//! 增删改查方法及唯一键、外键、模糊查询等元数据。
+
 use proc_macro2::{Ident, Span, TokenStream};
 use quote::{format_ident, quote};
 use syn::parse::{Parse, ParseStream};

@@ -3,6 +3,11 @@ use etcd_client::ConnectOptions;
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
 use std::time::Duration;
 
+/// `etcd_client::ConnectOptions` 的序列化包装。
+///
+/// `ConnectOptions` 内部字段为私有，无法直接反序列化；本包装器以扁平字段
+/// （user / keep_alive / timeout 等）方式解析配置并构造连接选项，
+/// 序列化时仅输出空对象。
 #[derive(Debug, Clone)]
 pub struct EtcdConnectOptionsWrapper(pub ConnectOptions);
 

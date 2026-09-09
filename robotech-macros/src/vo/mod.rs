@@ -1,3 +1,8 @@
+//! # VO 属性宏
+//!
+//! 实现 `#[vo]` 属性宏的参数解析与代码生成，为 VO 结构体自动添加标准属性、
+//! 无符号整型序列化处理，并生成对应的 ExVo（附带关联表信息）结构体。
+
 use proc_macro2::TokenStream;
 use quote::{format_ident, quote};
 use syn::{Attribute, Data, DeriveInput, Field, Fields, parse::{Parse, ParseStream}, Token, LitStr};

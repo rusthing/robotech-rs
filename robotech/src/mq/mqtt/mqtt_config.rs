@@ -4,6 +4,10 @@ use serde::Deserialize;
 use std::time::Duration;
 use wheel_rs::serde::{duration_serde, vec_serde};
 
+/// MQTT 连接与订阅配置。
+///
+/// 从配置文件中反序列化得到；`client_id`、`clean_session`、`qos` 共同决定
+/// 是否能在断线重连后收到离线消息。
 #[derive(Debug, Deserialize, Clone)]
 #[serde(rename_all = "kebab-case")]
 pub struct MqttConfig {

@@ -3,6 +3,10 @@ use std::time::Duration;
 use wheel_rs::serde::duration_option_serde;
 use wheel_rs::serde::vec_option_serde;
 
+/// # CORS 配置
+///
+/// 用于配置跨域资源共享（CORS）行为，控制浏览器允许哪些来源、方法、
+/// 请求头与响应头访问本服务，并支持预检缓存时间与携带凭证。
 #[derive(Debug, Serialize, Deserialize, Clone)]
 #[serde(rename_all = "kebab-case")]
 pub struct CorsConfig {

@@ -6,13 +6,16 @@ use serde::{Deserialize, Serialize};
 use std::time::Duration;
 use wheel_rs::serde::duration_serde;
 
+/// # API 客户端配置键
+///
+/// 配置文件中的 `api` 段，用于读取 API 客户端配置。
 pub const API_CLIENT_CONFIG_KEY: &str = "api";
 
-/// # API配置枚举
+/// # API 配置枚举
 ///
 /// 通过 `type` 字段区分两种模式：
-/// - `feign`: 服务发现模式，通过 svc_name 动态发现服务实例
-/// - `static`: 静态模式，直接使用 base_url 连接
+/// - `MicroSvc`: 服务发现模式，通过 svc_name 动态发现服务实例
+/// - `Simple`: 静态直连模式，直接使用 base_url 连接
 #[derive(Debug, Serialize, Deserialize, Clone)]
 #[serde(tag = "type")]
 pub enum ApiClientConfig {

@@ -1,3 +1,8 @@
+//! # API 文档属性宏
+//!
+//! 实现 `#[api_doc]` 属性宏的参数解析与代码生成，聚合控制器中的 OpenAPI
+//! path 并注册到全局 API 文档切片。
+
 use proc_macro2::TokenStream;
 use quote::{format_ident, quote};
 use syn::parse::{Parse, ParseStream};

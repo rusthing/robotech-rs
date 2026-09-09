@@ -20,6 +20,20 @@ use tracing::{debug, error};
 
 static CRYPTO_PROVIDER_INITIALIZED: OnceLock<()> = OnceLock::new();
 
+/// # 构建 HTTPS 服务
+///
+/// 基于给定的 Axum 路由、TCP 监听器与 HTTPS 配置启动一个启用 TLS 的 HTTP 服务，
+/// 支持 HTTP/2 与 HTTP/1.1（通过 ALPN 协商），并在收到停止信号时优雅关闭连接。
+///
+/// ## 参数
+/// * `router` - Axum 路由
+/// * `tokio_listener` - 已绑定的 TCP 监听器
+/// * `stop_web_service_receiver` - 停止信号接收端（用于优雅关闭）
+/// * `https_config` - HTTPS 配置（证书与私钥路径）
+///
+/// ## 返回值
+/// * `Ok(JoinHandle<()>)` - 服务任务的句柄
+/// * `Err(WebServerError)` - 未配置证书/私钥、证书或私钥解析失败、TLS 配置失败时
 pub fn build_https(
     router: Router,
     tokio_listener: TcpListener,

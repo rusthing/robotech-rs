@@ -1,5 +1,6 @@
 use serde::Deserialize;
 
+/// InfluxDB 连接配置。
 #[derive(Debug, Deserialize, Clone)]
 #[serde(rename_all = "kebab-case")]
 pub struct InfluxdbConfig {

@@ -3,6 +3,17 @@ use std::collections::HashMap;
 use tracing_appender::rolling::Rotation;
 use wheel_rs::serde::rotation_serde;
 
+/// # 日志配置
+///
+/// 日志初始化与热更新所需的配置项，支持从配置文件中反序列化（kebab-case 命名）。
+///
+/// 字段说明：
+/// - `level`：全局日志级别
+/// - `modules`：按模块（target）覆盖的日志级别
+/// - `console_time_format`：控制台日志时间格式
+/// - `file_time_format`：文件日志时间格式
+/// - `rotation`：日志文件滚动策略
+/// - `show_spans`：是否在控制台输出中打印 span 链
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "kebab-case")]
 pub struct LogConfig {

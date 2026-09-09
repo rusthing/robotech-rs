@@ -18,8 +18,14 @@ use wheel_rs::config_utils::diff_config;
 use wheel_rs::file_utils::{watch_file_changed, FileWatcher};
 use wheel_rs::process::{get_current_pid, send_signal_by_instruction};
 
+/// 应用层操作结果类型
 pub type Result<T> = core::result::Result<T, AppError>;
 
+/// # 应用配置监听器
+///
+/// 加载应用配置文件并监听其变化，在配置变更时自动重载，并通过回调通知调用方。
+///
+/// 监听期间会同时监听应用自身文件的更新，一旦应用文件被更新则触发优雅退出。
 pub struct AppWatcher<T>
 where
     T: Clone + serde::de::DeserializeOwned + Send + Sync + 'static,
@@ -43,6 +49,22 @@ impl<T> AppWatcher<T>
 where
     T: Clone + serde::de::DeserializeOwned + Send + Sync + 'static,
 {
+    /// # 创建应用配置监听器
+    ///
+    /// 加载应用配置文件（可通过 `config_file_path` 指定，未指定时使用环境中的
+    /// 应用配置文件），解析出 `T` 类型的应用配置，并启动配置热更新监听。
+    ///
+    /// 当应用配置变化时会调用 `on_change` 回调；日志配置变化时通过
+    /// `log_config_changed_tx` 发送新的日志配置。
+    ///
+    /// ## 参数
+    /// * `config_file_path` - 可选的自定义配置文件路径
+    /// * `log_config_changed_tx` - 日志配置变更通知发送端
+    /// * `on_change` - 应用配置变更时的回调函数
+    ///
+    /// ## 返回值
+    /// 返回 `Ok(AppWatcher<T>)`，持有最新的应用配置与后台监听任务；
+    /// 初始化失败时返回 `Err(AppError)`。
     pub async fn new<F, Fut>(
         config_file_path: Option<String>,
         log_config_changed_tx: watch::Sender<(LogConfig, HashMap<String, Value>)>,
@@ -232,6 +254,17 @@ pub fn watch_app_file(app_file_path: &PathBuf, debounce_delay: Duration) -> Resu
     })?)
 }
 
+/// # 等待退出信号并执行优雅退出
+///
+/// 循环监听 `signal_receiver` 中的系统信号，收到 SIGINT / SIGTERM / SIGQUIT 时
+/// 停止监听，随后执行 `graceful_shutdown` 回调完成优雅退出。
+///
+/// ## 参数
+/// * `signal_receiver` - 系统信号广播接收端
+/// * `graceful_shutdown` - 优雅退出时执行的收尾逻辑
+///
+/// ## 返回值
+/// 优雅退出流程执行完成后返回 `Ok(())`；收尾逻辑失败时返回 `Err(AppError)`。
 pub async fn wait_app_exit<F, Fut>(
     mut signal_receiver: broadcast::Receiver<nix::sys::signal::Signal>,
     graceful_shutdown: F,

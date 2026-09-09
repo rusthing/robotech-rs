@@ -1,3 +1,8 @@
+//! # svc 属性宏
+//!
+//! 实现 `#[svc]` 属性宏的代码生成，为以 `Svc` 结尾的结构体生成标准的
+//! 增删改查、分页查询及关联表查询（Ex 系列）Service 方法。
+
 use proc_macro2::TokenStream;
 use quote::{format_ident, quote};
 use syn::ItemStruct;

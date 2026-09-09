@@ -1,5 +1,8 @@
 use serde::{Deserialize, Serialize};
 
+/// # 健康检查配置
+///
+/// 用于配置健康检查端点是否暴露以及访问路径（默认兼容 Spring Cloud 的 `/actuator/health`）。
 #[derive(Debug, Serialize, Deserialize, Clone)]
 #[serde(rename_all = "kebab-case")]
 pub struct HealthCheckConfig {

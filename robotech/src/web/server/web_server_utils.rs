@@ -24,9 +24,17 @@ use utoipa_swagger_ui::{SwaggerUi, Url};
 use wheel_rs::config_utils::has_config_changed;
 use wheel_rs::process::terminate_process;
 
+/// # 路由注册切片
+///
+/// 通过 `#[distributed_slice]` 注册的路由构建函数集合，各业务模块在此注册路由，
+/// `setup_web_server` 会合并这些路由。
 #[distributed_slice]
 pub static ROUTER_SLICE: [fn() -> Router];
 
+/// # API 文档注册切片
+///
+/// 通过 `#[distributed_slice]` 注册的 API 文档（OpenApi）构建函数集合，
+/// 用于聚合各模块的 Swagger UI 文档。
 #[distributed_slice]
 pub static API_DOC_SLICE: [fn() -> (Url<'static>, OpenApi)];
 
@@ -39,11 +47,19 @@ static WEB_LISTEN_PORT: AtomicU16 = AtomicU16::new(0);
 static HEALTH_CHECK_URI: ArcSwapOption<String> = ArcSwapOption::const_empty();
 static HEALTH_CHECK_URL_HTTP_PROTOCOL: ArcSwapOption<String> = ArcSwapOption::const_empty();
 
+/// # 获取 Web 服务器实际监听端口
+///
+/// ## 返回值
+/// 返回服务器当前实际监听的端口；若服务器尚未启动（端口为 0），返回 `None`。
 pub fn get_web_listen_port() -> Option<u16> {
     let port = WEB_LISTEN_PORT.load(Ordering::Relaxed);
     if port == 0 { None } else { Some(port) }
 }
 
+/// # 获取健康检查 URI
+///
+/// ## 返回值
+/// 返回当前配置的健康检查路径；未配置时默认返回 `/actuator/health`。
 pub fn get_health_check_uri() -> String {
     HEALTH_CHECK_URI
         .load()
@@ -52,6 +68,10 @@ pub fn get_health_check_uri() -> String {
         .unwrap_or_else(|| "/actuator/health".to_string())
 }
 
+/// # 获取健康检查 URL 使用的 HTTP 协议
+///
+/// ## 返回值
+/// 返回当前 Web 服务使用的协议（`http` 或 `https`）；服务尚未启动时返回 `None`。
 pub fn get_health_check_url_http_protocol() -> Option<String> {
     HEALTH_CHECK_URL_HTTP_PROTOCOL
         .load()
@@ -93,16 +113,30 @@ fn take_stop_web_service_sender() -> Result<Option<broadcast::Sender<()>>, WebSe
 
 /// # 健康检查端点
 ///
-/// 提供简单的健康检查接口，返回 "Ok" 字符串表示服务正常运行
+/// 提供简单的健康检查接口，返回 `"Ok"` 表示服务正常运行。
 ///
 /// ## 返回值
-/// 返回实现了 Responder trait 的响应对象
+/// 恒返回字符串字面量 `"Ok"`。
 #[debug_handler]
 #[log_call]
 pub async fn health() -> &'static str {
     "Ok"
 }
 
+/// # 初始化并启动 Web 服务器
+///
+/// 根据配置构建路由、挂载健康检查与 Swagger 文档，添加日志/IP 拦截/禁止访问/
+/// 仅本地访问/CORS 等中间件，绑定监听地址并启动服务；支持端口复用与无缝重启。
+///
+/// ## 参数
+/// * `web_server_config` - Web 服务器配置
+/// * `port_of_args` - 命令行参数指定的端口（优先于配置文件中的端口）
+/// * `old_pid` - 旧应用进程的 PID（用于无缝重启时停止旧应用）
+/// * `changed` - 配置变更集合，用于判断 Web 配置是否发生变化
+///
+/// ## 返回值
+/// * `Ok(())` - 启动成功（或配置未变化无需重启）
+/// * `Err(WebServerError)` - 配置解析、监听绑定或启动失败
 #[log_call]
 pub async fn setup_web_server(
     web_server_config: WebServerConfig,
@@ -302,8 +336,9 @@ pub async fn setup_web_server(
 /// 创建一个支持SO_REUSEADDR和SO_REUSEPORT选项的TCP监听器，用于实现无缝重启
 ///
 /// ## 参数
-/// * `ip` - 要监听的IP地址字符串
+/// * `bind` - 要监听的 IP 地址字符串（IPv6 地址可带方括号，会被自动去除）
 /// * `port` - 要监听的端口号
+/// * `reuse_port` - 是否启用 SO_REUSEPORT 端口复用
 ///
 /// ## 返回值
 /// 返回配置好的TcpListener实例
@@ -378,10 +413,7 @@ pub fn create_listener(
 ///
 /// ## 返回值
 /// * `Ok(())` - 服务器准备就绪
-/// * `Err(String)` - 等待超时或其他错误
-///
-/// ## 错误处理
-/// * 等待超时时返回错误字符串"启动超时"
+/// * `Err(WebServerError::StartWebServerTimeout)` - 在 `wait_timeout` 内未通过健康检查
 async fn wait_for_web_server_ready(
     health_check_url: &str,
     wait_timeout: Duration,
@@ -410,6 +442,13 @@ async fn wait_for_web_server_ready(
     .map_err(|_| WebServerError::StartWebServerTimeout(health_check_url.to_string()))?
 }
 
+/// # 停止 Web 服务
+///
+/// 向当前运行中的 Web 服务发送停止信号，并等待所有服务任务结束。
+///
+/// ## 返回值
+/// * `Ok(())` - 服务已停止
+/// * `Err(WebServerError)` - 停止信号发送失败或服务任务等待失败
 pub async fn stop_web_service() -> Result<(), WebServerError> {
     if let Some(stop_web_service_sender) = take_stop_web_service_sender()? {
         stop_web_service_sender
@@ -426,6 +465,17 @@ pub async fn stop_web_service() -> Result<(), WebServerError> {
     Ok(())
 }
 
+/// # 停止旧的 Web 服务
+///
+/// 向旧服务的停止信号发送端发送信号，并等待旧服务任务结束，用于无缝重启场景。
+///
+/// ## 参数
+/// * `old_sender` - 旧服务的停止信号发送端（可选）
+/// * `old_handles` - 旧服务的任务句柄列表
+///
+/// ## 返回值
+/// * `Ok(())` - 旧服务已停止
+/// * `Err(WebServerError)` - 停止信号发送失败或任务等待失败
 pub async fn stop_old_web_service(
     old_sender: Option<broadcast::Sender<()>>,
     old_handles: Vec<JoinHandle<()>>,
@@ -443,22 +493,18 @@ pub async fn stop_old_web_service(
     Ok(())
 }
 
-/// # 停止旧的Web服务器
+/// # 停止旧的 Web 服务器
 ///
-/// 向指定PID的旧Web服务器进程发送停止信号
+/// 向指定 PID 的旧应用进程发送停止信号并等待其退出，用于无缝重启场景。
 ///
 /// ## 参数
-/// * `old_pid` - 旧服务器进程ID
+/// * `old_pid` - 旧应用进程 PID
+/// * `wait_timeout` - 等待进程退出的超时时间
+/// * `retry_interval` - 检查进程是否退出的重试间隔
 ///
 /// ## 返回值
-/// * `Ok(())` - 成功发送停止信号
-/// * `Err(Box<dyn std::error::Error>)` - 发送失败
-///
-/// ## 使用示例
-/// ```rust
-/// use crate::web::server::stop_old_web_server;
-/// stop_old_web_server(12345).await?;
-/// ```
+/// * `Ok(())` - 旧进程已停止
+/// * `Err(WebServerError)` - 停止进程失败（底层错误为 `ProcessError`）
 async fn terminate_old_app(
     old_pid: u32,
     wait_timeout: Duration,

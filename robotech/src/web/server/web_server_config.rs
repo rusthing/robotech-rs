@@ -7,8 +7,15 @@ use std::time::Duration;
 use wheel_rs::serde::{duration_serde, vec_ipnet_serde, vec_serde};
 use wheel_rs::urn_utils::Urn;
 
+/// # Web 服务器配置键
+///
+/// 配置文件中的 `web` 段，用于判断 Web 配置是否发生变化。
 pub const WEB_SERVER_CONFIG_KEY: &str = "web";
 
+/// # Web 服务器配置
+///
+/// 用于配置 Web 服务器的监听地址、端口、端口复用、HTTPS、IP 黑白名单、
+/// 访问控制 URN、CORS、健康检查，以及启动/停止相关的超时参数。
 #[derive(Debug, Serialize, Deserialize, Clone)]
 #[serde(rename_all = "kebab-case")]
 pub struct WebServerConfig {
@@ -62,18 +69,22 @@ pub struct WebServerConfig {
     #[serde(default)]
     pub health_check: HealthCheckConfig,
 
+    /// 等待新服务器启动就绪的超时时间
     #[serde(with = "duration_serde", default = "start_wait_timeout_default")]
     pub start_wait_timeout: Duration,
 
+    /// 等待新服务器就绪时的重试间隔
     #[serde(with = "duration_serde", default = "start_retry_interval_default")]
     pub start_retry_interval: Duration,
 
+    /// 停止旧应用进程的超时时间
     #[serde(
         with = "duration_serde",
         default = "terminate_old_app_wait_timeout_default"
     )]
     pub terminate_old_app_wait_timeout: Duration,
 
+    /// 停止旧应用进程时的重试间隔
     #[serde(
         with = "duration_serde",
         default = "terminate_old_app_retry_interval_default"

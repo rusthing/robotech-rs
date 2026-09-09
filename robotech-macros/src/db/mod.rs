@@ -1,3 +1,8 @@
+//! # 数据库迁移过程宏
+//!
+//! 实现 `db_migrate!()` 过程宏的参数解析与代码生成，根据数据库类型自动选择
+//! 对应的迁移目录并执行迁移。
+
 use proc_macro2::{Ident, TokenStream};
 use quote::quote;
 

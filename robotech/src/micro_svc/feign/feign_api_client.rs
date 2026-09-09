@@ -17,10 +17,13 @@ use std::time::{Duration, Instant};
 use thiserror::Error;
 use tracing::warn;
 
+/// Feign 调用过程中的错误。
 #[derive(Debug, Error)]
 pub enum FeignError {
+    /// 服务发现成功但没有可用实例（实例列表为空或全部处于冷却期）
     #[error("no available service instance")]
     NoAvailableInstance,
+    /// 服务发现失败
     #[error("service discovery failed: {0}")]
     Discovery(String),
 }
@@ -84,11 +87,20 @@ enum FeignMode {
     },
 }
 
+/// 声明式 HTTP 客户端：根据 `ApiClientConfig` 选择微服务模式或简单模式。
+///
+/// - 微服务模式：通过 `ServiceDiscovery` 发现目标服务实例，`LoadBalancer` 选择实例，
+///   失败实例按 `max_failures` / `cooldown_duration` 进入冷却期，请求会在多个实例间自动重试。
+/// - 简单模式：直接请求固定的 `base_url`，可选携带认证策略。
 pub struct FeignApiClient {
     mode: FeignMode,
 }
 
 impl FeignApiClient {
+    /// 根据配置创建 Feign 客户端。
+    ///
+    /// 微服务模式下会初始化服务发现并启动后台刷新任务；初始化失败不会报错，
+    /// 而是记录告警并在首次请求时重试发现。
     pub async fn new(config: ApiClientConfig) -> Self {
         match config {
             ApiClientConfig::MicroSvc {
@@ -124,6 +136,9 @@ impl FeignApiClient {
         }
     }
 
+    /// 自定义负载均衡器（仅微服务模式生效）。
+    ///
+    /// 默认使用轮询（RoundRobin）策略，可通过本方法替换。
     pub fn with_load_balancer(mut self, load_balancer: impl LoadBalancer + 'static) -> Self {
         if let FeignMode::MicroSvc {
             load_balancer: ref mut lb,
@@ -135,6 +150,7 @@ impl FeignApiClient {
         self
     }
 
+    /// 设置实例进入冷却期所需的连续失败次数（仅微服务模式生效）。
     pub fn with_max_failures(mut self, max_failures: usize) -> Self {
         if let FeignMode::MicroSvc {
             max_failures: ref mut mf,
@@ -146,6 +162,7 @@ impl FeignApiClient {
         self
     }
 
+    /// 设置实例进入冷却期后的冷却时长（仅微服务模式生效）。
     pub fn with_cooldown_duration(mut self, cooldown_duration: Duration) -> Self {
         if let FeignMode::MicroSvc {
             cooldown_duration: ref mut cd,
@@ -162,6 +179,7 @@ impl FeignApiClient {
         format!("{}://{}:{}", protocol, host, port)
     }
 
+    /// 返回内部的服务发现器（仅微服务模式；简单模式返回 `None`）。
     pub fn service_discovery(&self) -> Option<&Arc<ServiceDiscovery>> {
         match &self.mode {
             FeignMode::MicroSvc {
@@ -294,6 +312,17 @@ impl FeignApiClient {
         }
     }
 
+    /// 发起任意方法的 HTTP 请求，返回统一响应结构 `Ro<E>`。
+    ///
+    /// ## 参数
+    /// - `method`：HTTP 方法
+    /// - `uri`：请求路径（不含 base_url）
+    /// - `params`：查询参数（可选，会被序列化为 query string）
+    /// - `body`：请求体（可选）
+    /// - `headers`：附加请求头（可选）
+    ///
+    /// ## 错误
+    /// 微服务模式下无可用实例时返回 `ApiClientError::NotInit(FeignError::NoAvailableInstance)`。
     pub async fn request<D, E>(
         &self,
         method: Method,
@@ -309,6 +338,7 @@ impl FeignApiClient {
         self.do_request(method, uri, params, body, headers).await
     }
 
+    /// 发起 webhook 请求：GET 时 `data` 作为查询参数，其它方法作为请求体。
     pub async fn webhook<D, E>(
         &self,
         method: Method,
@@ -326,6 +356,7 @@ impl FeignApiClient {
         }
     }
 
+    /// 发起 GET 请求，返回 JSON 值。
     pub async fn get<D: Serialize + ?Sized + Debug>(
         &self,
         uri: &str,
@@ -336,6 +367,7 @@ impl FeignApiClient {
             .await
     }
 
+    /// 发起 GET 请求并返回原始字节（适用于下载文件等场景）。
     pub async fn get_bytes<D: Serialize + ?Sized + Debug>(
         &self,
         uri: &str,
@@ -398,6 +430,7 @@ impl FeignApiClient {
         }
     }
 
+    /// 发起 POST 请求，返回 JSON 值。
     pub async fn post<D: Serialize + ?Sized + Debug>(
         &self,
         uri: &str,
@@ -408,6 +441,7 @@ impl FeignApiClient {
             .await
     }
 
+    /// 发起 PUT 请求，返回 JSON 值。
     pub async fn put<D: Serialize + ?Sized + Debug>(
         &self,
         uri: &str,
@@ -418,6 +452,7 @@ impl FeignApiClient {
             .await
     }
 
+    /// 发起 DELETE 请求，返回 JSON 值。
     pub async fn delete<D: Serialize + ?Sized + Debug>(
         &self,
         uri: &str,
@@ -428,6 +463,7 @@ impl FeignApiClient {
             .await
     }
 
+    /// 发起 multipart/form-data 请求，返回 JSON 值。
     pub async fn multipart(
         &self,
         uri: &str,

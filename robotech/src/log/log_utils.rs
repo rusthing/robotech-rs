@@ -164,8 +164,15 @@ macro_rules! creat_file_layer {
     };
 }
 
+/// 日志模块操作结果类型
 pub type Result<T> = core::result::Result<T, LogError>;
 
+/// # 日志监听器
+///
+/// 初始化 tracing 日志系统（控制台彩色输出 + JSON 文件输出），并监听日志配置
+/// 变化，在配置变更时热更新日志级别、输出格式与文件滚动策略。
+///
+/// 通过 `config_changed_tx` 对外发布日志配置变更通知。
 pub struct LogWatcher {
     _file_watcher: FileWatcher,
     pub config_changed_tx: watch::Sender<(LogConfig, HashMap<String, Value>)>,
@@ -179,6 +186,16 @@ impl Drop for LogWatcher {
 }
 
 impl LogWatcher {
+    /// # 初始化日志系统
+    ///
+    /// 读取环境中的应用目录，构建日志配置（`LOG` 配置段），初始化 tracing 日志系统：
+    /// - 控制台彩色输出层
+    /// - JSON 格式文件输出层（按配置滚动）
+    ///
+    /// 随后启动两个后台任务：监听日志配置变更并热更新、监听日志配置文件变化并重载。
+    ///
+    /// ## 返回值
+    /// 返回 `Ok(LogWatcher)`；初始化失败时返回 `Err(LogError)`。
     pub async fn new() -> Result<Self> {
         let AppEnv { app_dir, .. } = APP_ENV.get().ok_or(EnvError::GetAppEnv())?;
         let (config_changed_tx, mut config_changed_rx) =

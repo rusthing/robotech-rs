@@ -11,11 +11,33 @@ use wheel_rs::config_utils::has_config_changed;
 /// 数据库连接
 static DB_CONN: ArcSwapOption<DbConn> = ArcSwapOption::const_empty();
 
-/// 获取数据库连接的只读访问
+/// # 获取数据库连接
+///
+/// 返回全局数据库连接池的只读访问引用。
+///
+/// ## 返回值
+/// 返回数据库连接引用
+///
+/// ## 错误
+/// 数据库连接尚未初始化时返回 `DbError::GetDbConn`
 pub fn get_db_conn() -> Result<Arc<DbConn>, DbError> {
     DB_CONN.load_full().ok_or(DbError::GetDbConn())
 }
 
+/// # 初始化数据库连接
+///
+/// 根据连接配置建立数据库连接并存入全局连接池。
+/// 若传入的配置变更信息显示数据库配置未变化，则跳过重建连接。
+///
+/// ## 参数
+/// * `db_conn_config` - 数据库连接配置
+/// * `changed` - 配置变更信息，用于判断数据库配置是否发生变化
+///
+/// ## 返回值
+/// 初始化成功返回 `Ok(())`
+///
+/// ## 错误
+/// 数据库连接建立失败时返回 `DbError::Connect`
 pub async fn setup_db_conn(
     db_conn_config: DbConnConfig,
     changed: &Option<HashMap<String, Value>>,

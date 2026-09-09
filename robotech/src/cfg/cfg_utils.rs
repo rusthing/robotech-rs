@@ -9,8 +9,29 @@ use config::{Config, ConfigBuilder};
 use std::path::{Path, PathBuf};
 use tracing::warn;
 
+/// # 配置模块的 Result 别名
+///
+/// 配置操作统一返回的错误类型，错误变体为 [`CfgError`]。
 pub type Result<T> = core::result::Result<T, CfgError>;
 
+/// # 构建应用配置
+///
+/// 依次加载基础配置文件、profile 对应的配置文件（可选），并按需从配置中心
+/// 拉取配置，最后叠加环境变量覆盖，构建完整的配置对象。
+///
+/// ## 参数
+/// * `app_dir` - 应用所在目录，用于定位默认配置文件
+/// * `env_var_prefix` - 环境变量前缀，用于从环境变量中覆盖配置
+/// * `app_file_name_without_ext` - 应用文件名（不含扩展名）；为 `None` 时表示仅构建日志配置，
+///   不进行配置中心初始化
+/// * `cfg_file_name_without_ext` - 配置文件基础名（不含扩展名），如 `"config"`
+/// * `cfg_file_path` - 可选的显式配置文件路径，指定后不再按目录查找默认配置
+///
+/// ## 返回值
+/// 返回构建完成的 `Config` 对象与已加载的配置文件路径列表
+///
+/// ## 错误
+/// 配置文件构建失败时返回 `CfgError::Build`；反序列化失败时返回 `CfgError::Deserialize`
 pub async fn build_cfg(
     app_dir: &PathBuf,
     env_var_prefix: &str,
@@ -96,6 +117,18 @@ pub async fn build_cfg(
     Ok((config, files))
 }
 
+/// # 反序列化配置对象
+///
+/// 将构建完成的 `Config` 反序列化为指定的配置结构体类型。
+///
+/// ## 参数
+/// * `config` - 待反序列化的配置对象
+///
+/// ## 返回值
+/// 返回反序列化后的配置结构体
+///
+/// ## 错误
+/// 配置反序列化失败时返回 `CfgError::Deserialize`
 pub async fn deserialize_config<'a, T>(config: Config) -> Result<T>
 where
     T: serde::Deserialize<'a>,

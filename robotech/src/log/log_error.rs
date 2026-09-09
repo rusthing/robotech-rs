@@ -3,6 +3,9 @@ use crate::env::EnvError;
 use thiserror::Error;
 use tracing_appender::rolling::InitError;
 
+/// # 日志模块错误
+///
+/// 日志初始化、配置加载、文件监听等操作失败时返回的错误类型。
 #[derive(Error, Debug)]
 pub enum LogError {
     #[error("{0}")]

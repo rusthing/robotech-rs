@@ -3,6 +3,10 @@ use std::io;
 use thiserror::Error;
 use wheel_rs::process::ProcessError;
 
+/// # Web 服务器错误
+///
+/// 该枚举定义了 Web 服务器在配置解析、端口解析、CORS/HTTPS 配置、监听绑定、
+/// 启动超时、服务停止与旧应用终止等过程中可能出现的错误。
 #[derive(Error, Debug)]
 pub enum WebServerError {
     #[error("{0}")]

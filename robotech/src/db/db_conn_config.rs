@@ -10,6 +10,10 @@ use wheel_rs::serde::{
     duration_option_option_serde, duration_option_serde, log_filter_option_serde,
 };
 
+/// # 数据库配置键
+///
+/// 配置文件中数据库配置段使用的键名，值为 `"db"`；
+/// 同时用于判断数据库相关配置是否发生变更。
 pub const DB_CONN_CONFIG_KEY: &str = "db";
 
 /// # 数据库配置结构体
@@ -146,7 +150,9 @@ impl Into<ConnectOptions> for DbConnConfig {
 }
 
 impl DbConnConfig {
-    /// Get the database URL of the pool
+    /// # 获取数据库连接 URL
+    ///
+    /// 返回当前配置的数据库连接字符串。
     pub fn get_url(&self) -> &str {
         &self.url
     }

@@ -1,3 +1,8 @@
+//! # db_unwrap 属性宏
+//!
+//! 实现 `#[db_unwrap]` 属性宏的参数解析与代码生成，为 Service 查询方法自动
+//! 处理数据库连接获取与可选的事务开启逻辑。
+
 use proc_macro2::{Ident, TokenStream};
 use quote::quote;
 use syn::parse::{Parse, ParseStream};

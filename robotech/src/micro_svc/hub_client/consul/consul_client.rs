@@ -20,6 +20,9 @@ use std::time::Duration;
 use tokio::sync::watch;
 use tokio::task::JoinHandle;
 
+/// Consul 后端客户端：同时实现配置中心（KV）与注册中心（Agent / Health）能力。
+///
+/// 通过标准 HTTP API 与 Consul 通信，不依赖专用 SDK。
 pub struct ConsulClient {
     reqwest_client: reqwest::Client,
     base_url: String,
@@ -39,6 +42,13 @@ struct ConsulKvEntry {
 impl ConsulClient {
     const CLIENT_NAME: &'static str = "consul";
 
+    /// 根据微服务配置创建 Consul 客户端。
+    ///
+    /// 取 `consul.hub_client.base_url` 的第一个地址（去掉末尾 `/`）作为基础 URL。
+    ///
+    /// ## Panics
+    /// 调用方需保证 `micro_svc_config.consul` 为 `Some`（`HubClient::new` 内部会先判断），
+    /// 否则此处 `unwrap` 会 panic。
     pub fn new(micro_svc_config: MicroSvcConfig) -> Result<Self, HubClientError> {
         let MicroSvcConfig {
             consul: consul_config,

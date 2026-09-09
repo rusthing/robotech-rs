@@ -1,3 +1,8 @@
+//! # 控制器属性宏
+//!
+//! 实现 `#[ctrl]` 属性宏的代码生成，为以 `Ctrl` 结尾的结构体生成一组带
+//! OpenAPI 元数据与日志能力的 axum CRUD 处理器方法。
+
 use proc_macro2::TokenStream;
 use quote::{format_ident, quote};
 use syn::ItemStruct;

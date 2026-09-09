@@ -1,7 +1,7 @@
 use rumqttc::QoS;
 use serde::{Deserialize, Deserializer};
 
-/// Custom deserializer for rumqttc::QoS
+/// `rumqttc::QoS` 的自定义反序列化器：将整数 0/1/2 映射为对应的 QoS 等级。
 pub fn deserialize<'de, D>(deserializer: D) -> Result<QoS, D::Error>
 where
     D: Deserializer<'de>,

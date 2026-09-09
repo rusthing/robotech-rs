@@ -46,17 +46,18 @@ static REGEX_DELETE_VIOLATE_FK_MYSQL: LazyLock<Regex> = LazyLock::new(|| {
     Regex::new(r#"Cannot delete or update a parent row: a foreign key constraint fails \(`[A-Za-z_0-9]+`\.`(?P<fk_table>[A-Za-z_0-9]+)`, CONSTRAINT `[A-Za-z_0-9]+` FOREIGN KEY \(`(?P<fk_column>[A-Za-z_0-9]+)`\) REFERENCES `(?P<pk_table>[A-Za-z_0-9]+)`"#).expect("正则表达式错误")
 });
 
-/// # 自定义服务层的错误枚举
+/// # 自定义数据访问层的错误枚举
 ///
-/// 该枚举定义了服务层可能遇到的各种错误类型，包括数据未找到、重复键约束违反、
-/// IO错误和数据库错误。这些错误类型用于在服务层统一处理各种异常情况，
-/// 并提供清晰的错误信息反馈给调用方。
+/// 该枚举定义了数据访问层可能遇到的各种错误类型，包括运行时错误、重复键约束违反、
+/// 外键约束违反、数据库错误与初始化状态错误等。这些错误类型用于在数据访问层
+/// 统一处理各种异常情况，并提供清晰的错误信息反馈给调用方。
 ///
 /// ## 错误类型说明
-/// - `NotFound`: 表示请求的数据未找到，通常用于查询操作
-/// - `DuplicateKey`: 表示违反了唯一性约束，如重复的用户名或邮箱
-/// - `IoError`: 表示输入输出相关的错误，如文件读写失败
-/// - `DatabaseError`: 表示底层数据库操作发生的错误
+/// - `Runtime`: 表示运行时错误，通常包装任意 `anyhow` 错误
+/// - `DuplicateKey`: 表示违反了唯一性约束，携带唯一键元数据与冲突值
+/// - `InsertViolateFk` / `DeleteViolateFk`: 表示插入或删除（更新）操作违反了外键约束
+/// - `Db`: 表示底层数据库操作发生的错误
+/// - `NotInitialized` / `AlreadyInitialized`: 表示注册表等资源未初始化或重复初始化的错误
 #[derive(Debug, thiserror::Error)]
 pub enum DaoError {
     #[error("运行时错误: {0}")]
@@ -82,18 +83,17 @@ pub enum DaoError {
 }
 
 impl DaoError {
-    /// # 处理数据库错误，并转换为服务层错误
+    /// # 处理数据库错误，并转换为数据访问层错误
     ///
-    /// 该函数用于将数据库层的错误(DbErr)转换为服务层错误(SvcError)，
-    /// 特别处理了重复键错误，能够识别Postgres和MySQL的重复键错误格式，
-    /// 并将其转换为带有字段名称和值的DuplicateKey错误。
+    /// 将数据库层返回的错误（`DbErr`）解析并转换为 `DaoError`，能够识别
+    /// PostgreSQL 与 MySQL 的重复键、外键约束违反错误格式，并转换为携带
+    /// 业务字段信息的 `DuplicateKey`、`InsertViolateFk`、`DeleteViolateFk` 变体。
     ///
     /// ## 参数
     /// * `db_err` - 数据库错误对象
-    /// * `unique_key_hashmap` - 用于映射数据库列名到业务字段名的哈希表
     ///
     /// ## 返回值
-    /// 返回对应的SvcError服务层错误对象
+    /// 返回对应的 `DaoError` 错误对象
     #[log_call(level = warn, mode = enter)]
     pub fn parse_db_err(db_err: DbErr) -> DaoError {
         let db_err_string = format!("{:?}", db_err);
@@ -123,15 +123,14 @@ impl DaoError {
     /// # 从正则匹配中抓取有用信息转换成重复键错误
     ///
     /// 该函数用于从正则表达式匹配结果中提取重复键错误的相关信息，
-    /// 包括冲突的列名和值，并通过映射表转换为业务层的字段名，
-    /// 最终构造出一个包含字段名和冲突值的DuplicateKey服务错误。
+    /// 包括冲突的列名和值，并通过唯一键注册表转换为业务层的字段名，
+    /// 最终构造出一个包含字段名和冲突值的 `DuplicateKey` 错误。
     ///
     /// ## 参数
-    /// * `caps` - 正则表达式匹配结果，包含column和value两个命名捕获组
-    /// * `unique_key_hashmap` - 数据库列名到业务字段名的映射表
+    /// * `caps` - 正则表达式匹配结果，包含 `ak_name` 和 `value` 两个命名捕获组
     ///
     /// ## 返回值
-    /// 返回一个包含字段名和冲突值的SvcError::DuplicateKey错误
+    /// 返回一个包含字段名和冲突值的 `DaoError::DuplicateKey` 错误
     fn parse_duplicate_key(caps: Captures) -> DaoError {
         let ak_name = caps["ak_name"].to_lowercase().to_string();
         let value = caps["value"].to_string();

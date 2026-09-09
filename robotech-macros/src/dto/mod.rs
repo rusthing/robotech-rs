@@ -1,3 +1,8 @@
+//! # DTO 属性宏
+//!
+//! 实现 `#[crud_dto]` 属性宏的参数解析与代码生成，为 DTO 结构体自动生成
+//! AddDto、ModifyDto、SaveDto、QueryDto 四类衍生结构体（区分服务端与客户端模式）。
+
 use proc_macro2::TokenStream;
 use quote::{format_ident, quote};
 use syn::{

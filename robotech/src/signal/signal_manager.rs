@@ -10,6 +10,12 @@ use wheel_rs::process::{
     watch_signal, PidFileGuard,
 };
 
+/// # 信号管理器
+///
+/// 负责应用进程的信号与 PID 文件管理：
+/// - 根据启动指令（`start`/`restart`/`stop`/`kill` 等）向旧进程发送信号或校验运行状态
+/// - 创建并持有 PID 文件，防止应用重复启动
+/// - 提供系统信号广播接收端，供应用实现优雅退出
 #[derive(Debug)]
 pub struct SignalManager {
     pid_file_path: PathBuf,
@@ -17,6 +23,17 @@ pub struct SignalManager {
 }
 
 impl SignalManager {
+    /// # 创建信号管理器
+    ///
+    /// 根据 `signal_instruction` 解析启动指令并执行对应操作（如向旧进程发送信号、
+    /// 校验程序是否已运行），同时计算并保存 PID 文件路径。
+    ///
+    /// ## 参数
+    /// * `signal_instruction` - 启动指令，如 `start`、`restart`、`stop`、`kill`
+    ///
+    /// ## 返回值
+    /// 返回 `Ok((SignalManager, Option<u32>))`，其中 `Option<u32>` 为旧进程 PID
+    /// （不存在时返回 `None`）；操作失败时返回 `Err(SignalManagerError)`。
     #[log_call]
     pub fn new(signal_instruction: String) -> Result<(Self, Option<u32>), SignalManagerError> {
         let AppEnv { app_file_path, .. } = APP_ENV.get().ok_or(EnvError::GetAppEnv())?;
@@ -32,6 +49,13 @@ impl SignalManager {
         ))
     }
 
+    /// # 注册系统信号监听
+    ///
+    /// 创建 PID 文件并返回系统信号广播接收端，供应用循环等待退出信号。
+    ///
+    /// ## 返回值
+    /// 返回 `Ok(broadcast::Receiver<Signal>)`；PID 文件创建失败时返回
+    /// `Err(SignalManagerError)`。
     pub fn watch_signal(
         &mut self,
     ) -> Result<broadcast::Receiver<nix::sys::signal::Signal>, SignalManagerError> {
@@ -41,32 +65,20 @@ impl SignalManager {
 
     /// # 解析并处理信号参数
     ///
-    /// 该函数根据传入的信号参数执行相应操作，如发送系统信号给指定进程或启动程序。
+    /// 根据启动指令执行相应操作：
+    /// - `restart`：若旧进程在运行，返回其 PID；否则返回 `None`
+    /// - `start`：若 PID 文件存在且进程正在运行，返回 `ProgramIsRunning` 错误；
+    ///   否则返回 `None`
+    /// - 其他指令（如 `stop`/`kill`）：向旧进程发送信号，`kill` 时顺带删除
+    ///   PID 文件，操作完成后进程直接退出
     ///
     /// ## 参数
-    ///
-    /// * `signal` - 信号参数，可选字符串，表示要执行的信号操作
+    /// * `signal_instruction` - 启动指令字符串
+    /// * `pid_file_path` - PID 文件路径
     ///
     /// ## 返回值
-    ///
-    /// 返回 `PidFileGuard` 实例，用于管理PID文件的生命周期
-    ///
-    /// ## 支持的信号指令
-    ///
-    /// * `start` - 默认值，先发送`SIGCONT`信号(kill -0)，检查程序是否已运行(如果程序已运行，会报错)，然后启动程序
-    /// * `restart` - 不处理，直接返回(restart指令在本函数中不处理，后续在需要时再单独发送信号停止旧程序)
-    /// * `stop`/`s` - 发送`SIGTERM`信号(kill -15)，用于终止程序，优雅退出
-    /// * `kill`/`k` - 发送`SIGKILL`信号(kill -9)，用于强制终止程序(顺带删除PID文件)
-    ///
-    /// ## 使用示例
-    ///
-    /// ```
-    /// let guard = parse_and_handle_signal_args(Some("stop".to_string()));
-    /// ```
-    ///
-    /// # Panics
-    ///
-    /// 当PID文件已存在且对应进程正在运行时，函数会panic并输出提示信息
+    /// 返回 `Ok(Option<u32>)`，即旧进程 PID（不存在时为 `None`）；
+    /// 处理失败时返回 `Err(SignalManagerError)`。
     #[log_call]
     fn parse_and_handle_signal_args(
         signal_instruction: String,

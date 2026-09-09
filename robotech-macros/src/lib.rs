@@ -49,6 +49,19 @@ pub fn log_call(args: TokenStream, input: TokenStream) -> TokenStream {
     log_call_macro(args, input).into()
 }
 
+/// 过程宏：在异步函数中生成数据库迁移代码
+///
+/// 调用时需要传入一个保存数据库连接地址字符串的变量名（支持 MySQL、PostgreSQL、
+/// SQLite），宏会在调用位置展开为连接数据库并执行迁移的代码，并根据数据库类型
+/// 自动选择对应的迁移目录（`migrations/mysql`、`migrations/pgsql`、`migrations/sqlite`）。
+///
+/// # 使用示例
+/// ```
+/// async fn migrate_db(db_url: String) -> anyhow::Result<()> {
+///     db_migrate!(db_url);
+///     Ok(())
+/// }
+/// ```
 #[proc_macro]
 pub fn db_migrate(args: TokenStream) -> TokenStream {
     let args = parse_macro_input!(args as MigrateArgs);
@@ -186,18 +199,63 @@ pub fn db_unwrap(args: TokenStream, input: TokenStream) -> TokenStream {
     db_unwrap_macro(args, input).into()
 }
 
+/// 属性宏：为以 `Svc` 结尾的结构体自动生成标准 CRUD 方法
+///
+/// 该宏会解析结构体名称（必须是 `XxxSvc` 形式的大驼峰命名），为结构体生成
+/// `add`、`modify`、`save`、`del_by_id`、`del_by_query_dto`、`get_by_id`、
+/// `get_by_query_dto`、`list_by_query_dto`、`page_by_query_dto` 以及对应的
+/// Ex 版本（附带关联表信息）等方法。生成的方法内部调用对应的 `XxxDao`，
+/// 返回 `Ro<Vo>`、`Ro<ExVo>`、`Ro<PageRx<Vo>>` 等统一响应格式。
+///
+/// 使用前提：项目中需存在与结构体名称对应的 `dto`、`dao`、`mo`、`vo` 模块。
+///
+/// # 使用示例
+/// ```
+/// #[svc]
+/// pub struct OssBucketSvc;
+/// ```
 #[proc_macro_attribute]
 pub fn svc(_args: TokenStream, input: TokenStream) -> TokenStream {
     let input = parse_macro_input!(input as ItemStruct);
     svc_macro(input).into()
 }
 
+/// 属性宏：为以 `Ctrl` 结尾的结构体自动生成标准 CRUD Web 处理器
+///
+/// 该宏会解析结构体名称（必须是 `XxxCtrl` 形式的大驼峰命名），为结构体生成
+/// 一组 axum handler 方法（`add`、`modify`、`save`、`del_by_id`、`get_by_id`、
+/// `get_by_query_dto`、`list_by_query_dto`、`page_by_query_dto` 及 Ex 版本），
+/// 每个方法带有 `#[utoipa::path]`、`#[debug_handler]`、`#[log_call]` 属性，
+/// 内部调用对应的 `XxxSvc` 并返回 `Json<Ro<...>>` 格式响应。
+///
+/// 使用前提：项目中需存在与结构体名称对应的 `dto`、`svc`、`vo` 模块。
+///
+/// # 使用示例
+/// ```
+/// #[ctrl]
+/// pub struct OssBucketCtrl;
+/// ```
 #[proc_macro_attribute]
 pub fn ctrl(_args: TokenStream, input: TokenStream) -> TokenStream {
     let input = parse_macro_input!(input as ItemStruct);
     ctrl_macro(input).into()
 }
 
+/// 属性宏：为以 `Router` 结尾的结构体生成路由注册函数
+///
+/// 该宏会解析结构体名称（必须是 `XxxRouter` 形式的大驼峰命名），生成
+/// `build_router` 函数，并通过 `linkme::distributed_slice` 注册到
+/// `robotech::web::ROUTER_SLICE` 全局路由切片，实现路由的分布式收集。
+///
+/// 支持以下参数：
+/// - `crud`：自动注册基于 `XxxCtrl` 的完整 CRUD 路由（增删改查、分页、Ex 等）
+/// - `routes = [(path, handler), ...]`：自定义路由列表
+///
+/// # 使用示例
+/// ```
+/// #[router(crud, routes = [("/hello", get(hello))])]
+/// pub struct OssBucketRouter;
+/// ```
 #[proc_macro_attribute]
 pub fn router(args: TokenStream, input: TokenStream) -> TokenStream {
     let args = parse_macro_input!(args as RouterArgs);
@@ -205,6 +263,20 @@ pub fn router(args: TokenStream, input: TokenStream) -> TokenStream {
     router_macro(args, input).into()
 }
 
+/// 属性宏：为以 `ApiDoc` 结尾的结构体生成 OpenAPI 文档聚合
+///
+/// 该宏会解析结构体名称（必须是 `XxxApiDoc` 形式的大驼峰命名），生成一个
+/// 派生 `utoipa::OpenApi` 的文档结构体，并通过 `linkme::distributed_slice`
+/// 注册到 `robotech::web::API_DOC_SLICE`，文档地址为 `/xxx/yyy/openapi.json`。
+///
+/// 宏参数为逗号分隔的 OpenAPI path 标识符列表（对应 `XxxCtrl` 中由
+/// `#[utoipa::path]` 标注的接口函数名），不可省略。
+///
+/// # 使用示例
+/// ```
+/// #[api_doc(add, modify, get_by_id, page_by_query_dto)]
+/// pub struct OssBucketApiDoc;
+/// ```
 #[proc_macro_attribute]
 pub fn api_doc(args: TokenStream, input: TokenStream) -> TokenStream {
     let args = parse_macro_input!(args as ApiDocArgs);

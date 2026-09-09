@@ -1,3 +1,7 @@
+//! # API 客户端模块
+//!
+//! 提供 API 客户端（feign/直连）的配置、错误类型、请求工具与 webhook 配置。
+
 mod api_client_config;
 mod api_client_error;
 mod api_client_utils;

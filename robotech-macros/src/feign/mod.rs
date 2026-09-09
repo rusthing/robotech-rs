@@ -1,3 +1,8 @@
+//! # Feign 客户端属性宏
+//!
+//! 实现 `#[feign_client]` 属性宏的代码生成，为包装了 `FeignApiClient` 的结构体
+//! 生成 `build_headers` 辅助方法及一组 CRUD 请求方法。
+
 use proc_macro2::TokenStream;
 use quote::{format_ident, quote};
 use syn::ItemStruct;

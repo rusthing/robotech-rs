@@ -1,3 +1,8 @@
+//! # 路由属性宏
+//!
+//! 实现 `#[router]` 属性宏的参数解析与代码生成，生成 `build_router` 函数并
+//! 注册到全局路由切片，支持 `crud` 与自定义 `routes` 参数。
+
 use proc_macro2::{Ident, TokenStream};
 use quote::{format_ident, quote};
 use syn::parse::{Parse, ParseStream};

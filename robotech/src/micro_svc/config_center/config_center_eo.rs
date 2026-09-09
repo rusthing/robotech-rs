@@ -18,6 +18,12 @@ pub struct ConfigKey {
 }
 
 impl ConfigKey {
+    /// 构造一个配置定位信息。
+    ///
+    /// ## 参数
+    /// - `namespace`：命名空间，可为空
+    /// - `group`：分组（一般用环境，如 `dev` / `prod`），可为空
+    /// - `data_id`：配置项标识（不带扩展名）
     pub fn new(
         namespace: Option<impl Into<String>>,
         group: Option<impl Into<String>>,
@@ -67,7 +73,10 @@ impl std::fmt::Display for ConfigKey {
 /// 一份配置的完整内容 + 元信息。
 #[derive(Debug, Clone)]
 pub struct ConfigItem {
+    /// 该配置的定位信息（namespace + group + data_id）
     pub key: ConfigKey,
+    /// 配置内容的文件格式（如 Yaml、Toml）
     pub format: FileFormat,
+    /// 配置原文内容
     pub content: String,
 }

@@ -3,19 +3,19 @@ use crate::dao::U64;
 use axum::http::HeaderMap;
 use validator;
 
-/// # 从HTTP请求头中获取当前用户ID
+/// # 从 HTTP 请求头中获取当前用户ID
 ///
 /// 该函数会从请求头中提取用户ID，如果请求头中没有用户ID或格式不正确，
-/// 将返回相应的ApiError错误。
+/// 将返回相应的校验错误。
 ///
 /// ## 参数
 ///
-/// * `req` - HTTP请求对象，包含请求头信息
+/// * `headers` - HTTP 请求头，应包含用户ID（头名见 `USER_ID_HEADER_NAME`）
 ///
 /// ## 返回值
 ///
 /// * `Ok(U64)` - 成功解析出的用户ID
-/// * `Err(ApiError)` - 解析失败时返回的错误信息
+/// * `Err(validator::ValidationError)` - 缺少用户ID或格式不正确时返回的校验错误
 ///
 /// ## 错误处理
 ///

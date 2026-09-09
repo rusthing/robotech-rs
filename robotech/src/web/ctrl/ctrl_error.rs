@@ -19,23 +19,25 @@ use validator;
 
 /// # 自定义控制器错误类型
 ///
-/// 该枚举定义了控制器可能遇到的各种错误类型，包括参数校验错误、IO错误和服务层错误。
-/// 通过实现ResponseError trait，这些错误可以被自动转换为HTTP响应。
+/// 该枚举定义了控制器可能遇到的各种错误类型，包括运行时错误、参数校验错误、
+/// IO 错误、非法 Header 值和服务层错误。
+/// 通过实现 `IntoResponse` trait，这些错误可以被自动转换为 HTTP 响应。
 ///
-/// ## Variants
+/// 各变体说明：
+/// - `Runtime(anyhow::Error)` - 运行时错误，通常返回 500 状态码
+/// - `Validation(validator::ValidationError)` - 单个参数校验错误，通常返回 400 状态码
+/// - `Validations(validator::ValidationErrors)` - 批量参数校验错误，通常返回 400 状态码
+/// - `Io(std::io::Error)` - IO 操作错误，通常返回 500 状态码
+/// - `InvalidHeaderValue(InvalidHeaderValue)` - 非法的 HTTP Header 值，通常返回 400 状态码
+/// - `Svc(SvcError)` - 服务层错误，根据具体错误类型返回相应状态码
 ///
-/// * `ValidationError(String)` - 参数校验错误，通常返回400状态码
-/// * `ValidationErrors(validator::ValidationErrors)` - 参数校验错误，通常返回400状态码
-/// * `IoError(std::io::Error)` - IO操作错误，通常返回500状态码
-/// * `SvcError(SvcError)` - 服务层错误，根据具体错误类型返回相应状态码
-///
-/// ## Examples
+/// ## 示例
 ///
 /// ```
-/// use crate::utils::ctrl_utils::CtrlError;
+/// use robotech::web::CtrlError;
 ///
-/// let error = CtrlError::ValidationError("用户名不能为空".to_string());
-/// assert_eq!(format!("{}", error), "参数校验错误: 用户名不能为空");
+/// let error = CtrlError::Io(std::io::Error::new(std::io::ErrorKind::Other, "磁盘故障"));
+/// assert_eq!(format!("{}", error), "IO错误: 磁盘故障");
 /// ```
 #[derive(Debug, Error)]
 pub enum CtrlError {
