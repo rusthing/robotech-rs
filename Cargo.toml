@@ -19,7 +19,7 @@ derive_setters = "0.1.9"
 typed-builder = "0.23.2"
 serde = "1.0.229"
 serde_json = "1.0.151"
-serde_with = "3.22.0"
+serde_with = "3.23.0"
 tokio = "1.53.1"
 async-trait = "0.1.92"
 utoipa = "5.5.0"
@@ -31,20 +31,20 @@ regex = "1.13.1"
 nix = "0.31.3"
 axum = "0.8.9"
 tower = "0.5.3"
-tower-http = "0.7.0"
-tokio-rustls = "0.26.4"
-hyper = "1.11.0"
+tower-http = "0.7.1"
+tokio-rustls = "0.26.5"
+hyper = "1.11.1"
 hyper-util = "0.1.20"
-rustls = "0.23.43"
+rustls = "0.23.44"
 rustls-pemfile = "2.2.0" # 用于读取 pem 证书文件
 socket2 = "0.6.5"
 sqlx = "0.9.0"
 sea-orm = "2.0.2"
 once_cell = "1.21.4"
 validator = "0.21.0"
-reqwest = "0.13.4"
+reqwest = "0.13.5"
 http = "1.5.0"
-ipnet = "2.12.1"
+ipnet = "2.12.2"
 bytes = "1.12.1"
 rumqttc = "0.25.1"
 influxdb = "0.8.0"
@@ -53,14 +53,14 @@ base64 = "0.23.1"
 etcd-client = "0.20.0"
 nacos-sdk = "0.8.2"
 
-wheel-rs = "1.11.1"
+wheel-rs = "1.11.2"
 idworker = "1.3.0"
-robotech-macros = "1.15.2"
+robotech-macros = "1.16.0"
 
 # macro依赖
 proc-macro2 = "1.0.107"             # 提供与标准库 proc_macro 兼容但更易测试的接口
 quote = "1.0.47"                    # 用于将语法树转换回代码
-syn = "3.0.3"                     # 用于解析 Rust 代码为语法树（AST）
+syn = "3.0.5"                     # 用于解析 Rust 代码为语法树（AST）
 
 [patch.crates-io]
 wheel-rs = { path = "../wheel-rs" }
