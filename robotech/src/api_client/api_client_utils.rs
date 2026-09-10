@@ -1,6 +1,6 @@
 use crate::api_client::api_client_config::{ApiAuthStrategy, Claim};
 use crate::api_client::ApiClientError;
-use crate::ro::Ro;
+use crate::api::Ro;
 use chrono::Utc;
 use http::header::HeaderMap;
 use http::Method;

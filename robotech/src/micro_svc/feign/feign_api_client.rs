@@ -5,7 +5,7 @@ use crate::api_client::ApiClientUtils;
 use crate::micro_svc::feign::load_balancer::{LoadBalancer, RoundRobinBalancer};
 use crate::micro_svc::feign::service_discovery::ServiceDiscovery;
 use crate::micro_svc::ServiceInstance;
-use crate::ro::Ro;
+use crate::api::Ro;
 use http::Method;
 use reqwest::header::HeaderMap;
 use serde::de::DeserializeOwned;

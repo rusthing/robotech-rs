@@ -7,6 +7,7 @@ use crate::micro_svc::{setup_hub_client, MicroSvcConfig, MICRO_SVC_CONFIG_KEY};
 use config::builder::DefaultState;
 use config::{Config, ConfigBuilder};
 use std::path::{Path, PathBuf};
+#[cfg(any(feature = "config-center", feature = "registry-center"))]
 use tracing::warn;
 
 /// # 配置模块的 Result 别名

@@ -1,7 +1,7 @@
 use crate::cst::user_id_cst::USER_ID_HEADER_NAME;
-use crate::dao::U64;
 use axum::http::HeaderMap;
 use validator;
+use crate::api::U64;
 
 /// # 从 HTTP 请求头中获取当前用户ID
 ///

@@ -1,6 +1,6 @@
 //! # Response Object (RO) 模块，用于统一API响应格式
 
-use crate::ro::ro_result::RoResult;
+use crate::api::RoResult;
 use chrono::Utc;
 use derive_setters::Setters;
 use serde::{Deserialize, Serialize};

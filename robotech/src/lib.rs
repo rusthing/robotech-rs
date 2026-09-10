@@ -24,6 +24,7 @@
 //!
 //! 同时通过 `pub use ro::rx` 重新导出 `rx` 模块（分页响应等）。
 
+pub mod api;
 #[cfg(feature = "api-client")]
 pub mod api_client;
 #[cfg(feature = "app")]
@@ -40,7 +41,6 @@ pub mod log;
 pub mod macros;
 pub mod micro_svc;
 pub mod mq;
-pub mod ro;
 #[cfg(feature = "app")]
 pub mod signal;
 #[cfg(any(feature = "app"))]
@@ -48,5 +48,3 @@ pub mod svc;
 pub mod tsdb;
 #[cfg(feature = "web")]
 pub mod web;
-
-pub use ro::rx;

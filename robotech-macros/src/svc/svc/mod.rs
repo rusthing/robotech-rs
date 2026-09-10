@@ -507,9 +507,10 @@ pub(crate) fn svc_macro(input: ItemStruct) -> TokenStream {
     });
 
     let expanded = quote! {
-        use robotech::dao::{begin_transaction, build_like_condition, U64};
-        use robotech::ro::Ro;
-        use robotech::rx::PageRx;
+        use robotech::dao::{begin_transaction, build_like_condition};
+        use robotech::api::U64;
+        use robotech::api::Ro;
+        use robotech::api::rx::PageRx;
         use robotech::svc::SvcError;
         use robotech::macros::db_unwrap;
         use robotech::macros::log_call;

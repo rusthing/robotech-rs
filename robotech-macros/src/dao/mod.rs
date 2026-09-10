@@ -697,7 +697,8 @@ pub(super) fn dao_macro(args: DaoArgs, input: ItemStruct) -> TokenStream {
     let mo_crate_token: TokenStream = syn::parse_str(mo_crate_path).unwrap_or_else(|_| quote! { crate });
 
     let expanded = quote! {
-        use robotech::dao::{add_order_by, DaoError, U64};
+        use robotech::dao::{add_order_by, DaoError};
+        use robotech::api::U64;
         use sea_orm::{
             ActiveModelTrait, ActiveValue, Condition, ConnectionTrait, EntityTrait, FromQueryResult, PaginatorTrait, QueryFilter, DeleteResult
         };

@@ -475,9 +475,9 @@ pub(crate) fn ctrl_macro(input: ItemStruct) -> TokenStream {
         use axum::http::HeaderMap;
         use axum::response::Json;
         use robotech::macros::log_call;
-        use robotech::ro::Ro;
-        use robotech::rx::PageRx;
-        use robotech::dao::U64;
+        use robotech::api::Ro;
+        use robotech::api::rx::PageRx;
+        use robotech::api::U64;
         use robotech::web::ctrl_utils::get_current_user_id;
         use robotech::web::CtrlError;
         use sea_orm::{DatabaseConnection, DatabaseTransaction};

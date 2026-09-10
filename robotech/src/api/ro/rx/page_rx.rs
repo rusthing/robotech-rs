@@ -1,4 +1,4 @@
-use crate::dao::U64;
+use crate::api::U64;
 use derive_setters::Setters;
 use serde::{Deserialize, Serialize};
 use serde_with::skip_serializing_none;

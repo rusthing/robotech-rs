@@ -5,7 +5,10 @@
 
 use proc_macro2::TokenStream;
 use quote::{format_ident, quote};
-use syn::{Attribute, Data, DeriveInput, Field, Fields, parse::{Parse, ParseStream}, Token, LitStr};
+use syn::{
+    parse::{Parse, ParseStream}, Attribute, Data, DeriveInput, Field, Fields, LitStr,
+    Token,
+};
 use wheel_rs::str_utils::{split_camel_case, CamelFormat};
 
 /// vo宏参数
@@ -278,7 +281,8 @@ fn handle_fields_client(input: &DeriveInput, is_ex: bool) -> Result<TokenStream,
                                 if let Some(segment) = type_path.path.segments.last() {
                                     let ident_str = segment.ident.to_string();
                                     if ident_str.ends_with("Vo") {
-                                        let ex_vo_type = format_ident!("{}", &ident_str.replace("Vo", "ExVo"));
+                                        let ex_vo_type =
+                                            format_ident!("{}", &ident_str.replace("Vo", "ExVo"));
                                         return Some(quote! {
                                             #field_name: #ex_vo_type,
                                         });
@@ -372,7 +376,8 @@ pub fn vo_macro(args: VoArgs, input: DeriveInput) -> TokenStream {
     };
 
     let mo_crate_path = args.mo_crate.as_deref().unwrap_or("crate");
-    let mo_crate_token: TokenStream = syn::parse_str(mo_crate_path).unwrap_or_else(|_| quote! { crate });
+    let mo_crate_token: TokenStream =
+        syn::parse_str(mo_crate_path).unwrap_or_else(|_| quote! { crate });
 
     // 生成完整的结构体定义，包含所有必要的属性和派生宏
     let expanded = quote! {
@@ -389,7 +394,8 @@ pub fn vo_macro(args: VoArgs, input: DeriveInput) -> TokenStream {
         #[cfg(feature = "server")]
         use sea_orm::DerivePartialModel;
         #[cfg(feature = "server")]
-        use robotech::dao::{belongs_to_owned, U8, U16, U32, U64, U128};
+        use robotech::dao::belongs_to_owned;
+        use robotech::api::{U8, U16, U32, U64, U128};
         #[cfg(feature = "server")]
         use #mo_crate_token::mo::#module_name::{Entity, Model, ModelEx};
 

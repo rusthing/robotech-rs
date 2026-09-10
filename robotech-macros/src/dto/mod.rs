@@ -136,7 +136,7 @@ pub fn crud_dto_macro(args: CrudDtoArgs, input: ItemStruct) -> TokenStream {
         use typed_builder::TypedBuilder;
         use wheel_rs::serde::option_option_serde;
 
-        use robotech::dao::{U8, U16, U32, U64, U128};
+        use robotech::api::{U8, U16, U32, U64, U128};
 
         // ========== Server mode: full sea_orm/o2o code ==========
         #[cfg(feature = "server")]
