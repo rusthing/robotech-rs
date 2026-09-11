@@ -367,25 +367,26 @@ fn process_field(field: &Field, target: &str) -> TokenStream {
     let has_validate = has_attr(original_attrs, "validate");
     let has_builder = has_attr(original_attrs, "builder");
     let has_serde = has_attr(original_attrs, "serde");
+    let has_db_default = has_attr(original_attrs, "db_default");
 
     // 生成属性
     let mut new_attrs = Vec::new();
 
-    // 保留原有属性（除了validate，根据目标类型决定）
+    // 保留原有属性（除了validate和db_default，根据目标类型决定）
     for attr in original_attrs {
-        if target == "modify" || target == "save" {
+        if attr.path().is_ident("validate") {
             // ModifyDto和SaveDto移除validate属性
-            if !attr.path().is_ident("validate") {
+            if target == "add" {
                 new_attrs.push(attr.clone());
             }
-        } else {
-            // AddDto保留所有属性
+        } else if !attr.path().is_ident("db_default") {
+            // db_default只是标记，不保留到生成的代码中
             new_attrs.push(attr.clone());
         }
     }
 
-    // 如果是添加，且没有validate，自动生成检验属性
-    if target == "add" && !has_validate {
+    // 如果是添加，且没有手动写validate，且没有db_default，自动生成检验属性
+    if target == "add" && !has_validate && !has_db_default {
         if let Some(attr) = generate_validate_attr(field) {
             new_attrs.push(attr);
         }
