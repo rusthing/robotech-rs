@@ -21,6 +21,7 @@ registry-center = ["web", "dep:base64", "dep:etcd-client", "dep:nacos-sdk"]
 feign = ["api-client", "registry-center"]
 db = ["app", "dep:sqlx", "dep:regex", "dep:once_cell"]
 mqtt = ["dep:rumqttc", "dep:bytes"]
+redis = ["dep:redis"]
 influxdb = ["dep:influxdb", "dep:reqwest"]
 macros = ["dep:robotech-macros"]
 
@@ -71,6 +72,7 @@ influxdb = { workspace = true, optional = true }
 base64 = { workspace = true, optional = true }
 etcd-client = { workspace = true, optional = true }
 nacos-sdk = { workspace = true, optional = true }
+redis = { workspace = true, features = ["tokio-comp", "streams"], optional = true }
 
 
 idworker = { workspace = true, optional = true }

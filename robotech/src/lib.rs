@@ -41,6 +41,8 @@ pub mod log;
 pub mod macros;
 pub mod micro_svc;
 pub mod mq;
+#[cfg(feature = "redis")]
+pub mod redis;
 #[cfg(feature = "app")]
 pub mod signal;
 #[cfg(any(feature = "app"))]
