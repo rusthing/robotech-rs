@@ -72,15 +72,12 @@ fn generate_from_attr(ty: &syn::Type) -> Option<TokenStream> {
         syn::Type::Path(type_path) => {
             let path_str = type_path.path.segments.last().unwrap().ident.to_string();
 
-            // 检查是否是 Vo 后缀，如果是，说明是BelongsTo关系的字段
             if path_str.ends_with("Vo") {
                 return Some(quote! { #[from(belongs_to_owned(~))] });
             }
 
-            // 检查是否是 Option<T> 类型
             if is_option_type(ty) {
                 if let Some(inner_ty) = extract_option_inner_type(type_path) {
-                    // 处理 Option<VoType>：关联关系字段，用户可能手动写了 Option
                     if inner_ty.ends_with("Vo") {
                         return Some(quote! { #[from(belongs_to_owned(~))] });
                     }
@@ -88,15 +85,18 @@ fn generate_from_attr(ty: &syn::Type) -> Option<TokenStream> {
                         "u8" | "u16" | "u32" | "u64" | "u128" => {
                             quote! { #[from(~.map(|v|v.into()))] }
                         }
-                        _ => return None,
+                        "i8" | "i16" | "i32" | "i64" | "String" => {
+                            quote! { #[from(~)] }
+                        }
+                        _ => quote! { #[from(~.map(|v|v.into()))] },
                     });
                 }
             }
 
-            // 处理普通类型
             Some(match path_str.as_str() {
                 "u8" | "u16" | "u32" | "u64" | "u128" => quote! { #[from(~.into())] },
-                _ => return None,
+                "i8" | "i16" | "i32" | "i64" | "String" => quote! { #[from(~)] },
+                _ => quote! { #[from(~.into())] },
             })?
         }
         _ => return None,
