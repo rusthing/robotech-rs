@@ -523,7 +523,7 @@ fn generate_into_attr(field: &Field) -> Attribute {
                                     }
                                     _ => {
                                         syn::parse_quote!(
-                                            #[into(match ~ {Some(v)=>ActiveValue::Set(v),None=>ActiveValue::NotSet})]
+                                            #[into(match ~ {Some(v)=>ActiveValue::Set(v.map(|x| x.into())),None=>ActiveValue::NotSet})]
                                         )
                                     }
                                 };
@@ -564,7 +564,7 @@ fn generate_into_attr(field: &Field) -> Attribute {
                     }
                     _ => {
                         syn::parse_quote!(
-                            #[into(match ~ {Some(v)=>ActiveValue::Set(v),None=>ActiveValue::NotSet})]
+                            #[into(match ~ {Some(v)=>ActiveValue::Set(v.into()),None=>ActiveValue::NotSet})]
                         )
                     }
                 };
@@ -683,14 +683,17 @@ fn add_query_field_to_condition_tokens(field: &Field) -> TokenStream {
 
 fn get_value_token_stream(type_name: &str) -> TokenStream {
     match type_name {
-        "u8" | "u16" | "u32" | "u64" | "u128" => {
+        "u8" | "u16" | "u32" | "u64" | "u128" | "U8" | "U16" | "U32" | "U64" | "U128" => {
             quote! { v.value() }
         }
         "bool" => {
             quote! { *v }
         }
-        _ => {
+        "String" | "i64" | "i32" | "i16" | "i8" | "f64" | "f32" => {
             quote! { v }
+        }
+        _ => {
+            quote! { v.value() }
         }
     }
 }

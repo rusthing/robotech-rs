@@ -217,12 +217,13 @@ fn handle_fields(input: &DeriveInput, is_ex: bool) -> Result<TokenStream, TokenS
                         let field_ty = map_unsigned_type(&field.ty);
                         let attrs = generate_field_attrs(field);
 
-                        // 保留原有的注释和其他属性（除了 from/builder/serde）
+                        let has_custom_from = has_attribute(&field.attrs, "from");
+
                         let original_attrs: Vec<_> = field
                             .attrs
                             .iter()
                             .filter(|attr| {
-                                !attr.path().is_ident("from")
+                                (has_custom_from || !attr.path().is_ident("from"))
                                     && !attr.path().is_ident("builder")
                                     && !attr.path().is_ident("serde")
                             })
