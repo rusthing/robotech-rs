@@ -323,13 +323,14 @@ fn process_field_client(field: &Field, _target: &str) -> TokenStream {
 
     let mut new_attrs: Vec<Attribute> = Vec::new();
 
-    // 保留原有属性（除了validate/into/owned_into/ghosts）
+    // 保留原有属性（除了validate/into/owned_into/ghosts/db_default）
     for attr in original_attrs {
         let path = attr.path();
         if !path.is_ident("validate")
             && !path.is_ident("into")
             && !path.is_ident("owned_into")
             && !path.is_ident("ghosts")
+            && !path.is_ident("db_default")
         {
             new_attrs.push(attr.clone());
         }
