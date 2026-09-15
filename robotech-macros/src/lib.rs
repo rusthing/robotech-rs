@@ -12,9 +12,9 @@ use crate::db::MigrateArgs;
 use crate::dto::{crud_dto_macro, CrudDtoArgs};
 use crate::feign::feign_macro;
 use crate::log::{log_call_macro, LogCallArgs};
-use crate::svc::{db_unwrap_macro, svc_macro, DbUnwrapArgs};
+use crate::svc::{db_unwrap_macro, svc_macro, DbUnwrapArgs, SvcArgs};
 use crate::vo::{vo_macro, VoArgs};
-use crate::web::{api_doc_macro, ctrl_macro, router_macro, ApiDocArgs, RouterArgs};
+use crate::web::{api_doc_macro, ctrl_macro, router_macro, ApiDocArgs, CtrlArgs, RouterArgs};
 use proc_macro::TokenStream;
 use syn::{parse_macro_input, DeriveInput, ItemFn, ItemStruct};
 
@@ -215,9 +215,10 @@ pub fn db_unwrap(args: TokenStream, input: TokenStream) -> TokenStream {
 /// pub struct OssBucketSvc;
 /// ```
 #[proc_macro_attribute]
-pub fn svc(_args: TokenStream, input: TokenStream) -> TokenStream {
+pub fn svc(args: TokenStream, input: TokenStream) -> TokenStream {
+    let args = parse_macro_input!(args as SvcArgs);
     let input = parse_macro_input!(input as ItemStruct);
-    svc_macro(input).into()
+    svc_macro(args, input).into()
 }
 
 /// 属性宏：为以 `Ctrl` 结尾的结构体自动生成标准 CRUD Web 处理器
@@ -236,9 +237,10 @@ pub fn svc(_args: TokenStream, input: TokenStream) -> TokenStream {
 /// pub struct OssBucketCtrl;
 /// ```
 #[proc_macro_attribute]
-pub fn ctrl(_args: TokenStream, input: TokenStream) -> TokenStream {
+pub fn ctrl(args: TokenStream, input: TokenStream) -> TokenStream {
+    let args = parse_macro_input!(args as CtrlArgs);
     let input = parse_macro_input!(input as ItemStruct);
-    ctrl_macro(input).into()
+    ctrl_macro(args, input).into()
 }
 
 /// 属性宏：为以 `Router` 结尾的结构体生成路由注册函数

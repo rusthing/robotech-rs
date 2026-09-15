@@ -5,10 +5,53 @@
 
 use proc_macro2::TokenStream;
 use quote::{format_ident, quote};
-use syn::ItemStruct;
+use std::collections::HashSet;
+use syn::{
+    bracketed,
+    parse::{Parse, ParseStream},
+    Ident, ItemStruct, Token,
+};
 use wheel_rs::str_utils::{split_camel_case, CamelFormat};
 
-pub(crate) fn svc_macro(input: ItemStruct) -> TokenStream {
+/// `#[svc]` 宏参数
+pub(crate) struct SvcArgs {
+    /// 需要跳过的的方法名集合
+    pub skip: HashSet<String>,
+}
+
+impl Parse for SvcArgs {
+    fn parse(input: ParseStream) -> syn::Result<Self> {
+        let mut skip = HashSet::new();
+
+        if input.is_empty() {
+            return Ok(SvcArgs { skip });
+        }
+
+        let ident: Ident = input.parse()?;
+        if ident != "skip" {
+            return Err(syn::Error::new_spanned(ident, "expected `skip`"));
+        }
+
+        let lookahead = input.lookahead1();
+        if lookahead.peek(Token![:]) {
+            let _: Token![:] = input.parse()?;
+        } else if lookahead.peek(Token![=]) {
+            let _: Token![=] = input.parse()?;
+        }
+
+        let content;
+        bracketed!(content in input);
+        let method_names = content.parse_terminated(Ident::parse, Token![,])?;
+        for method_name in method_names {
+            skip.insert(method_name.to_string());
+        }
+
+        Ok(SvcArgs { skip })
+    }
+}
+
+pub(crate) fn svc_macro(args: SvcArgs, input: ItemStruct) -> TokenStream {
+    let skip = args.skip;
     let struct_name = &input.ident;
 
     // 解析结构体的名称，必须是Svc结尾，符合大驼峰命名规范
@@ -44,7 +87,8 @@ pub(crate) fn svc_macro(input: ItemStruct) -> TokenStream {
     let mut generated_methods = Vec::new();
 
     // 生成add方法
-    generated_methods.push(quote! {
+    if !skip.contains("add") {
+        generated_methods.push(quote! {
         /// # 添加新记录
         ///
         /// 将提供的AddTo对象转换为ActiveModel并插入到数据库中
@@ -73,10 +117,12 @@ pub(crate) fn svc_macro(input: ItemStruct) -> TokenStream {
             let one = #vo_name::from(#dao_name::insert(active_model, db).await?);
             Ok(Ro::success("添加成功".to_string()).extra(Some(one)))
         }
-    });
+        });
+    }
 
     // 生成modify方法
-    generated_methods.push(quote! {
+    if !skip.contains("modify") {
+        generated_methods.push(quote! {
         /// # 修改记录
         ///
         /// 根据提供的ModifyTo对象更新数据库中的相应记录
@@ -106,10 +152,12 @@ pub(crate) fn svc_macro(input: ItemStruct) -> TokenStream {
             let one = #vo_name::from(#dao_name::update(active_model, db).await?);
             Ok(Ro::success("修改成功".to_string()).extra(Some(one)))
         }
-    });
+        });
+    }
 
     // 生成save方法
-    generated_methods.push(quote! {
+    if !skip.contains("save") {
+        generated_methods.push(quote! {
         /// # 保存记录
         ///
         /// 根据提供的SaveTo对象保存记录到数据库中。如果提供了ID，则更新现有记录；如果没有提供ID，则创建新记录
@@ -134,10 +182,12 @@ pub(crate) fn svc_macro(input: ItemStruct) -> TokenStream {
                 Self::add(save_dto.into(), db).await
             }
         }
-    });
+        });
+    }
 
     // 生成del_by_id方法
-    generated_methods.push(quote! {
+    if !skip.contains("del_by_id") {
+        generated_methods.push(quote! {
         /// # 删除记录
         ///
         /// 根据提供的ID删除数据库中的相应记录
@@ -176,10 +226,12 @@ pub(crate) fn svc_macro(input: ItemStruct) -> TokenStream {
             }
             Ok(Ro::success("删除成功".to_string()).extra(Some(one)))
         }
-    });
+        });
+    }
 
     // 生成del_by_query_dto方法
-    generated_methods.push(quote! {
+    if !skip.contains("del_by_query_dto") {
+        generated_methods.push(quote! {
         /// # 删除记录
         ///
         /// 根据提供的查询参数获取数据库中的记录
@@ -211,10 +263,12 @@ pub(crate) fn svc_macro(input: ItemStruct) -> TokenStream {
             }
             Ok(Ro::success(format!("删除了{}条记录", rows_affected).to_string()))
         }
-    });
+        });
+    }
 
     // 生成get_by_id方法
-    generated_methods.push(quote! {
+    if !skip.contains("get_by_id") {
+        generated_methods.push(quote! {
         /// # 根据id获取记录信息
         ///
         /// 通过提供的ID从数据库中查询相应的记录，如果找到则返回封装了Vo的Ro对象，否则返回对象的extra为None
@@ -239,10 +293,12 @@ pub(crate) fn svc_macro(input: ItemStruct) -> TokenStream {
             let one = #dao_name::get_by_id::<_, #vo_name>(id, db).await?;
             Ok(Ro::success("查询成功".to_string()).extra(one))
         }
-    });
+        });
+    }
 
     // 生成get_by_query_dto方法
-    generated_methods.push(quote! {
+    if !skip.contains("get_by_query_dto") {
+        generated_methods.push(quote! {
         /// # 获取记录
         ///
         /// 根据提供的查询参数获取数据库中的记录
@@ -271,10 +327,12 @@ pub(crate) fn svc_macro(input: ItemStruct) -> TokenStream {
             let one = #dao_name::get_by_condition::<_, #vo_name>(condition, db).await?;
             Ok(Ro::success("查询成功".to_string()).extra(one))
         }
-    });
+        });
+    }
 
     // 生成list_by_query_dto方法
-    generated_methods.push(quote! {
+    if !skip.contains("list_by_query_dto") {
+        generated_methods.push(quote! {
         /// # 查询记录列表
         ///
         /// 根据提供的查询参数获取数据库中的记录列表
@@ -305,10 +363,12 @@ pub(crate) fn svc_macro(input: ItemStruct) -> TokenStream {
             let all = #dao_name::list_by_condition::<_, #vo_name>(condition, order_by, db).await?;
             Ok(Ro::success("查询成功".to_string()).extra(Some(all)))
         }
-    });
+        });
+    }
 
     // 生成page_by_query_dto方法
-    generated_methods.push(quote! {
+    if !skip.contains("page_by_query_dto") {
+        generated_methods.push(quote! {
         /// # 查询记录列表
         ///
         /// 根据提供的查询参数获取数据库中的记录列表
@@ -353,10 +413,12 @@ pub(crate) fn svc_macro(input: ItemStruct) -> TokenStream {
                 .build()
             )))
         }
-    });
+        });
+    }
 
     // 生成get_ex_by_id方法
-    generated_methods.push(quote! {
+    if !skip.contains("get_ex_by_id") {
+        generated_methods.push(quote! {
         /// # 根据id获取记录信息(附带获取关联表的信息)
         ///
         /// 通过提供的ID从数据库中查询相应的记录，如果找到则返回封装了ExVo的Ro对象，否则返回对象的extra为None
@@ -383,10 +445,12 @@ pub(crate) fn svc_macro(input: ItemStruct) -> TokenStream {
                 .map(|m| m.into());
             Ok(Ro::success("查询成功".to_string()).extra(one))
         }
-    });
+        });
+    }
 
     // 生成get_ex_by_query_dto方法
-    generated_methods.push(quote! {
+    if !skip.contains("get_ex_by_query_dto") {
+        generated_methods.push(quote! {
         /// # 获取记录信息(附带获取关联表的信息)
         ///
         /// 根据提供的查询参数获取数据库中的记录
@@ -417,10 +481,12 @@ pub(crate) fn svc_macro(input: ItemStruct) -> TokenStream {
                 .map(|m| m.into());
             Ok(Ro::success("查询成功".to_string()).extra(one))
         }
-    });
+        });
+    }
 
     // 生成list_ex_by_query_dto方法
-    generated_methods.push(quote! {
+    if !skip.contains("list_ex_by_query_dto") {
+        generated_methods.push(quote! {
         /// # 查询记录列表(附带获取关联表的信息)
         ///
         /// 根据提供的查询参数获取数据库中的记录列表
@@ -455,10 +521,12 @@ pub(crate) fn svc_macro(input: ItemStruct) -> TokenStream {
                 .collect();
             Ok(Ro::success("查询成功".to_string()).extra(Some(all)))
         }
-    });
+        });
+    }
 
     // 生成page_ex_by_query_dto方法
-    generated_methods.push(quote! {
+    if !skip.contains("page_ex_by_query_dto") {
+        generated_methods.push(quote! {
         /// # 查询记录列表(附带获取关联表的信息)
         ///
         /// 根据提供的查询参数获取数据库中的记录列表
@@ -504,7 +572,8 @@ pub(crate) fn svc_macro(input: ItemStruct) -> TokenStream {
                 .build()
             )))
         }
-    });
+        });
+    }
 
     let expanded = quote! {
         use robotech::dao::{begin_transaction, build_like_condition};

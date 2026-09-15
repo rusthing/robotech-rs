@@ -5,6 +5,7 @@
 
 use proc_macro2::{Ident, Span, TokenStream};
 use quote::{format_ident, quote};
+use std::collections::HashSet;
 use syn::parse::{Parse, ParseStream};
 use syn::{bracketed, parenthesized, Expr, ItemStruct, Lit, LitStr, Token};
 use wheel_rs::str_utils::{split_camel_case, CamelFormat};
@@ -79,6 +80,8 @@ pub(super) struct DaoArgs {
     related_tables: Vec<Expr>,
     /// mo模块所在的crate路径
     mo_crate: Option<String>,
+    /// 需要跳过的的方法名集合
+    pub skip: HashSet<String>,
 }
 
 impl Parse for DaoArgs {
@@ -88,6 +91,7 @@ impl Parse for DaoArgs {
         let mut like_columns = vec![];
         let mut related_tables = vec![];
         let mut mo_crate = None;
+        let mut skip = HashSet::new();
 
         // 解析可选的参数列表
         while !input.is_empty() {
@@ -131,6 +135,13 @@ impl Parse for DaoArgs {
             } else if ident == "mo_crate" {
                 let value: LitStr = input.parse()?;
                 mo_crate = Some(value.value());
+            } else if ident == "skip" {
+                let content;
+                bracketed!(content in input);
+                let method_names = content.parse_terminated(Ident::parse, Token![,])?;
+                for method_name in method_names {
+                    skip.insert(method_name.to_string());
+                }
             } else {
                 let error_msg = format!("未知的参数：{}", ident);
                 return Err(syn::Error::new_spanned(&ident, error_msg));
@@ -148,6 +159,7 @@ impl Parse for DaoArgs {
             like_columns,
             related_tables,
             mo_crate,
+            skip,
         })
     }
 }
@@ -159,6 +171,7 @@ pub(super) fn dao_macro(args: DaoArgs, input: ItemStruct) -> TokenStream {
         like_columns,
         related_tables,
         mo_crate,
+        skip,
     } = args;
 
     let struct_name = &input.ident;
@@ -291,7 +304,8 @@ pub(super) fn dao_macro(args: DaoArgs, input: ItemStruct) -> TokenStream {
     }
 
     // 生成insert方法
-    generated_members.push(quote! {
+    if !skip.contains("insert") {
+        generated_members.push(quote! {
         /// # 插入记录
         ///
         /// 此函数负责向数据库中插入一个新的记录。它会自动处理以下逻辑：
@@ -328,9 +342,11 @@ pub(super) fn dao_macro(args: DaoArgs, input: ItemStruct) -> TokenStream {
                 .map_err(|e| DaoError::parse_db_err(e))
         }
     });
+    }
 
     // 生成update方法
-    generated_members.push(quote! {
+    if !skip.contains("update") {
+        generated_members.push(quote! {
         /// # 更新记录
         ///
         /// 此函数负责更新数据库中的现有记录。它会自动处理以下逻辑：
@@ -362,9 +378,11 @@ pub(super) fn dao_macro(args: DaoArgs, input: ItemStruct) -> TokenStream {
                 .map_err(|e| DaoError::parse_db_err(e))
         }
     });
+    }
 
     // 生成delete方法
-    generated_members.push(quote! {
+    if !skip.contains("delete") {
+        generated_members.push(quote! {
         /// # 删除记录
         ///
         /// 此函数负责根据关键字段删除相应的记录
@@ -385,9 +403,11 @@ pub(super) fn dao_macro(args: DaoArgs, input: ItemStruct) -> TokenStream {
                 .map_err(|e| DaoError::parse_db_err(e))
         }
     });
+    }
 
     // 生成delete_by_condition方法
-    generated_members.push(quote! {
+    if !skip.contains("delete_by_condition") {
+        generated_members.push(quote! {
         /// # 删除记录
         ///
         /// 根据提供的查询参数删除数据库中的记录
@@ -412,9 +432,11 @@ pub(super) fn dao_macro(args: DaoArgs, input: ItemStruct) -> TokenStream {
                 .map_err(|e| DaoError::parse_db_err(e))
         }
     });
+    }
 
     // 生成get_by_id方法
-    generated_members.push(quote! {
+    if !skip.contains("get_by_id") {
+        generated_members.push(quote! {
         /// # 根据ID查询相应记录
         ///
         /// 此函数负责根据提供的ID从数据库中查询对应的记录
@@ -437,9 +459,11 @@ pub(super) fn dao_macro(args: DaoArgs, input: ItemStruct) -> TokenStream {
                 .map_err(|e| DaoError::parse_db_err(e))
         }
     });
+    }
 
     // 生成get_by_condition方法
-    generated_members.push(quote! {
+    if !skip.contains("get_by_condition") {
+        generated_members.push(quote! {
         /// # 获取记录
         ///
         /// 根据提供的查询条件获取数据库中的记录
@@ -463,9 +487,11 @@ pub(super) fn dao_macro(args: DaoArgs, input: ItemStruct) -> TokenStream {
                 .map_err(|e| DaoError::parse_db_err(e))
         }
     });
+    }
 
     // 生成list_by_condition方法
-    generated_members.push(quote! {
+    if !skip.contains("list_by_condition") {
+        generated_members.push(quote! {
         /// # 查询记录列表
         ///
         /// 根据提供的查询条件查询数据库中的记录列表
@@ -489,9 +515,11 @@ pub(super) fn dao_macro(args: DaoArgs, input: ItemStruct) -> TokenStream {
                 .map_err(|e| DaoError::parse_db_err(e))
         }
     });
+    }
 
     // 生成page_by_condition方法
-    generated_members.push(quote! {
+    if !skip.contains("page_by_condition") {
+        generated_members.push(quote! {
         /// # 分页查询记录列表
         ///
         /// 根据提供的查询条件分页查询数据库中的记录列表
@@ -537,6 +565,7 @@ pub(super) fn dao_macro(args: DaoArgs, input: ItemStruct) -> TokenStream {
             Ok((page_num, U64(total), models))
         }
     });
+    }
 
     // 生成also_related相关方法
     // 从 related_tables 中提取表名
@@ -568,7 +597,8 @@ pub(super) fn dao_macro(args: DaoArgs, input: ItemStruct) -> TokenStream {
         .collect();
 
     // 生成get_ex_by_id方法
-    generated_members.push(quote! {
+    if !skip.contains("get_ex_by_id") {
+        generated_members.push(quote! {
         /// # 根据 ID 查询记录(附带获取关联表的信息)
         ///
         /// 此函数通过给定的 ID 查询单条记录，并同时获取关联的存储桶和对象信息
@@ -595,9 +625,11 @@ pub(super) fn dao_macro(args: DaoArgs, input: ItemStruct) -> TokenStream {
                 .map_err(|e| DaoError::parse_db_err(e))
         }
     });
+    }
 
     // 生成get_ex_by_condition方法
-    generated_members.push(quote! {
+    if !skip.contains("get_ex_by_condition") {
+        generated_members.push(quote! {
         /// # 获取记录(附带获取关联表的信息)
         ///
         /// 根据提供的查询条件获取数据库中的记录
@@ -620,9 +652,11 @@ pub(super) fn dao_macro(args: DaoArgs, input: ItemStruct) -> TokenStream {
                 .map_err(|e| DaoError::parse_db_err(e))
         }
     });
+    }
 
     // 生成list_ex_by_condition方法
-    generated_members.push(quote! {
+    if !skip.contains("list_ex_by_condition") {
+        generated_members.push(quote! {
         /// # 查询记录列表(附带获取关联表的信息)
         ///
         /// 根据提供的查询条件查询数据库中的记录列表
@@ -645,9 +679,11 @@ pub(super) fn dao_macro(args: DaoArgs, input: ItemStruct) -> TokenStream {
                 .map_err(|e| DaoError::parse_db_err(e))
         }
     });
+    }
 
     // 生成page_ex_by_condition方法
-    generated_members.push(quote! {
+    if !skip.contains("page_ex_by_condition") {
+        generated_members.push(quote! {
         /// # 分页查询记录列表(附带获取关联表的信息)
         ///
         /// 根据提供的查询条件分页查询数据库中的记录列表
@@ -692,6 +728,7 @@ pub(super) fn dao_macro(args: DaoArgs, input: ItemStruct) -> TokenStream {
             Ok((page_num, U64(total), models))
         }
     });
+    }
 
     let mo_crate_path = mo_crate.as_deref().unwrap_or("crate");
     let mo_crate_token: TokenStream = syn::parse_str(mo_crate_path).unwrap_or_else(|_| quote! { crate });

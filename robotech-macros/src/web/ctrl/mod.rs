@@ -5,10 +5,50 @@
 
 use proc_macro2::TokenStream;
 use quote::{format_ident, quote};
-use syn::ItemStruct;
+use std::collections::HashSet;
+use syn::parse::{Parse, ParseStream};
+use syn::{bracketed, Ident, ItemStruct, Token};
 use wheel_rs::str_utils::{split_camel_case, CamelFormat};
 
-pub(crate) fn ctrl_macro(input: ItemStruct) -> TokenStream {
+/// `#[ctrl]` 宏参数
+pub(crate) struct CtrlArgs {
+    /// 需要跳过的的方法名集合
+    pub skip: HashSet<String>,
+}
+
+impl Parse for CtrlArgs {
+    fn parse(input: ParseStream) -> syn::Result<Self> {
+        let mut skip = HashSet::new();
+
+        if input.is_empty() {
+            return Ok(CtrlArgs { skip });
+        }
+
+        let ident: Ident = input.parse()?;
+        if ident != "skip" {
+            return Err(syn::Error::new_spanned(ident, "expected `skip`"));
+        }
+
+        let lookahead = input.lookahead1();
+        if lookahead.peek(Token![:]) {
+            let _: Token![:] = input.parse()?;
+        } else if lookahead.peek(Token![=]) {
+            let _: Token![=] = input.parse()?;
+        }
+
+        let content;
+        bracketed!(content in input);
+        let method_names = content.parse_terminated(Ident::parse, Token![,])?;
+        for method_name in method_names {
+            skip.insert(method_name.to_string());
+        }
+
+        Ok(CtrlArgs { skip })
+    }
+}
+
+pub(crate) fn ctrl_macro(args: CtrlArgs, input: ItemStruct) -> TokenStream {
+    let CtrlArgs { skip } = args;
     let struct_name = &input.ident;
 
     // 解析结构体的名称，必须是Ctrl结尾，符合大驼峰命名规范
@@ -57,7 +97,8 @@ pub(crate) fn ctrl_macro(input: ItemStruct) -> TokenStream {
     let mut generated_methods = Vec::new();
 
     // 生成add方法
-    generated_methods.push(quote! {
+    if !skip.contains("add") {
+        generated_methods.push(quote! {
         /// # 添加新的记录
         ///
         /// 该接口用于添加一个新的记录
@@ -94,9 +135,11 @@ pub(crate) fn ctrl_macro(input: ItemStruct) -> TokenStream {
             Ok(Json(result))
         }
     });
+    }
 
     // 生成modify方法
-    generated_methods.push(quote! {
+    if !skip.contains("modify") {
+        generated_methods.push(quote! {
         /// # 修改记录的信息
         ///
         /// 该接口用于修改一个已存在记录的信息
@@ -133,9 +176,11 @@ pub(crate) fn ctrl_macro(input: ItemStruct) -> TokenStream {
             Ok(Json(result))
         }
     });
+    }
 
     // 生成save方法
-    generated_methods.push(quote! {
+    if !skip.contains("save") {
+        generated_methods.push(quote! {
         /// # 保存记录的信息
         ///
         /// 该接口用于保存记录的信息，如果记录不存在则创建新记录，如果记录已存在则更新记录
@@ -172,9 +217,11 @@ pub(crate) fn ctrl_macro(input: ItemStruct) -> TokenStream {
             Ok(Json(result))
         }
     });
+    }
 
     // 生成del_by_id方法
-    generated_methods.push(quote! {
+    if !skip.contains("del_by_id") {
+        generated_methods.push(quote! {
         /// # 删除记录
         ///
         /// 该接口用于删除一个已存在的记录
@@ -203,9 +250,11 @@ pub(crate) fn ctrl_macro(input: ItemStruct) -> TokenStream {
             Ok(Json(ro))
         }
     });
+    }
 
     // 生成del_by_query_dto方法
-    generated_methods.push(quote! {
+    if !skip.contains("del_by_query_dto") {
+        generated_methods.push(quote! {
         /// # 根据查询条件删除记录
         ///
         /// 该接口用于根据查询条件删除一个或多个已存在的记录
@@ -230,9 +279,11 @@ pub(crate) fn ctrl_macro(input: ItemStruct) -> TokenStream {
             Ok(Json(ro))
         }
     });
+    }
 
     // 生成get_by_id方法
-    generated_methods.push(quote! {
+    if !skip.contains("get_by_id") {
+        generated_methods.push(quote! {
         /// # 根据ID获取记录的信息
         ///
         /// 该接口通过查询参数中的ID获取对应记录的详细信息
@@ -265,9 +316,11 @@ pub(crate) fn ctrl_macro(input: ItemStruct) -> TokenStream {
             Ok(Json(ro))
         }
     });
+    }
 
     // 生成get_by_query_dto方法
-    generated_methods.push(quote! {
+    if !skip.contains("get_by_query_dto") {
+        generated_methods.push(quote! {
         /// # 根据查询参数获取记录的信息
         ///
         /// 该接口通过查询参数获取对应记录的详细信息
@@ -293,9 +346,11 @@ pub(crate) fn ctrl_macro(input: ItemStruct) -> TokenStream {
             Ok(Json(ro))
         }
     });
+    }
 
     // 生成list_by_query_dto方法
-    generated_methods.push(quote! {
+    if !skip.contains("list_by_query_dto") {
+        generated_methods.push(quote! {
         /// # 查询记录列表
         ///
         /// 该接口通过查询参数获取对应记录列表的详细信息
@@ -321,9 +376,11 @@ pub(crate) fn ctrl_macro(input: ItemStruct) -> TokenStream {
             Ok(Json(ro))
         }
     });
+    }
 
     // 生成page_by_query_dto方法
-    generated_methods.push(quote! {
+    if !skip.contains("page_by_query_dto") {
+        generated_methods.push(quote! {
         /// # 查询记录列表
         ///
         /// 该接口通过查询参数获取对应记录列表的详细信息
@@ -349,9 +406,11 @@ pub(crate) fn ctrl_macro(input: ItemStruct) -> TokenStream {
             Ok(Json(ro))
         }
     });
+    }
 
     // 生成get_ex_by_id方法
-    generated_methods.push(quote! {
+    if !skip.contains("get_ex_by_id") {
+        generated_methods.push(quote! {
         /// # 根据ID获取记录的信息(附带获取关联表的信息)
         ///
         /// 该接口通过查询参数中的ID获取对应记录的详细信息
@@ -384,9 +443,11 @@ pub(crate) fn ctrl_macro(input: ItemStruct) -> TokenStream {
             Ok(Json(ro))
         }
     });
+    }
 
     // 生成get_ex_by_query_dto方法
-    generated_methods.push(quote! {
+    if !skip.contains("get_ex_by_query_dto") {
+        generated_methods.push(quote! {
         /// # 根据查询参数获取记录的信息(附带获取关联表的信息)
         ///
         /// 该接口通过查询参数获取对应记录的详细信息
@@ -412,9 +473,11 @@ pub(crate) fn ctrl_macro(input: ItemStruct) -> TokenStream {
             Ok(Json(ro))
         }
     });
+    }
 
     // 生list_ex_by_query_dto方法
-    generated_methods.push(quote! {
+    if !skip.contains("list_ex_by_query_dto") {
+        generated_methods.push(quote! {
         /// # 查询记录列表(附带获取关联表的信息)
         ///
         /// 该接口通过查询参数获取对应记录列表的详细信息
@@ -440,9 +503,11 @@ pub(crate) fn ctrl_macro(input: ItemStruct) -> TokenStream {
             Ok(Json(ro))
         }
     });
+    }
 
     // 生page_ex_by_query_dto方法
-    generated_methods.push(quote! {
+    if !skip.contains("page_ex_by_query_dto") {
+        generated_methods.push(quote! {
         /// # 查询记录列表(附带获取关联表的信息)
         ///
         /// 该接口通过查询参数获取对应记录列表的详细信息
@@ -468,6 +533,7 @@ pub(crate) fn ctrl_macro(input: ItemStruct) -> TokenStream {
             Ok(Json(ro))
         }
     });
+    }
 
     let expanded = quote! {
         use axum::debug_handler;
