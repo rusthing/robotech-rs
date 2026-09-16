@@ -3,7 +3,7 @@ use crate::cfg::{deserialize_config, BaseConfig};
 use crate::env::{AppEnv, EnvError, APP_ENV};
 use crate::log::{LogConfig, LogError};
 use arc_swap::ArcSwap;
-use chrono::Utc;
+use chrono::{Local, Utc};
 use config::{Config, Value};
 use std::collections::HashMap;
 use std::env;
@@ -75,7 +75,10 @@ where
             }
         )?;
 
-        let time_str = Utc::now().format(self.timer_format.as_str()).to_string();
+        let time_str = Utc::now()
+            .with_timezone(&Local)
+            .format(self.timer_format.as_str())
+            .to_string();
         write!(writer, "{} ", time_str)?;
 
         write!(writer, "{:<5} ", *level)?;

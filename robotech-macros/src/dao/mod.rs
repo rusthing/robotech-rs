@@ -329,7 +329,7 @@ pub(super) fn dao_macro(args: DaoArgs, input: ItemStruct) -> TokenStream {
             }
             // 当创建时间未设置时，设置创建时间和修改时间
             if active_model.create_ts.is_not_set() {
-                let now = ActiveValue::set(wheel_rs::time_utils::now_ts()? as i64);
+                let now = ActiveValue::set(wheel_rs::time_utils::now_ms() as i64);
                 active_model.create_ts = now.clone();
                 active_model.update_ts = now;
             }
@@ -368,7 +368,7 @@ pub(super) fn dao_macro(args: DaoArgs, input: ItemStruct) -> TokenStream {
             active_model.create_ts = ActiveValue::NotSet;
             // 当修改时间未设置时，设置修改时间
             if active_model.update_ts.is_not_set() {
-                let now = ActiveValue::set(wheel_rs::time_utils::now_ts()? as i64);
+                let now = ActiveValue::set(wheel_rs::time_utils::now_ms() as i64);
                 active_model.update_ts = now;
             }
             // 执行数据库更新操作
