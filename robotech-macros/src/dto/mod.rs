@@ -164,7 +164,7 @@ pub fn crud_dto_macro(args: CrudDtoArgs, input: ItemStruct) -> TokenStream {
             #[serde(skip_deserializing)]
             #[into(create_ms, match ~ {Some(v)=>ActiveValue::Set(v.into()),None=>ActiveValue::NotSet})]
             #[builder(default, setter(strip_option))]
-            pub _current_ts: Option<U64>,
+            pub _current_ms: Option<U64>,
             #[serde(skip_deserializing)]
             #[into(creator_id, ActiveValue::Set(~.into()))]
             pub _current_user_id: U64,
@@ -189,7 +189,7 @@ pub fn crud_dto_macro(args: CrudDtoArgs, input: ItemStruct) -> TokenStream {
             #[serde(skip_deserializing)]
             #[into(update_ms, match ~ {Some(v)=>ActiveValue::Set(v.into()),None=>ActiveValue::NotSet})]
             #[builder(default, setter(strip_option))]
-            pub _current_ts: Option<U64>,
+            pub _current_ms: Option<U64>,
             #[serde(skip_deserializing)]
             #[into(updator_id, ActiveValue::Set(~.into()))]
             pub _current_user_id: U64,
@@ -209,7 +209,7 @@ pub fn crud_dto_macro(args: CrudDtoArgs, input: ItemStruct) -> TokenStream {
             #[serde(skip_deserializing)]
             pub _current_user_id: U64,
             #[serde(skip_deserializing)]
-            pub _current_ts: Option<U64>,
+            pub _current_ms: Option<U64>,
         }
 
         // QueryDto
