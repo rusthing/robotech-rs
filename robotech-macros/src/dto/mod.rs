@@ -522,6 +522,12 @@ fn generate_into_attr(field: &Field) -> Attribute {
                                             #[into(match ~ {Some(v)=>ActiveValue::Set(v),None=>ActiveValue::NotSet})]
                                         )
                                     }
+                                    "Duration" => {
+                                        // Option<Option<Duration>> -> ActiveValue<Option<String>>
+                                        syn::parse_quote!(
+                                            #[into(match ~ {Some(v)=>ActiveValue::Set(v.map(|d| String::from(d))),None=>ActiveValue::NotSet})]
+                                        )
+                                    }
                                     _ => {
                                         syn::parse_quote!(
                                             #[into(match ~ {Some(v)=>ActiveValue::Set(v.map(|x| x.into())),None=>ActiveValue::NotSet})]
@@ -561,6 +567,13 @@ fn generate_into_attr(field: &Field) -> Attribute {
                         // ~ 是 Option<String> 类型（包装后的值）
                         syn::parse_quote!(
                             #[into(match ~ {Some(v)=>ActiveValue::Set(v),None=>ActiveValue::NotSet})]
+                        )
+                    }
+                    "Duration" => {
+                        // Duration -> Option<Duration> -> ActiveValue<String>
+                        // ~ 是 Option<Duration> 类型（包装后的值）
+                        syn::parse_quote!(
+                            #[into(match ~ {Some(v)=>ActiveValue::Set(String::from(v)),None=>ActiveValue::NotSet})]
                         )
                     }
                     _ => {
@@ -692,6 +705,9 @@ fn get_value_token_stream(type_name: &str) -> TokenStream {
         }
         "String" | "i64" | "i32" | "i16" | "i8" | "f64" | "f32" => {
             quote! { v }
+        }
+        "Duration" => {
+            quote! { String::from(v.clone()) }
         }
         _ => {
             quote! { v.value() }

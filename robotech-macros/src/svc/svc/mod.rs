@@ -147,7 +147,6 @@ pub(crate) fn svc_macro(args: SvcArgs, input: ItemStruct) -> TokenStream {
             // 先校验dto
             modify_dto.validate()?;
 
-            let id = modify_dto.id.unwrap();    // id经过校验，可以放心unwrap
             let active_model: ActiveModel = modify_dto.into();
             let one = #vo_name::from(#dao_name::update(active_model, db).await?);
             Ok(Ro::success("修改成功".to_string()).extra(Some(one)))

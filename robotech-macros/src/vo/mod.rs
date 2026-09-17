@@ -88,6 +88,9 @@ fn generate_from_attr(ty: &syn::Type) -> Option<TokenStream> {
                         "i8" | "i16" | "i32" | "i64" | "String" => {
                             quote! { #[from(~)] }
                         }
+                        "Duration" => {
+                            quote! { #[from(~.map(|v: String| wheel_rs::time_utils::string_to_duration(v).into()))] }
+                        }
                         _ => quote! { #[from(~.map(|v|v.into()))] },
                     });
                 }
@@ -96,6 +99,7 @@ fn generate_from_attr(ty: &syn::Type) -> Option<TokenStream> {
             Some(match path_str.as_str() {
                 "u8" | "u16" | "u32" | "u64" | "u128" => quote! { #[from(~.into())] },
                 "i8" | "i16" | "i32" | "i64" | "String" => quote! { #[from(~)] },
+                "Duration" => quote! { #[from(wheel_rs::time_utils::string_to_duration(~).into())] },
                 _ => quote! { #[from(~.into())] },
             })?
         }
