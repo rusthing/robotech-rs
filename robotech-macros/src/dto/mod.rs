@@ -153,7 +153,6 @@ pub fn crud_dto_macro(args: CrudDtoArgs, input: ItemStruct) -> TokenStream {
         #[owned_into(ActiveModel)]
         #[ghosts(
             updator_id: Default::default(),
-            create_ts: Default::default(),
             update_ts: Default::default(),
         )]
         #[builder]
@@ -162,6 +161,10 @@ pub fn crud_dto_macro(args: CrudDtoArgs, input: ItemStruct) -> TokenStream {
             #[builder(default, setter(strip_option))]
             pub id: Option<U64>,
             #add_fields
+            #[serde(skip_deserializing)]
+            #[into(create_ts, match ~ {Some(v)=>ActiveValue::Set(v.into()),None=>ActiveValue::NotSet})]
+            #[builder(default, setter(strip_option))]
+            pub _current_ts: Option<U64>,
             #[serde(skip_deserializing)]
             #[into(creator_id, ActiveValue::Set(~.into()))]
             pub _current_user_id: U64,
@@ -175,7 +178,6 @@ pub fn crud_dto_macro(args: CrudDtoArgs, input: ItemStruct) -> TokenStream {
         #[ghosts(
             creator_id: Default::default(),
             create_ts: Default::default(),
-            update_ts: Default::default(),
         )]
         #[builder]
         #vis struct #modify_dto_name {
@@ -184,6 +186,10 @@ pub fn crud_dto_macro(args: CrudDtoArgs, input: ItemStruct) -> TokenStream {
             #[builder(default, setter(strip_option))]
             pub id: Option<U64>,
             #modify_fields
+            #[serde(skip_deserializing)]
+            #[into(update_ts, match ~ {Some(v)=>ActiveValue::Set(v.into()),None=>ActiveValue::NotSet})]
+            #[builder(default, setter(strip_option))]
+            pub _current_ts: Option<U64>,
             #[serde(skip_deserializing)]
             #[into(updator_id, ActiveValue::Set(~.into()))]
             pub _current_user_id: U64,
@@ -202,6 +208,8 @@ pub fn crud_dto_macro(args: CrudDtoArgs, input: ItemStruct) -> TokenStream {
             #save_fields
             #[serde(skip_deserializing)]
             pub _current_user_id: U64,
+            #[serde(skip_deserializing)]
+            pub _current_ts: Option<U64>,
         }
 
         // QueryDto
