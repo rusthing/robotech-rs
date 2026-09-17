@@ -153,7 +153,7 @@ pub fn crud_dto_macro(args: CrudDtoArgs, input: ItemStruct) -> TokenStream {
         #[owned_into(ActiveModel)]
         #[ghosts(
             updator_id: Default::default(),
-            update_ts: Default::default(),
+            update_ms: Default::default(),
         )]
         #[builder]
         #vis struct #add_dto_name {
@@ -162,7 +162,7 @@ pub fn crud_dto_macro(args: CrudDtoArgs, input: ItemStruct) -> TokenStream {
             pub id: Option<U64>,
             #add_fields
             #[serde(skip_deserializing)]
-            #[into(create_ts, match ~ {Some(v)=>ActiveValue::Set(v.into()),None=>ActiveValue::NotSet})]
+            #[into(create_ms, match ~ {Some(v)=>ActiveValue::Set(v.into()),None=>ActiveValue::NotSet})]
             #[builder(default, setter(strip_option))]
             pub _current_ts: Option<U64>,
             #[serde(skip_deserializing)]
@@ -177,7 +177,7 @@ pub fn crud_dto_macro(args: CrudDtoArgs, input: ItemStruct) -> TokenStream {
         #[owned_into(ActiveModel)]
         #[ghosts(
             creator_id: Default::default(),
-            create_ts: Default::default(),
+            create_ms: Default::default(),
         )]
         #[builder]
         #vis struct #modify_dto_name {
@@ -187,7 +187,7 @@ pub fn crud_dto_macro(args: CrudDtoArgs, input: ItemStruct) -> TokenStream {
             pub id: Option<U64>,
             #modify_fields
             #[serde(skip_deserializing)]
-            #[into(update_ts, match ~ {Some(v)=>ActiveValue::Set(v.into()),None=>ActiveValue::NotSet})]
+            #[into(update_ms, match ~ {Some(v)=>ActiveValue::Set(v.into()),None=>ActiveValue::NotSet})]
             #[builder(default, setter(strip_option))]
             pub _current_ts: Option<U64>,
             #[serde(skip_deserializing)]

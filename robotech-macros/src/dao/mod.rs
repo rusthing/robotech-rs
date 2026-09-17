@@ -328,10 +328,10 @@ pub(super) fn dao_macro(args: DaoArgs, input: ItemStruct) -> TokenStream {
                 active_model.id = ActiveValue::set(idworker::next_id()? as i64);
             }
             // 当创建时间未设置时，设置创建时间和修改时间
-            if active_model.create_ts.is_not_set() {
+            if active_model.create_ms.is_not_set() {
                 let now = ActiveValue::set(wheel_rs::time_utils::now_ms() as i64);
-                active_model.create_ts = now.clone();
-                active_model.update_ts = now;
+                active_model.create_ms = now.clone();
+                active_model.update_ms = now;
             }
             // 添加时修改者就是创建者
             active_model.updator_id = active_model.creator_id.clone();
@@ -365,11 +365,11 @@ pub(super) fn dao_macro(args: DaoArgs, input: ItemStruct) -> TokenStream {
         {
             // 保护创建者信息不能被修改
             active_model.creator_id = ActiveValue::NotSet;
-            active_model.create_ts = ActiveValue::NotSet;
+            active_model.create_ms = ActiveValue::NotSet;
             // 当修改时间未设置时，设置修改时间
-            if active_model.update_ts.is_not_set() {
+            if active_model.update_ms.is_not_set() {
                 let now = ActiveValue::set(wheel_rs::time_utils::now_ms() as i64);
-                active_model.update_ts = now;
+                active_model.update_ms = now;
             }
             // 执行数据库更新操作
             active_model
