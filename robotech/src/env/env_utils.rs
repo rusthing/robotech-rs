@@ -2,6 +2,7 @@ use crate::env::EnvError;
 use std::env;
 use std::path::PathBuf;
 use std::sync::OnceLock;
+use uuid::Uuid;
 
 /// # 全局应用环境
 ///
@@ -24,6 +25,8 @@ pub struct AppEnv {
     pub app_file_name: String,
     /// 当前执行文件名（不含扩展名）
     pub app_file_name_without_ext: String,
+    /// 当前实例ID
+    pub instance_id: String,
 }
 
 /// # 初始化应用环境
@@ -69,6 +72,7 @@ pub fn init_env() -> Result<(), EnvError> {
         app_dir,
         app_file_name,
         app_file_name_without_ext,
+        instance_id: Uuid::new_v4().to_string(),
     };
 
     APP_ENV.set(env).map_err(|_| EnvError::SetAppEnv())?;

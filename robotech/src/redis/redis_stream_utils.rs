@@ -1,8 +1,7 @@
 use crate::redis::get_redis_conn;
-use redis::streams::{
-    StreamReadOptions, StreamReadReply, StreamTrimOptions, StreamTrimmingMode,
-};
+use redis::streams::{StreamReadOptions, StreamReadReply, StreamTrimOptions, StreamTrimmingMode};
 use redis::{AsyncCommands, RedisError};
+use std::time::Duration;
 
 /// # 消息发布到 Stream
 /// 执行 XADD 命令将一组键值对作为消息添加到指定流中。
@@ -43,19 +42,27 @@ pub async fn publish_to_stream_if_not_exists(
 
 /// # 统一读取流消息
 /// 同时支持普通读取（XREAD）和消费者组读取（XREADGROUP）。
+/// 默认阻塞等待新消息，可避免空轮询浪费 CPU 与网络。
+/// 注意：阻塞期间会独占 Redis 连接，请勿在高并发、连接池场景中使用；
+/// 适合每个 Worker 持有独立连接的场景。
 /// - stream_key: 流的键名。
 /// - last_id: 起始消息 ID，"0" 表示从头开始，">" 表示仅接收新消息（仅消费者组模式有效）。
 /// - count: 单次最多读取的消息数量。
+/// - block_ms: 阻塞超时时间（毫秒）。Some(0) 表示永久阻塞直到有新消息；Some(N) 表示最多等待 N 毫秒，超时返回空结果；None 表示非阻塞立即返回。
 /// - group: 消费者组信息。None 表示普通读取；Some((group_name, consumer_name)) 表示以消费者组方式读取。
-/// 返回 StreamReadReply 结构体。
+/// 返回 StreamReadReply 结构体，无新消息时其中的 stream 列表为空。
 pub async fn read_from_stream(
     stream_key: &str,
     last_id: &str,
     count: usize,
+    block_duration: Option<&Duration>,
     group: Option<(&str, &str)>,
 ) -> Result<StreamReadReply, RedisError> {
     let mut conn = get_redis_conn()?;
     let mut opts = StreamReadOptions::default().count(count);
+    if let Some(duration) = block_duration {
+        opts = opts.block(duration.as_millis() as usize);
+    }
     if let Some((group_name, consumer_name)) = group {
         opts = opts.group(group_name, consumer_name);
     }
@@ -68,12 +75,10 @@ pub async fn read_from_stream(
 /// - stream_key: 流的键名。
 /// - group_name: 消费者组名称。
 /// 无返回值，创建成功返回 Ok(())。
-pub async fn create_consumer_group(
-    stream_key: &str,
-    group_name: &str,
-) -> Result<(), RedisError> {
+pub async fn create_consumer_group(stream_key: &str, group_name: &str) -> Result<(), RedisError> {
     let mut conn = get_redis_conn()?;
-    conn.xgroup_create_mkstream(stream_key, group_name, "$").await
+    conn.xgroup_create_mkstream(stream_key, group_name, "$")
+        .await
 }
 
 /// # 幂等创建消费者组
@@ -82,10 +87,7 @@ pub async fn create_consumer_group(
 /// - stream_key: 流的键名。
 /// - group_name: 消费者组名称。
 /// 无返回值，创建成功或组已存在时返回 Ok(())。
-pub async fn ensure_consumer_group(
-    stream_key: &str,
-    group_name: &str,
-) -> Result<(), RedisError> {
+pub async fn ensure_consumer_group(stream_key: &str, group_name: &str) -> Result<(), RedisError> {
     match create_consumer_group(stream_key, group_name).await {
         Ok(()) => Ok(()),
         Err(e) => {
@@ -142,10 +144,7 @@ pub async fn delete_stream_message(
 /// - stream_key: 流的键名。
 /// - min_id: 最小保留的消息 ID，所有小于此 ID 的消息将被删除。
 /// 返回被删除的消息数量。
-pub async fn trim_stream_before(
-    stream_key: &str,
-    min_id: &str,
-) -> Result<usize, RedisError> {
+pub async fn trim_stream_before(stream_key: &str, min_id: &str) -> Result<usize, RedisError> {
     let mut conn = get_redis_conn()?;
     let opts = StreamTrimOptions::minid(StreamTrimmingMode::Exact, min_id);
     conn.xtrim_options(stream_key, &opts).await

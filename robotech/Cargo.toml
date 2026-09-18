@@ -79,3 +79,4 @@ idworker = { workspace = true, optional = true }
 wheel-rs = { workspace = true }
 
 robotech-macros = { workspace = true, optional = true }
+uuid = { version = "1.24.1", features = ["v4"] }
