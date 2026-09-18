@@ -17,6 +17,30 @@ pub async fn publish_to_stream(
     conn.xadd(stream_key, "*", fields).await
 }
 
+/// # 仅在 Stream 不存在时发布消息
+/// 使用 Lua 脚本原子性地检查 key 是否存在：若不存在则创建流并发布消息，
+/// 若已存在则不做任何操作。避免了先检查再写入的竞态条件问题。
+/// - stream_key: 流的键名。
+/// - fields: 消息的字段键值对切片，格式为 &[(key, value)]。
+/// 返回 Option<String>：Some(消息ID) 表示发布成功，None 表示 key 已存在、未执行任何操作。
+pub async fn publish_to_stream_if_not_exists(
+    stream_key: &str,
+    fields: &[(&str, &str)],
+) -> Result<Option<String>, RedisError> {
+    let mut conn = get_redis_conn()?;
+
+    let script = redis::Script::new(
+        r#"if redis.call('EXISTS', KEYS[1]) == 0 then return redis.call('XADD', KEYS[1], '*', unpack(ARGV)) else return nil end"#,
+    );
+    let mut invocation = script.key(stream_key);
+    for (k, v) in fields {
+        invocation.arg(*k);
+        invocation.arg(*v);
+    }
+
+    invocation.invoke_async(&mut conn).await
+}
+
 /// # 统一读取流消息
 /// 同时支持普通读取（XREAD）和消费者组读取（XREADGROUP）。
 /// - stream_key: 流的键名。
