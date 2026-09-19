@@ -269,6 +269,11 @@ pub fn crud_dto_macro(args: CrudDtoArgs, input: ItemStruct) -> TokenStream {
             #[builder(default, setter(strip_option))]
             pub id: Option<U64>,
             #client_add_fields
+            #[serde(skip_serializing)]
+            #[builder(default, setter(strip_option))]
+            pub _current_ms: Option<U64>,
+            #[serde(skip_serializing)]
+            pub _current_user_id: U64,
         }
 
         #[cfg(not(feature = "server"))]
@@ -279,6 +284,11 @@ pub fn crud_dto_macro(args: CrudDtoArgs, input: ItemStruct) -> TokenStream {
             #[builder(default, setter(strip_option))]
             pub id: Option<U64>,
             #client_modify_fields
+            #[serde(skip_serializing)]
+            #[builder(default, setter(strip_option))]
+            pub _current_ms: Option<U64>,
+            #[serde(skip_serializing)]
+            pub _current_user_id: U64,
         }
 
         #[cfg(not(feature = "server"))]
@@ -289,6 +299,10 @@ pub fn crud_dto_macro(args: CrudDtoArgs, input: ItemStruct) -> TokenStream {
             #[builder(default, setter(strip_option))]
             pub id: Option<U64>,
             #client_save_fields
+            #[serde(skip_serializing)]
+            pub _current_user_id: U64,
+            #[serde(skip_serializing)]
+            pub _current_ms: Option<U64>,
         }
 
         #[cfg(not(feature = "server"))]

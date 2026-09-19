@@ -130,6 +130,10 @@ pub(crate) fn ctrl_macro(args: CtrlArgs, input: ItemStruct) -> TokenStream {
         ) -> Result<Json<Ro<#vo_name>>, CtrlError> {
             // 从header中解析当前用户ID，如果没有或解析失败则抛出ValidationError
             dto._current_user_id = get_current_user_id(&headers)?;
+            // 从header中解析当前时间戳（可选），未提供时由dao层自动填充
+            if let ::core::option::Option::Some(ms) = get_current_ms(&headers)? {
+                dto._current_ms = ::core::option::Option::Some(ms);
+            }
 
             let result = #svc_name::add::<DatabaseTransaction>(dto, None).await?;
             Ok(Json(result))
@@ -171,6 +175,10 @@ pub(crate) fn ctrl_macro(args: CtrlArgs, input: ItemStruct) -> TokenStream {
         ) -> Result<Json<Ro<#vo_name>>, CtrlError> {
             // 从header中解析当前用户ID，如果没有或解析失败则抛出ValidationError
             dto._current_user_id = get_current_user_id(&headers)?;
+            // 从header中解析当前时间戳（可选），未提供时由dao层自动填充
+            if let ::core::option::Option::Some(ms) = get_current_ms(&headers)? {
+                dto._current_ms = ::core::option::Option::Some(ms);
+            }
 
             let result = #svc_name::modify::<DatabaseTransaction>(dto, None).await?;
             Ok(Json(result))
@@ -212,6 +220,10 @@ pub(crate) fn ctrl_macro(args: CtrlArgs, input: ItemStruct) -> TokenStream {
         ) -> Result<Json<Ro<#vo_name>>, CtrlError> {
             // 从header中解析当前用户ID，如果没有或解析失败则抛出ValidationError
             dto._current_user_id = get_current_user_id(&headers)?;
+            // 从header中解析当前时间戳（可选），未提供时由dao层自动填充
+            if let ::core::option::Option::Some(ms) = get_current_ms(&headers)? {
+                dto._current_ms = ::core::option::Option::Some(ms);
+            }
 
             let result = #svc_name::save::<DatabaseTransaction>(dto, None).await?;
             Ok(Json(result))
@@ -544,7 +556,7 @@ pub(crate) fn ctrl_macro(args: CtrlArgs, input: ItemStruct) -> TokenStream {
         use robotech::api::Ro;
         use robotech::api::rx::PageRx;
         use robotech::api::U64;
-        use robotech::web::ctrl_utils::get_current_user_id;
+        use robotech::web::ctrl_utils::{get_current_ms, get_current_user_id};
         use robotech::web::CtrlError;
         use sea_orm::{DatabaseConnection, DatabaseTransaction};
         use validator::Validate;

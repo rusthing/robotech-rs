@@ -61,10 +61,9 @@ pub(crate) fn feign_macro(input: ItemStruct) -> TokenStream {
         pub async fn add(
             &self,
             dto: &#add_dto_name,
-            current_user_id: u64,
         ) -> ::core::result::Result<robotech::api::Ro<#vo_name>, robotech::api_client::ApiClientError> {
             let url = #crud_path.to_string();
-            let headers = Self::build_headers(current_user_id)?;
+            let headers = Self::build_headers(dto._current_user_id.value(), dto._current_ms.map(|m| m.value()))?;
             self.client
                 .request::<#add_dto_name, #vo_name>(
                     ::reqwest::Method::POST,
@@ -82,10 +81,9 @@ pub(crate) fn feign_macro(input: ItemStruct) -> TokenStream {
         pub async fn modify(
             &self,
             dto: &#modify_dto_name,
-            current_user_id: u64,
         ) -> ::core::result::Result<robotech::api::Ro<#vo_name>, robotech::api_client::ApiClientError> {
             let url = #crud_path.to_string();
-            let headers = Self::build_headers(current_user_id)?;
+            let headers = Self::build_headers(dto._current_user_id.value(), dto._current_ms.map(|m| m.value()))?;
             self.client
                 .request::<#modify_dto_name, #vo_name>(
                     ::reqwest::Method::PUT,
@@ -103,10 +101,9 @@ pub(crate) fn feign_macro(input: ItemStruct) -> TokenStream {
         pub async fn save(
             &self,
             dto: &#save_dto_name,
-            current_user_id: u64,
         ) -> ::core::result::Result<robotech::api::Ro<#vo_name>, robotech::api_client::ApiClientError> {
             let url = #save_path.to_string();
-            let headers = Self::build_headers(current_user_id)?;
+            let headers = Self::build_headers(dto._current_user_id.value(), dto._current_ms.map(|m| m.value()))?;
             self.client
                 .request::<#save_dto_name, #vo_name>(
                     ::reqwest::Method::POST,
@@ -127,7 +124,7 @@ pub(crate) fn feign_macro(input: ItemStruct) -> TokenStream {
             current_user_id: u64,
         ) -> ::core::result::Result<robotech::api::Ro<#vo_name>, robotech::api_client::ApiClientError> {
             let url = ::std::format!(#del_by_id_path, id);
-            let headers = Self::build_headers(current_user_id)?;
+            let headers = Self::build_headers(current_user_id, None)?;
             self.client
                 .request::<(), #vo_name>(
                     ::reqwest::Method::DELETE,
@@ -148,7 +145,7 @@ pub(crate) fn feign_macro(input: ItemStruct) -> TokenStream {
             current_user_id: u64,
         ) -> ::core::result::Result<robotech::api::Ro<::serde_json::Value>, robotech::api_client::ApiClientError> {
             let url = #del_by_query_dto_path.to_string();
-            let headers = Self::build_headers(current_user_id)?;
+            let headers = Self::build_headers(current_user_id, None)?;
             self.client
                 .request::<#query_dto_name, ::serde_json::Value>(
                     ::reqwest::Method::DELETE,
@@ -169,7 +166,7 @@ pub(crate) fn feign_macro(input: ItemStruct) -> TokenStream {
             current_user_id: u64,
         ) -> ::core::result::Result<robotech::api::Ro<#vo_name>, robotech::api_client::ApiClientError> {
             let url = ::std::format!(#get_by_id_path, id);
-            let headers = Self::build_headers(current_user_id)?;
+            let headers = Self::build_headers(current_user_id, None)?;
             self.client
                 .request::<(), #vo_name>(
                     ::reqwest::Method::GET,
@@ -190,7 +187,7 @@ pub(crate) fn feign_macro(input: ItemStruct) -> TokenStream {
             current_user_id: u64,
         ) -> ::core::result::Result<robotech::api::Ro<#vo_name>, robotech::api_client::ApiClientError> {
             let url = #get_by_query_dto_path.to_string();
-            let headers = Self::build_headers(current_user_id)?;
+            let headers = Self::build_headers(current_user_id, None)?;
             self.client
                 .request::<#query_dto_name, #vo_name>(
                     ::reqwest::Method::GET,
@@ -211,7 +208,7 @@ pub(crate) fn feign_macro(input: ItemStruct) -> TokenStream {
             current_user_id: u64,
         ) -> ::core::result::Result<robotech::api::Ro<::std::vec::Vec<#vo_name>>, robotech::api_client::ApiClientError> {
             let url = #list_by_query_dto_path.to_string();
-            let headers = Self::build_headers(current_user_id)?;
+            let headers = Self::build_headers(current_user_id, None)?;
             self.client
                 .request::<#query_dto_name, ::std::vec::Vec<#vo_name>>(
                     ::reqwest::Method::GET,
@@ -232,7 +229,7 @@ pub(crate) fn feign_macro(input: ItemStruct) -> TokenStream {
             current_user_id: u64,
         ) -> ::core::result::Result<robotech::api::Ro<robotech::api::rx::PageRx<#vo_name>>, robotech::api_client::ApiClientError> {
             let url = #page_by_query_dto_path.to_string();
-            let headers = Self::build_headers(current_user_id)?;
+            let headers = Self::build_headers(current_user_id, None)?;
             self.client
                 .request::<#query_dto_name, robotech::api::rx::PageRx<#vo_name>>(
                     ::reqwest::Method::GET,
@@ -253,7 +250,7 @@ pub(crate) fn feign_macro(input: ItemStruct) -> TokenStream {
             current_user_id: u64,
         ) -> ::core::result::Result<robotech::api::Ro<#ex_vo_name>, robotech::api_client::ApiClientError> {
             let url = ::std::format!(#get_ex_by_id_path, id);
-            let headers = Self::build_headers(current_user_id)?;
+            let headers = Self::build_headers(current_user_id, None)?;
             self.client
                 .request::<(), #ex_vo_name>(
                     ::reqwest::Method::GET,
@@ -274,7 +271,7 @@ pub(crate) fn feign_macro(input: ItemStruct) -> TokenStream {
             current_user_id: u64,
         ) -> ::core::result::Result<robotech::api::Ro<#ex_vo_name>, robotech::api_client::ApiClientError> {
             let url = #get_ex_by_query_dto_path.to_string();
-            let headers = Self::build_headers(current_user_id)?;
+            let headers = Self::build_headers(current_user_id, None)?;
             self.client
                 .request::<#query_dto_name, #ex_vo_name>(
                     ::reqwest::Method::GET,
@@ -295,7 +292,7 @@ pub(crate) fn feign_macro(input: ItemStruct) -> TokenStream {
             current_user_id: u64,
         ) -> ::core::result::Result<robotech::api::Ro<::std::vec::Vec<#ex_vo_name>>, robotech::api_client::ApiClientError> {
             let url = #list_ex_by_query_dto_path.to_string();
-            let headers = Self::build_headers(current_user_id)?;
+            let headers = Self::build_headers(current_user_id, None)?;
             self.client
                 .request::<#query_dto_name, ::std::vec::Vec<#ex_vo_name>>(
                     ::reqwest::Method::GET,
@@ -316,7 +313,7 @@ pub(crate) fn feign_macro(input: ItemStruct) -> TokenStream {
             current_user_id: u64,
         ) -> ::core::result::Result<robotech::api::Ro<robotech::api::rx::PageRx<#ex_vo_name>>, robotech::api_client::ApiClientError> {
             let url = #page_ex_by_query_dto_path.to_string();
-            let headers = Self::build_headers(current_user_id)?;
+            let headers = Self::build_headers(current_user_id, None)?;
             self.client
                 .request::<#query_dto_name, robotech::api::rx::PageRx<#ex_vo_name>>(
                     ::reqwest::Method::GET,
@@ -335,6 +332,7 @@ pub(crate) fn feign_macro(input: ItemStruct) -> TokenStream {
         impl #struct_name {
             fn build_headers(
                 current_user_id: u64,
+                current_ms: ::core::option::Option<u64>,
             ) -> ::core::result::Result<
                 ::reqwest::header::HeaderMap,
                 robotech::api_client::ApiClientError,
@@ -347,6 +345,15 @@ pub(crate) fn feign_macro(input: ItemStruct) -> TokenStream {
                     )
                     .map_err(|e| ::anyhow::anyhow!("current_user_id: {}", e))?,
                 );
+                if let ::core::option::Option::Some(ms) = current_ms {
+                    headers.insert(
+                        robotech::cst::user_id_cst::CURRENT_MS_HEADER_NAME,
+                        ::reqwest::header::HeaderValue::from_str(
+                            &ms.to_string().as_str(),
+                        )
+                        .map_err(|e| ::anyhow::anyhow!("current_ms: {}", e))?,
+                    );
+                }
                 Ok(headers)
             }
 
