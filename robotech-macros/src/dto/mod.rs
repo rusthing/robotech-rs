@@ -148,7 +148,7 @@ pub fn crud_dto_macro(args: CrudDtoArgs, input: ItemStruct) -> TokenStream {
 
         // AddDto
         #[cfg(feature = "server")]
-        #[derive(o2o::o2o, utoipa::ToSchema, Debug, Default, serde::Serialize, serde::Deserialize, validator::Validate, Setters, TypedBuilder)]
+        #[derive(o2o::o2o, utoipa::ToSchema, Debug, Clone, Default, serde::Serialize, serde::Deserialize, validator::Validate, Setters, TypedBuilder)]
         #[serde(default, rename_all = "camelCase")]
         #[owned_into(ActiveModel)]
         #[ghosts(
@@ -172,7 +172,7 @@ pub fn crud_dto_macro(args: CrudDtoArgs, input: ItemStruct) -> TokenStream {
 
         // ModifyDto
         #[cfg(feature = "server")]
-        #[derive(o2o::o2o, utoipa::ToSchema, Debug, Default, serde::Serialize, serde::Deserialize, validator::Validate, Setters, TypedBuilder)]
+        #[derive(o2o::o2o, utoipa::ToSchema, Debug, Clone, Default, serde::Serialize, serde::Deserialize, validator::Validate, Setters, TypedBuilder)]
         #[serde(default, rename_all = "camelCase")]
         #[owned_into(ActiveModel)]
         #[ghosts(
@@ -197,7 +197,7 @@ pub fn crud_dto_macro(args: CrudDtoArgs, input: ItemStruct) -> TokenStream {
 
         // SaveDto
         #[cfg(feature = "server")]
-        #[derive(o2o::o2o, utoipa::ToSchema, Debug, Default, serde::Serialize, serde::Deserialize, Setters, TypedBuilder)]
+        #[derive(o2o::o2o, utoipa::ToSchema, Debug, Clone, Default, serde::Serialize, serde::Deserialize, Setters, TypedBuilder)]
         #[serde(default, rename_all = "camelCase")]
         #[owned_into(#add_dto_name)]
         #[owned_into(#modify_dto_name)]
@@ -214,7 +214,7 @@ pub fn crud_dto_macro(args: CrudDtoArgs, input: ItemStruct) -> TokenStream {
 
         // QueryDto
         #[cfg(feature = "server")]
-        #[derive(utoipa::ToSchema, utoipa::IntoParams, Debug, Default, serde::Serialize, serde::Deserialize, Setters, TypedBuilder)]
+        #[derive(utoipa::ToSchema, utoipa::IntoParams, Debug, Clone, Default, serde::Serialize, serde::Deserialize, Setters, TypedBuilder)]
         #[serde(default, rename_all = "camelCase")]
         #[builder]
         #vis struct #query_dto_name {
@@ -262,7 +262,7 @@ pub fn crud_dto_macro(args: CrudDtoArgs, input: ItemStruct) -> TokenStream {
 
         // ========== Client mode: pure data structures ==========
         #[cfg(not(feature = "server"))]
-        #[derive(utoipa::ToSchema, Debug, Default, serde::Serialize, serde::Deserialize, Setters, TypedBuilder)]
+        #[derive(utoipa::ToSchema, Debug, Clone, Default, serde::Serialize, serde::Deserialize, Setters, TypedBuilder)]
         #[serde(default, rename_all = "camelCase")]
         #[builder]
         #vis struct #add_dto_name {
@@ -277,7 +277,7 @@ pub fn crud_dto_macro(args: CrudDtoArgs, input: ItemStruct) -> TokenStream {
         }
 
         #[cfg(not(feature = "server"))]
-        #[derive(utoipa::ToSchema, Debug, Default, serde::Serialize, serde::Deserialize, Setters, TypedBuilder)]
+        #[derive(utoipa::ToSchema, Debug, Clone, Default, serde::Serialize, serde::Deserialize, Setters, TypedBuilder)]
         #[serde(default, rename_all = "camelCase")]
         #[builder]
         #vis struct #modify_dto_name {
@@ -292,7 +292,7 @@ pub fn crud_dto_macro(args: CrudDtoArgs, input: ItemStruct) -> TokenStream {
         }
 
         #[cfg(not(feature = "server"))]
-        #[derive(utoipa::ToSchema, Debug, Default, serde::Serialize, serde::Deserialize, Setters, TypedBuilder)]
+        #[derive(utoipa::ToSchema, Debug, Clone, Default, serde::Serialize, serde::Deserialize, Setters, TypedBuilder)]
         #[serde(default, rename_all = "camelCase")]
         #[builder]
         #vis struct #save_dto_name {
@@ -306,7 +306,7 @@ pub fn crud_dto_macro(args: CrudDtoArgs, input: ItemStruct) -> TokenStream {
         }
 
         #[cfg(not(feature = "server"))]
-        #[derive(utoipa::ToSchema, Debug, Default, serde::Serialize, serde::Deserialize, Setters, TypedBuilder)]
+        #[derive(utoipa::ToSchema, Debug, Clone, Default, serde::Serialize, serde::Deserialize, Setters, TypedBuilder)]
         #[serde(default, rename_all = "camelCase")]
         #[builder]
         #vis struct #query_dto_name {
