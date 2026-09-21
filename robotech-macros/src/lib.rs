@@ -1,3 +1,4 @@
+mod bootstrap;
 mod dao;
 mod db;
 mod dto;
@@ -7,6 +8,7 @@ mod svc;
 mod vo;
 mod web;
 
+use crate::bootstrap::{bootstrap_macro, BootstrapArgs};
 use crate::dao::{dao_macro, DaoArgs};
 use crate::db::MigrateArgs;
 use crate::dto::{crud_dto_macro, CrudDtoArgs};
@@ -66,6 +68,38 @@ pub fn log_call(args: TokenStream, input: TokenStream) -> TokenStream {
 pub fn db_migrate(args: TokenStream) -> TokenStream {
     let args = parse_macro_input!(args as MigrateArgs);
     db::db_migrate_macro(args).into()
+}
+
+/// 过程宏：生成微服务应用的 `main()` 函数和 CLI 参数定义
+///
+/// 消除各项目 `main.rs` 中的重复模板代码。宏展开后会生成完整的 `Args` 结构体
+/// （基于 clap）和 `main()` 函数（包含配置加载、信号管理、微服务注册、优雅退出等）。
+///
+/// 使用者需在同一文件中定义 `setup` 函数来完成项目特有的初始化逻辑。
+///
+/// # 使用示例
+/// ```ignore
+/// use robotech::bootstrap;
+/// use my_svr::config::AppConfig;
+/// use robotech::macros::log_call;
+///
+/// bootstrap!(AppConfig);
+///
+/// #[log_call]
+/// async fn setup(
+///     app_config: &Arc<AppConfig>,
+///     changed: &Option<HashMap<String, Value>>,
+///     port: Option<u16>,
+///     old_pid: Option<u32>,
+/// ) -> Result<(), anyhow::Error> {
+///     // 项目特有的初始化逻辑
+///     Ok(())
+/// }
+/// ```
+#[proc_macro]
+pub fn bootstrap(args: TokenStream) -> TokenStream {
+    let args = parse_macro_input!(args as BootstrapArgs);
+    bootstrap_macro(args).into()
 }
 
 /// 属性宏：为XxxDto结构体自动生成XxxAddDto、XxxModifyDto、XxxSaveDto
