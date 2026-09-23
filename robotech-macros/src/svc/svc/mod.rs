@@ -17,42 +17,70 @@ use wheel_rs::str_utils::{split_camel_case, CamelFormat};
 pub(crate) struct SvcArgs {
     /// 需要跳过的的方法名集合
     pub skip: HashSet<String>,
+    /// 写操作成功后的回调函数路径（add / modify / del_by_id / del_by_query_dto）
+    pub after_write: Option<syn::Path>,
 }
 
 impl Parse for SvcArgs {
     fn parse(input: ParseStream) -> syn::Result<Self> {
         let mut skip = HashSet::new();
+        let mut after_write = None;
 
         if input.is_empty() {
-            return Ok(SvcArgs { skip });
+            return Ok(SvcArgs { skip, after_write });
         }
 
-        let ident: Ident = input.parse()?;
-        if ident != "skip" {
-            return Err(syn::Error::new_spanned(ident, "expected `skip`"));
+        loop {
+            let ident: Ident = input.parse()?;
+            match ident.to_string().as_str() {
+                "skip" => {
+                    let lookahead = input.lookahead1();
+                    if lookahead.peek(Token![:]) {
+                        let _: Token![:] = input.parse()?;
+                    } else if lookahead.peek(Token![=]) {
+                        let _: Token![=] = input.parse()?;
+                    }
+
+                    let content;
+                    bracketed!(content in input);
+                    let method_names =
+                        content.parse_terminated(Ident::parse, Token![,])?;
+                    for method_name in method_names {
+                        skip.insert(method_name.to_string());
+                    }
+                }
+                "after_write" => {
+                    let _: Token![=] = input.parse()?;
+                    after_write = Some(input.parse()?);
+                }
+                unknown => {
+                    return Err(syn::Error::new_spanned(
+                        ident,
+                        format!("Unknown argument: {unknown}"),
+                    ));
+                }
+            }
+
+            if input.is_empty() {
+                break;
+            }
+            let _: Token![,] = input.parse()?;
         }
 
-        let lookahead = input.lookahead1();
-        if lookahead.peek(Token![:]) {
-            let _: Token![:] = input.parse()?;
-        } else if lookahead.peek(Token![=]) {
-            let _: Token![=] = input.parse()?;
-        }
-
-        let content;
-        bracketed!(content in input);
-        let method_names = content.parse_terminated(Ident::parse, Token![,])?;
-        for method_name in method_names {
-            skip.insert(method_name.to_string());
-        }
-
-        Ok(SvcArgs { skip })
+        Ok(SvcArgs { skip, after_write })
     }
 }
 
 pub(crate) fn svc_macro(args: SvcArgs, input: ItemStruct) -> TokenStream {
     let skip = args.skip;
+    let after_write = args.after_write;
     let struct_name = &input.ident;
+
+    let after_write_call = after_write.map(|f| {
+        quote! {
+            let _ = #f().await;
+        }
+    });
 
     // 解析结构体的名称，必须是Svc结尾，符合大驼峰命名规范
     let struct_name_str = struct_name.to_string();
@@ -115,6 +143,7 @@ pub(crate) fn svc_macro(args: SvcArgs, input: ItemStruct) -> TokenStream {
 
             let active_model: ActiveModel = add_dto.into();
             let one = #vo_name::from(#dao_name::insert(active_model, db).await?);
+            #after_write_call
             Ok(Ro::success("添加成功".to_string()).extra(Some(one)))
         }
         });
@@ -149,6 +178,7 @@ pub(crate) fn svc_macro(args: SvcArgs, input: ItemStruct) -> TokenStream {
 
             let active_model: ActiveModel = modify_dto.into();
             let one = #vo_name::from(#dao_name::update(active_model, db).await?);
+            #after_write_call
             Ok(Ro::success("修改成功".to_string()).extra(Some(one)))
         }
         });
@@ -223,6 +253,7 @@ pub(crate) fn svc_macro(args: SvcArgs, input: ItemStruct) -> TokenStream {
             if rows_affected == 0 {
                 return Err(SvcError::NotFound(id.to_string()));
             }
+            #after_write_call
             Ok(Ro::success("删除成功".to_string()).extra(Some(one)))
         }
         });
@@ -260,6 +291,7 @@ pub(crate) fn svc_macro(args: SvcArgs, input: ItemStruct) -> TokenStream {
             if rows_affected == 0 {
                 return Err(SvcError::NotFound(dto.to_string()));
             }
+            #after_write_call
             Ok(Ro::success(format!("删除了{}条记录", rows_affected).to_string()))
         }
         });
