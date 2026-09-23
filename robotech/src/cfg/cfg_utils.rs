@@ -95,18 +95,15 @@ pub async fn build_cfg(
         // 从配置中心获取配置文件内容并加载到config中
         #[cfg(feature = "config-center")]
         match get_configs().await {
-            Ok(config_items) => {
-                for item in config_items {
-                    // 如果是缓存版本 key，将其值包装到 micro-svc.cache-keys.{local_key} 路径
-                    if let Ok(hc) = get_hub_client() {
-                        if let Some(local_key) = hc.get_cache_key_local_name(&item.key.data_id) {
-                            let wrapped = format!(
-                                r#"{{"micro-svc":{{"cache-keys":{{"{}":"{}"}}}}}}"#,
-                                local_key,
-                                item.content.trim()
+            Ok(config_keys) => {
+                for item in config_keys {
+                    // 如果是 refresh-scope key，直接以 TOML 格式注入到 [refresh-scope] 段落下
+                    if let Ok(hub_client) = get_hub_client() {
+                        if hub_client.is_refresh_scope_key(&item.key.data_id) {
+                            let wrapped = format!("[refresh-scope]\n{}", item.content);
+                            config_builder = config_builder.add_source(
+                                config::File::from_str(&wrapped, config::FileFormat::Toml),
                             );
-                            config_builder = config_builder
-                                .add_source(config::File::from_str(&wrapped, config::FileFormat::Json));
                             continue;
                         }
                     }

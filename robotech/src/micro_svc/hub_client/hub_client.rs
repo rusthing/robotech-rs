@@ -13,7 +13,6 @@ use arc_swap::ArcSwapOption;
 use config::FileFormat;
 use ipnet::IpNet;
 use serde::{Deserialize, Serialize};
-use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex, OnceLock};
 use std::time::Duration;
@@ -141,6 +140,22 @@ pub async fn set_config(key: &ConfigKey, content: &str) -> Result<(), CfgError> 
     hub_client.set_config(key, content).await
 }
 
+/// 更新 `refresh-scope.toml` 中某一个字段的值。
+///
+/// 内部先 fetch `refresh-scope.toml` 的当前 TOML 内容，修改指定字段后写回；
+/// 其他字段保持不变。写入后自动触发 watch 链路，所有实例热更新。
+///
+/// ## 参数
+/// - `scope_name`: 作用域名，对应 TOML 字段名（如 `"msg-cache"`）
+/// - `value`: 新值（通常用时间戳）
+///
+/// ## 错误
+/// Hub 客户端未初始化或写入失败时返回 `CfgError`。
+pub async fn set_refresh_scope(scope_name: &str, value: &str) -> Result<(), CfgError> {
+    let hub_client = get_hub_client()?;
+    hub_client.set_refresh_scope(scope_name, value).await
+}
+
 /// 订阅所有配置项的变更，配置变化时调用 `on_change` 回调（含公共配置）。
 ///
 /// ## 参数
@@ -206,8 +221,8 @@ pub struct HubClient {
     retry_interval: Duration,
     refresh_interval: Duration,
     join_handles: Mutex<Vec<JoinHandle<()>>>,
-    /// 缓存版本 key 映射：本地 key → 配置中心 key 的 data_id
-    cache_keys: HashMap<String, String>,
+    /// 刷新作用域在配置中心使用的 data_id
+    refresh_scope: String,
 }
 
 impl Drop for HubClient {
@@ -291,7 +306,6 @@ impl HubClient {
                 ))?
             }
         };
-        let cache_keys = micro_svc_config.cache_keys.clone();
         Ok(Self {
             config: config_center_client,
             registry: registry_center_client,
@@ -303,25 +317,12 @@ impl HubClient {
             retry_interval,
             refresh_interval,
             join_handles: Mutex::new(Vec::new()),
-            cache_keys,
+            refresh_scope: micro_svc_config.refresh_scope.clone(),
         })
     }
 
-    /// 根据配置中心 key 的 `data_id` 反查对应的本地 key 名。
-    ///
-    /// `cache_keys` 的映射方向是 local_key → data_id；此方法做反向查找，
-    /// 用于 `build_cfg` 中将配置中心 key 的原始值包装到正确的配置路径下。
-    ///
-    /// ## 参数
-    /// - `data_id`: 配置中心 key 的 data_id
-    ///
-    /// ## 返回值
-    /// 找到的本地 key 名；未找到返回 `None`
-    pub fn get_cache_key_local_name(&self, data_id: &str) -> Option<&str> {
-        self.cache_keys
-            .iter()
-            .find(|(_, v)| v.as_str() == data_id)
-            .map(|(k, _)| k.as_str())
+    pub fn is_refresh_scope_key(&self, data_id: &str) -> bool {
+        &self.refresh_scope == data_id
     }
 
     /// 拉取所有配置项；单个配置项后端拉取失败时回退到本地快照，快照也不存在则报错。
@@ -375,11 +376,7 @@ impl HubClient {
     ///
     /// ## 错误
     /// 配置中心客户端未初始化或后端写入失败时返回 `CfgError`。
-    pub async fn set_config(
-        &self,
-        key: &ConfigKey,
-        content: &str,
-    ) -> Result<(), CfgError> {
+    pub async fn set_config(&self, key: &ConfigKey, content: &str) -> Result<(), CfgError> {
         let config_center_client = self.config.as_ref().ok_or(CfgError::NotInit(
             "config center not configured".to_string(),
         ))?;
@@ -388,6 +385,70 @@ impl HubClient {
             .await
             .map_err(|e| CfgError::Init(e.to_string()))?;
         info!("config key set: {key}");
+        Ok(())
+    }
+
+    /// 更新 `refresh-scope.toml` 中某一个字段的值。
+    ///
+    /// 内部先 fetch `refresh-scope.toml` 的当前 TOML 内容，修改指定字段后写回；
+    /// 其他字段保持不变。如果 key 不存在则自动创建。写入后自动触发 watch 链路，所有实例热更新。
+    ///
+    /// ## 参数
+    /// - `scope_name`: 作用域名，对应 TOML 字段名（如 `"msg-cache"`）
+    /// - `value`: 新值（通常用时间戳）
+    ///
+    /// ## 错误
+    /// config_keys 为空、fetch 失败、TOML 解析失败或写入失败时返回 `CfgError`。
+    pub async fn set_refresh_scope(&self, scope_name: &str, value: &str) -> Result<(), CfgError> {
+        // 从 config_keys 中取任意一个来获取 namespace / group
+        let template_key = self
+            .config_keys
+            .as_ref()
+            .and_then(|keys| keys.first())
+            .ok_or_else(|| CfgError::NotInit("no config keys available".to_string()))?;
+
+        let data_id = self.refresh_scope.clone();
+
+        let scope_key = ConfigKey::new(
+            template_key.namespace.clone(),
+            template_key.group.clone(),
+            data_id.clone(),
+        );
+
+        let config_center_client = self.config.as_ref().ok_or(CfgError::NotInit(
+            "config center not configured".to_string(),
+        ))?;
+
+        // 1. 读取当前内容（不存在则自动创建空 table）
+        let current = config_center_client
+            .fetch(&scope_key)
+            .await
+            .unwrap_or_else(|_| ConfigItem {
+                key: scope_key.clone(),
+                content: String::new(),
+                format: FileFormat::Toml,
+            });
+
+        // 2. 修改指定字段
+        let mut table: toml::Table = if current.content.is_empty() {
+            toml::Table::new()
+        } else {
+            toml::from_str(&current.content).unwrap_or_default()
+        };
+        table.insert(
+            scope_name.to_string(),
+            toml::Value::String(value.to_string()),
+        );
+        let new_content = toml::to_string(&table)
+            .map_err(|e| CfgError::Init(format!("toml serialize failed: {e}")))?;
+
+        // 3. 写回
+        config_center_client
+            .set_config(&scope_key, &new_content)
+            .await
+            .map_err(|e| CfgError::Init(e.to_string()))?;
+
+        info!("refresh scope updated: {scope_name} = {value}");
         Ok(())
     }
 
@@ -659,14 +720,13 @@ fn build_branch<C: ConfigCenterClient + RegistryCenterClient + 'static>(
         };
         config_keys.push(config_key);
 
-        // 缓存版本 key 也纳入配置中心监听与拉取
-        for (_local_key, data_id) in &micro_svc_config.cache_keys {
-            config_keys.push(ConfigKey::new(
-                namespace.clone(),
-                group.clone(),
-                data_id.clone(),
-            ));
-        }
+        // 刷新作用域 key 也纳入配置中心监听与拉取
+        let data_id = micro_svc_config.refresh_scope.clone();
+        config_keys.push(ConfigKey::new(
+            namespace.clone(),
+            group.clone(),
+            data_id.clone(),
+        ));
 
         (Some(snapshot_dir), Some(config_keys))
     } else {
