@@ -5,7 +5,7 @@
 
 use proc_macro2::TokenStream;
 use quote::{format_ident, quote};
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use syn::{
     bracketed,
     parse::{Parse, ParseStream},
@@ -13,26 +13,45 @@ use syn::{
 };
 use wheel_rs::str_utils::{split_camel_case, CamelFormat};
 
+/// 写操作方法名集合（before_write / after_write 快捷方式生效范围）
+const WRITE_METHODS: &[&str] = &["add", "modify", "del_by_id", "del_by_query_dto"];
+
 /// `#[svc]` 宏参数
 pub(crate) struct SvcArgs {
     /// 需要跳过的的方法名集合
     pub skip: HashSet<String>,
-    /// 写操作成功后的回调函数路径（add / modify / del_by_id / del_by_query_dto）
+    /// 写操作前的回调（add / modify / del_by_id / del_by_query_dto）
+    pub before_write: Option<syn::Path>,
+    /// 写操作后的回调（add / modify / del_by_id / del_by_query_dto）
     pub after_write: Option<syn::Path>,
+    /// 每个方法单独的前置回调：方法名 → 函数路径
+    pub before: HashMap<String, syn::Path>,
+    /// 每个方法单独的后置回调：方法名 → 函数路径
+    pub after: HashMap<String, syn::Path>,
 }
 
 impl Parse for SvcArgs {
     fn parse(input: ParseStream) -> syn::Result<Self> {
         let mut skip = HashSet::new();
+        let mut before_write = None;
         let mut after_write = None;
+        let mut before = HashMap::new();
+        let mut after = HashMap::new();
 
         if input.is_empty() {
-            return Ok(SvcArgs { skip, after_write });
+            return Ok(SvcArgs {
+                skip,
+                before_write,
+                after_write,
+                before,
+                after,
+            });
         }
 
         loop {
             let ident: Ident = input.parse()?;
-            match ident.to_string().as_str() {
+            let ident_str = ident.to_string();
+            match ident_str.as_str() {
                 "skip" => {
                     let lookahead = input.lookahead1();
                     if lookahead.peek(Token![:]) {
@@ -49,9 +68,23 @@ impl Parse for SvcArgs {
                         skip.insert(method_name.to_string());
                     }
                 }
+                "before_write" => {
+                    let _: Token![=] = input.parse()?;
+                    before_write = Some(input.parse()?);
+                }
                 "after_write" => {
                     let _: Token![=] = input.parse()?;
                     after_write = Some(input.parse()?);
+                }
+                name if name.starts_with("before_") && name.len() > "before_".len() => {
+                    let method = name["before_".len()..].to_string();
+                    let _: Token![=] = input.parse()?;
+                    before.insert(method, input.parse()?);
+                }
+                name if name.starts_with("after_") && name.len() > "after_".len() => {
+                    let method = name["after_".len()..].to_string();
+                    let _: Token![=] = input.parse()?;
+                    after.insert(method, input.parse()?);
                 }
                 unknown => {
                     return Err(syn::Error::new_spanned(
@@ -67,20 +100,34 @@ impl Parse for SvcArgs {
             let _: Token![,] = input.parse()?;
         }
 
-        Ok(SvcArgs { skip, after_write })
+        Ok(SvcArgs {
+            skip,
+            before_write,
+            after_write,
+            before,
+            after,
+        })
     }
 }
 
-pub(crate) fn svc_macro(args: SvcArgs, input: ItemStruct) -> TokenStream {
-    let skip = args.skip;
-    let after_write = args.after_write;
-    let struct_name = &input.ident;
+/// 为指定方法解析钩子函数调用
+///
+/// 优先级：单方法钩子 > 写操作快捷方式（仅写方法生效）
+fn resolve_hook(
+    method_name: &str,
+    is_write: bool,
+    per_method: &HashMap<String, syn::Path>,
+    fallback: &Option<syn::Path>,
+) -> Option<TokenStream> {
+    let fn_path = per_method
+        .get(method_name)
+        .or_else(|| if is_write { fallback.as_ref() } else { None });
+    fn_path.map(|f| quote! { let _ = #f().await; })
+}
 
-    let after_write_call = after_write.map(|f| {
-        quote! {
-            let _ = #f().await;
-        }
-    });
+pub(crate) fn svc_macro(args: SvcArgs, input: ItemStruct) -> TokenStream {
+    let skip = &args.skip;
+    let struct_name = &input.ident;
 
     // 解析结构体的名称，必须是Svc结尾，符合大驼峰命名规范
     let struct_name_str = struct_name.to_string();
@@ -116,6 +163,9 @@ pub(crate) fn svc_macro(args: SvcArgs, input: ItemStruct) -> TokenStream {
 
     // 生成add方法
     if !skip.contains("add") {
+        let is_write = WRITE_METHODS.contains(&"add");
+        let before_call = resolve_hook("add", is_write, &args.before, &args.before_write);
+        let after_call = resolve_hook("add", is_write, &args.after, &args.after_write);
         generated_methods.push(quote! {
         /// # 添加新记录
         ///
@@ -138,12 +188,13 @@ pub(crate) fn svc_macro(args: SvcArgs, input: ItemStruct) -> TokenStream {
         where
             C: ConnectionTrait,
         {
+            #before_call
             // 先校验dto
             add_dto.validate()?;
 
             let active_model: ActiveModel = add_dto.into();
             let one = #vo_name::from(#dao_name::insert(active_model, db).await?);
-            #after_write_call
+            #after_call
             Ok(Ro::success("添加成功".to_string()).extra(Some(one)))
         }
         });
@@ -151,6 +202,9 @@ pub(crate) fn svc_macro(args: SvcArgs, input: ItemStruct) -> TokenStream {
 
     // 生成modify方法
     if !skip.contains("modify") {
+        let is_write = WRITE_METHODS.contains(&"modify");
+        let before_call = resolve_hook("modify", is_write, &args.before, &args.before_write);
+        let after_call = resolve_hook("modify", is_write, &args.after, &args.after_write);
         generated_methods.push(quote! {
         /// # 修改记录
         ///
@@ -173,12 +227,13 @@ pub(crate) fn svc_macro(args: SvcArgs, input: ItemStruct) -> TokenStream {
         where
             C: ConnectionTrait,
         {
+            #before_call
             // 先校验dto
             modify_dto.validate()?;
 
             let active_model: ActiveModel = modify_dto.into();
             let one = #vo_name::from(#dao_name::update(active_model, db).await?);
-            #after_write_call
+            #after_call
             Ok(Ro::success("修改成功".to_string()).extra(Some(one)))
         }
         });
@@ -186,6 +241,8 @@ pub(crate) fn svc_macro(args: SvcArgs, input: ItemStruct) -> TokenStream {
 
     // 生成save方法
     if !skip.contains("save") {
+        let before_call = resolve_hook("save", false, &args.before, &args.before_write);
+        let after_call = resolve_hook("save", false, &args.after, &args.after_write);
         generated_methods.push(quote! {
         /// # 保存记录
         ///
@@ -205,17 +262,23 @@ pub(crate) fn svc_macro(args: SvcArgs, input: ItemStruct) -> TokenStream {
         where
             C: ConnectionTrait,
         {
-            if let Some(id) = save_dto.id {
+            #before_call
+            let result = if let Some(id) = save_dto.id {
                 Self::modify(save_dto.into(), db).await
             } else {
                 Self::add(save_dto.into(), db).await
-            }
+            };
+            #after_call
+            result
         }
         });
     }
 
     // 生成del_by_id方法
     if !skip.contains("del_by_id") {
+        let is_write = WRITE_METHODS.contains(&"del_by_id");
+        let before_call = resolve_hook("del_by_id", is_write, &args.before, &args.before_write);
+        let after_call = resolve_hook("del_by_id", is_write, &args.after, &args.after_write);
         generated_methods.push(quote! {
         /// # 删除记录
         ///
@@ -238,6 +301,7 @@ pub(crate) fn svc_macro(args: SvcArgs, input: ItemStruct) -> TokenStream {
         where
             C: ConnectionTrait,
         {
+            #before_call
             let one = Self::get_by_id(id, Some(db))
                 .await?
                 .extra
@@ -253,7 +317,7 @@ pub(crate) fn svc_macro(args: SvcArgs, input: ItemStruct) -> TokenStream {
             if rows_affected == 0 {
                 return Err(SvcError::NotFound(id.to_string()));
             }
-            #after_write_call
+            #after_call
             Ok(Ro::success("删除成功".to_string()).extra(Some(one)))
         }
         });
@@ -261,6 +325,9 @@ pub(crate) fn svc_macro(args: SvcArgs, input: ItemStruct) -> TokenStream {
 
     // 生成del_by_query_dto方法
     if !skip.contains("del_by_query_dto") {
+        let is_write = WRITE_METHODS.contains(&"del_by_query_dto");
+        let before_call = resolve_hook("del_by_query_dto", is_write, &args.before, &args.before_write);
+        let after_call = resolve_hook("del_by_query_dto", is_write, &args.after, &args.after_write);
         generated_methods.push(quote! {
         /// # 删除记录
         ///
@@ -282,6 +349,7 @@ pub(crate) fn svc_macro(args: SvcArgs, input: ItemStruct) -> TokenStream {
         where
             C: ConnectionTrait,
         {
+            #before_call
             let mut condition = dto.to_condition();
             if let Some(keyword) = &dto._keyword {
                 condition = condition.add(build_like_condition(keyword, #dao_name::LIKE_COLUMNS));
@@ -291,7 +359,7 @@ pub(crate) fn svc_macro(args: SvcArgs, input: ItemStruct) -> TokenStream {
             if rows_affected == 0 {
                 return Err(SvcError::NotFound(dto.to_string()));
             }
-            #after_write_call
+            #after_call
             Ok(Ro::success(format!("删除了{}条记录", rows_affected).to_string()))
         }
         });
@@ -299,6 +367,8 @@ pub(crate) fn svc_macro(args: SvcArgs, input: ItemStruct) -> TokenStream {
 
     // 生成get_by_id方法
     if !skip.contains("get_by_id") {
+        let before_call = resolve_hook("get_by_id", false, &args.before, &args.before_write);
+        let after_call = resolve_hook("get_by_id", false, &args.after, &args.after_write);
         generated_methods.push(quote! {
         /// # 根据id获取记录信息
         ///
@@ -321,7 +391,9 @@ pub(crate) fn svc_macro(args: SvcArgs, input: ItemStruct) -> TokenStream {
         where
             C: ConnectionTrait,
         {
+            #before_call
             let one = #dao_name::get_by_id::<_, #vo_name>(id, db).await?;
+            #after_call
             Ok(Ro::success("查询成功".to_string()).extra(one))
         }
         });
@@ -329,6 +401,8 @@ pub(crate) fn svc_macro(args: SvcArgs, input: ItemStruct) -> TokenStream {
 
     // 生成get_by_query_dto方法
     if !skip.contains("get_by_query_dto") {
+        let before_call = resolve_hook("get_by_query_dto", false, &args.before, &args.before_write);
+        let after_call = resolve_hook("get_by_query_dto", false, &args.after, &args.after_write);
         generated_methods.push(quote! {
         /// # 获取记录
         ///
@@ -350,12 +424,14 @@ pub(crate) fn svc_macro(args: SvcArgs, input: ItemStruct) -> TokenStream {
         where
             C: ConnectionTrait,
         {
+            #before_call
             let mut condition = dto.to_condition();
             if let Some(keyword) = &dto._keyword {
                 condition = condition.add(build_like_condition(keyword, #dao_name::LIKE_COLUMNS));
             }
 
             let one = #dao_name::get_by_condition::<_, #vo_name>(condition, db).await?;
+            #after_call
             Ok(Ro::success("查询成功".to_string()).extra(one))
         }
         });
@@ -363,6 +439,8 @@ pub(crate) fn svc_macro(args: SvcArgs, input: ItemStruct) -> TokenStream {
 
     // 生成list_by_query_dto方法
     if !skip.contains("list_by_query_dto") {
+        let before_call = resolve_hook("list_by_query_dto", false, &args.before, &args.before_write);
+        let after_call = resolve_hook("list_by_query_dto", false, &args.after, &args.after_write);
         generated_methods.push(quote! {
         /// # 查询记录列表
         ///
@@ -384,6 +462,7 @@ pub(crate) fn svc_macro(args: SvcArgs, input: ItemStruct) -> TokenStream {
         where
             C: ConnectionTrait,
         {
+            #before_call
             let keyword = &dto._keyword;
             let order_by = &dto._order_by;
             let mut condition = dto.to_condition();
@@ -392,6 +471,7 @@ pub(crate) fn svc_macro(args: SvcArgs, input: ItemStruct) -> TokenStream {
             }
 
             let all = #dao_name::list_by_condition::<_, #vo_name>(condition, order_by, db).await?;
+            #after_call
             Ok(Ro::success("查询成功".to_string()).extra(Some(all)))
         }
         });
@@ -399,6 +479,8 @@ pub(crate) fn svc_macro(args: SvcArgs, input: ItemStruct) -> TokenStream {
 
     // 生成page_by_query_dto方法
     if !skip.contains("page_by_query_dto") {
+        let before_call = resolve_hook("page_by_query_dto", false, &args.before, &args.before_write);
+        let after_call = resolve_hook("page_by_query_dto", false, &args.after, &args.after_write);
         generated_methods.push(quote! {
         /// # 查询记录列表
         ///
@@ -420,6 +502,7 @@ pub(crate) fn svc_macro(args: SvcArgs, input: ItemStruct) -> TokenStream {
         where
             C: ConnectionTrait,
         {
+            #before_call
             let keyword = &dto._keyword;
             let order_by = &dto._order_by;
             let page_num = dto._page.unwrap_or(U64(1));
@@ -437,6 +520,7 @@ pub(crate) fn svc_macro(args: SvcArgs, input: ItemStruct) -> TokenStream {
                 page_size,
                 db
             ).await?;
+            #after_call
             Ok(Ro::success("查询成功".to_string()).extra(Some(PageRx::builder()
                 .total(total)
                 .page_num(page_num)
@@ -449,6 +533,8 @@ pub(crate) fn svc_macro(args: SvcArgs, input: ItemStruct) -> TokenStream {
 
     // 生成get_ex_by_id方法
     if !skip.contains("get_ex_by_id") {
+        let before_call = resolve_hook("get_ex_by_id", false, &args.before, &args.before_write);
+        let after_call = resolve_hook("get_ex_by_id", false, &args.after, &args.after_write);
         generated_methods.push(quote! {
         /// # 根据id获取记录信息(附带获取关联表的信息)
         ///
@@ -471,9 +557,11 @@ pub(crate) fn svc_macro(args: SvcArgs, input: ItemStruct) -> TokenStream {
         where
             C: ConnectionTrait,
         {
+            #before_call
             let one: Option<#ex_vo_name> = #dao_name::get_ex_by_id(id, db)
                 .await?
                 .map(|m| m.into());
+            #after_call
             Ok(Ro::success("查询成功".to_string()).extra(one))
         }
         });
@@ -481,6 +569,8 @@ pub(crate) fn svc_macro(args: SvcArgs, input: ItemStruct) -> TokenStream {
 
     // 生成get_ex_by_query_dto方法
     if !skip.contains("get_ex_by_query_dto") {
+        let before_call = resolve_hook("get_ex_by_query_dto", false, &args.before, &args.before_write);
+        let after_call = resolve_hook("get_ex_by_query_dto", false, &args.after, &args.after_write);
         generated_methods.push(quote! {
         /// # 获取记录信息(附带获取关联表的信息)
         ///
@@ -502,6 +592,7 @@ pub(crate) fn svc_macro(args: SvcArgs, input: ItemStruct) -> TokenStream {
         where
             C: ConnectionTrait,
         {
+            #before_call
             let mut condition = dto.to_condition();
             if let Some(keyword) = &dto._keyword {
                 condition = condition.add(build_like_condition(keyword, #dao_name::LIKE_COLUMNS));
@@ -510,6 +601,7 @@ pub(crate) fn svc_macro(args: SvcArgs, input: ItemStruct) -> TokenStream {
             let one: Option<#ex_vo_name> = #dao_name::get_ex_by_condition(condition, db)
                 .await?
                 .map(|m| m.into());
+            #after_call
             Ok(Ro::success("查询成功".to_string()).extra(one))
         }
         });
@@ -517,6 +609,8 @@ pub(crate) fn svc_macro(args: SvcArgs, input: ItemStruct) -> TokenStream {
 
     // 生成list_ex_by_query_dto方法
     if !skip.contains("list_ex_by_query_dto") {
+        let before_call = resolve_hook("list_ex_by_query_dto", false, &args.before, &args.before_write);
+        let after_call = resolve_hook("list_ex_by_query_dto", false, &args.after, &args.after_write);
         generated_methods.push(quote! {
         /// # 查询记录列表(附带获取关联表的信息)
         ///
@@ -538,6 +632,7 @@ pub(crate) fn svc_macro(args: SvcArgs, input: ItemStruct) -> TokenStream {
         where
             C: ConnectionTrait,
         {
+            #before_call
             let keyword = &dto._keyword;
             let order_by = &dto._order_by;
             let mut condition = dto.to_condition();
@@ -550,6 +645,7 @@ pub(crate) fn svc_macro(args: SvcArgs, input: ItemStruct) -> TokenStream {
                 .into_iter()
                 .map(|m| m.into())
                 .collect();
+            #after_call
             Ok(Ro::success("查询成功".to_string()).extra(Some(all)))
         }
         });
@@ -557,6 +653,8 @@ pub(crate) fn svc_macro(args: SvcArgs, input: ItemStruct) -> TokenStream {
 
     // 生成page_ex_by_query_dto方法
     if !skip.contains("page_ex_by_query_dto") {
+        let before_call = resolve_hook("page_ex_by_query_dto", false, &args.before, &args.before_write);
+        let after_call = resolve_hook("page_ex_by_query_dto", false, &args.after, &args.after_write);
         generated_methods.push(quote! {
         /// # 查询记录列表(附带获取关联表的信息)
         ///
@@ -578,6 +676,7 @@ pub(crate) fn svc_macro(args: SvcArgs, input: ItemStruct) -> TokenStream {
         where
             C: ConnectionTrait,
         {
+            #before_call
             let keyword = &dto._keyword;
             let order_by = &dto._order_by;
             let page_num = dto._page.unwrap_or(U64(1));
@@ -596,6 +695,7 @@ pub(crate) fn svc_macro(args: SvcArgs, input: ItemStruct) -> TokenStream {
                 db
             ).await?;
             let list: Vec<#ex_vo_name> = models.into_iter().map(|m| m.into()).collect();
+            #after_call
             Ok(Ro::success("查询成功".to_string()).extra(Some(PageRx::builder()
                 .total(total)
                 .page_num(page_num)
