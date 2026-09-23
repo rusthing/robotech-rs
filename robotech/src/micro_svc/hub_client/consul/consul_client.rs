@@ -211,6 +211,22 @@ impl ConfigCenterClient for ConsulClient {
 
         Ok(Some(join_handle))
     }
+
+    async fn set_config(
+        &self,
+        key: &ConfigKey,
+        content: &str,
+    ) -> Result<(), ConfigCenterError> {
+        let consul_key = key.to_string();
+        let url = format!("{}/v1/kv/{}", self.base_url, consul_key);
+        self.reqwest_client
+            .put(&url)
+            .body(content.to_string())
+            .send()
+            .await
+            .map_err(|e| ConfigCenterError::Connection(e.to_string()))?;
+        Ok(())
+    }
 }
 
 #[cfg(feature = "registry-center")]

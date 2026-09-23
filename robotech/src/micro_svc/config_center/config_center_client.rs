@@ -25,4 +25,14 @@ pub trait ConfigCenterClient: Send + Sync {
         keys: &ConfigKey,
         config_changed_sender: watch::Sender<()>,
     ) -> Result<Option<JoinHandle<()>>, ConfigCenterError>;
+
+    /// 向配置中心写入（创建或更新）一个 key 的值。
+    ///
+    /// 写入后，所有 watch 该 key 的实例会自动感知到变更，
+    /// 触发 reload → diff_config → setup() 链路。
+    async fn set_config(
+        &self,
+        key: &ConfigKey,
+        content: &str,
+    ) -> Result<(), ConfigCenterError>;
 }

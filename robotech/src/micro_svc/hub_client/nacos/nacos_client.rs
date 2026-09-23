@@ -172,6 +172,23 @@ impl ConfigCenterClient for NacosClient {
 
         Ok(None)
     }
+
+    async fn set_config(
+        &self,
+        key: &ConfigKey,
+        content: &str,
+    ) -> Result<(), ConfigCenterError> {
+        let data_id = key.data_id.clone();
+        let group = key
+            .group
+            .clone()
+            .unwrap_or_else(|| "DEFAULT_GROUP".to_string());
+        self.service
+            .publish_config(data_id, group, content.to_string(), None)
+            .await
+            .map_err(|e| ConfigCenterError::Connection(e.to_string()))?;
+        Ok(())
+    }
 }
 
 #[cfg(feature = "registry-center")]

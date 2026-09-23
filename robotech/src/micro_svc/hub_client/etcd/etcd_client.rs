@@ -146,6 +146,20 @@ impl ConfigCenterClient for EtcdClient {
 
         Ok(Some(join_handle))
     }
+
+    async fn set_config(
+        &self,
+        key: &ConfigKey,
+        content: &str,
+    ) -> Result<(), ConfigCenterError> {
+        let etcd_key = format!("/config/{key}");
+        let mut client = self.etcd_client.clone();
+        client
+            .put(etcd_key, content, None)
+            .await
+            .map_err(|e| ConfigCenterError::Connection(e.to_string()))?;
+        Ok(())
+    }
 }
 
 #[cfg(feature = "registry-center")]

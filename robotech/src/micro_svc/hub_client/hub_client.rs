@@ -13,6 +13,7 @@ use arc_swap::ArcSwapOption;
 use config::FileFormat;
 use ipnet::IpNet;
 use serde::{Deserialize, Serialize};
+use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex, OnceLock};
 use std::time::Duration;
@@ -125,6 +126,21 @@ pub async fn discover_service(svc_name: &str) -> Result<Vec<ServiceInstance>, Cf
         .map_err(|e| CfgError::NotInit(format!("discover service failed: {e:?}",)))
 }
 
+/// 向配置中心写入（创建或更新）一个配置项。
+///
+/// 写入后，所有 watch 该 key 的实例会自动感知变更，触发热更新链路。
+///
+/// ## 参数
+/// - `key`: 配置项定位信息（namespace + group + data_id）
+/// - `content`: 配置内容原文
+///
+/// ## 错误
+/// Hub 客户端未初始化或后端写入失败时返回 `CfgError`。
+pub async fn set_config(key: &ConfigKey, content: &str) -> Result<(), CfgError> {
+    let hub_client = get_hub_client()?;
+    hub_client.set_config(key, content).await
+}
+
 /// 订阅所有配置项的变更，配置变化时调用 `on_change` 回调（含公共配置）。
 ///
 /// ## 参数
@@ -190,6 +206,8 @@ pub struct HubClient {
     retry_interval: Duration,
     refresh_interval: Duration,
     join_handles: Mutex<Vec<JoinHandle<()>>>,
+    /// 缓存版本 key 映射：本地 key → 配置中心 key 的 data_id
+    cache_keys: HashMap<String, String>,
 }
 
 impl Drop for HubClient {
@@ -273,6 +291,7 @@ impl HubClient {
                 ))?
             }
         };
+        let cache_keys = micro_svc_config.cache_keys.clone();
         Ok(Self {
             config: config_center_client,
             registry: registry_center_client,
@@ -284,7 +303,25 @@ impl HubClient {
             retry_interval,
             refresh_interval,
             join_handles: Mutex::new(Vec::new()),
+            cache_keys,
         })
+    }
+
+    /// 根据配置中心 key 的 `data_id` 反查对应的本地 key 名。
+    ///
+    /// `cache_keys` 的映射方向是 local_key → data_id；此方法做反向查找，
+    /// 用于 `build_cfg` 中将配置中心 key 的原始值包装到正确的配置路径下。
+    ///
+    /// ## 参数
+    /// - `data_id`: 配置中心 key 的 data_id
+    ///
+    /// ## 返回值
+    /// 找到的本地 key 名；未找到返回 `None`
+    pub fn get_cache_key_local_name(&self, data_id: &str) -> Option<&str> {
+        self.cache_keys
+            .iter()
+            .find(|(_, v)| v.as_str() == data_id)
+            .map(|(k, _)| k.as_str())
     }
 
     /// 拉取所有配置项；单个配置项后端拉取失败时回退到本地快照，快照也不存在则报错。
@@ -330,6 +367,28 @@ impl HubClient {
         }
 
         Ok(all)
+    }
+
+    /// 向配置中心写入（创建或更新）一个配置项。
+    ///
+    /// 写入后，所有 watch 该 key 的实例会自动感知变更，触发热更新链路。
+    ///
+    /// ## 错误
+    /// 配置中心客户端未初始化或后端写入失败时返回 `CfgError`。
+    pub async fn set_config(
+        &self,
+        key: &ConfigKey,
+        content: &str,
+    ) -> Result<(), CfgError> {
+        let config_center_client = self.config.as_ref().ok_or(CfgError::NotInit(
+            "config center not configured".to_string(),
+        ))?;
+        config_center_client
+            .set_config(key, content)
+            .await
+            .map_err(|e| CfgError::Init(e.to_string()))?;
+        info!("config key set: {key}");
+        Ok(())
     }
 
     /// 订阅所有配置项变更，配置变化时调用 `on_change` 回调（含公共配置）。
@@ -599,6 +658,15 @@ fn build_branch<C: ConfigCenterClient + RegistryCenterClient + 'static>(
             ConfigKey::new(namespace.clone(), group.clone(), data_id.clone())
         };
         config_keys.push(config_key);
+
+        // 缓存版本 key 也纳入配置中心监听与拉取
+        for (_local_key, data_id) in &micro_svc_config.cache_keys {
+            config_keys.push(ConfigKey::new(
+                namespace.clone(),
+                group.clone(),
+                data_id.clone(),
+            ));
+        }
 
         (Some(snapshot_dir), Some(config_keys))
     } else {

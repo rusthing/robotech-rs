@@ -1,7 +1,7 @@
 use crate::cfg::base_config::BaseConfig;
 use crate::cfg::cfg_error::CfgError;
 #[cfg(feature = "config-center")]
-use crate::micro_svc::get_configs;
+use crate::micro_svc::{get_configs, get_hub_client};
 #[cfg(any(feature = "config-center", feature = "registry-center"))]
 use crate::micro_svc::{setup_hub_client, MicroSvcConfig, MICRO_SVC_CONFIG_KEY};
 use config::builder::DefaultState;
@@ -97,6 +97,19 @@ pub async fn build_cfg(
         match get_configs().await {
             Ok(config_items) => {
                 for item in config_items {
+                    // 如果是缓存版本 key，将其值包装到 micro-svc.cache-keys.{local_key} 路径
+                    if let Ok(hc) = get_hub_client() {
+                        if let Some(local_key) = hc.get_cache_key_local_name(&item.key.data_id) {
+                            let wrapped = format!(
+                                r#"{{"micro-svc":{{"cache-keys":{{"{}":"{}"}}}}}}"#,
+                                local_key,
+                                item.content.trim()
+                            );
+                            config_builder = config_builder
+                                .add_source(config::File::from_str(&wrapped, config::FileFormat::Json));
+                            continue;
+                        }
+                    }
                     config_builder = config_builder
                         .add_source(config::File::from_str(&item.content, item.format));
                 }
