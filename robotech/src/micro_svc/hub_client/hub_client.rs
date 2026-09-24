@@ -151,6 +151,7 @@ pub async fn set_config(key: &ConfigKey, content: &str) -> Result<(), CfgError> 
 ///
 /// ## 错误
 /// Hub 客户端未初始化或写入失败时返回 `CfgError`。
+#[cfg(feature = "config-center")]
 pub async fn set_refresh_scope(scope_name: &str, value: &str) -> Result<(), CfgError> {
     let hub_client = get_hub_client()?;
     hub_client.set_refresh_scope(scope_name, value).await
@@ -399,6 +400,7 @@ impl HubClient {
     ///
     /// ## 错误
     /// config_keys 为空、fetch 失败、TOML 解析失败或写入失败时返回 `CfgError`。
+    #[cfg(feature = "config-center")]
     pub async fn set_refresh_scope(&self, scope_name: &str, value: &str) -> Result<(), CfgError> {
         // 从 config_keys 中取任意一个来获取 namespace / group
         let template_key = self
