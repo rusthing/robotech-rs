@@ -30,7 +30,7 @@ pub async fn setup_rabbitmq_client(
     config: RabbitMqConfig,
     changed: &Option<HashMap<String, Value>>,
 ) -> Result<(), RabbitMqError> {
-    info!("setup rabbitmq client...: {config:?}");
+    info!("setup RabbitMQ client...: {config:?}");
     if changed
         .as_ref()
         .map(|changed| has_config_changed(RABBITMQ_CONFIG_KEY, changed))
@@ -239,7 +239,7 @@ pub async fn publish<T: Serialize + std::fmt::Debug>(
 /// ## 返回值
 ///
 /// 返回 [`Arc<JoinHandle<()>>`]，可调用 `.abort()` 停止消费。
-pub async fn consume<F, Fut>(
+pub async fn subscriber<F, Fut>(
     queue: &str,
     consumer_tag: &str,
     prefetch_count: Option<u16>,

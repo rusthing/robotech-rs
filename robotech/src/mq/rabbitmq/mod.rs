@@ -13,6 +13,7 @@ mod rabbitmq_config;
 mod rabbitmq_error;
 mod rabbitmq_utils;
 
+pub use lapin::ExchangeKind;
 pub use rabbitmq_config::*;
 pub use rabbitmq_error::*;
 pub use rabbitmq_utils::*;
