@@ -15,7 +15,7 @@
 //! - `log`：日志初始化与热更新
 //! - `macros`：过程宏导出（需启用 feature `macros`）
 //! - `micro_svc`：微服务能力（注册中心、配置中心、Feign 客户端等）
-//! - `mq`：消息队列
+//! - `mq`：消息队列（MQTT、NATS、RabbitMQ）
 //! - `ro`：统一响应对象
 //! - `signal`：进程信号与 PID 文件管理（需启用 feature `app`）
 //! - `svc`：服务层基础设施（需启用 feature `app`）
