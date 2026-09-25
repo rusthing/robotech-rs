@@ -21,7 +21,9 @@ pub fn get_rabbitmq_connection() -> Result<Arc<Connection>, RabbitMqError> {
     RABBITMQ_CONNECTION
         .load_full()
         .map(|outer| outer.as_ref().clone())
-        .ok_or(RabbitMqError::Connect("RabbitMQ 客户端未初始化".to_string()))
+        .ok_or(RabbitMqError::Connect(
+            "RabbitMQ 客户端未初始化".to_string(),
+        ))
 }
 
 /// 设置全局 RabbitMQ 连接

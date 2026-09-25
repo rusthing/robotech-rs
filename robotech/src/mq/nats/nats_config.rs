@@ -70,7 +70,8 @@ pub struct NatsConfig {
     pub token: Option<String>,
     /// 是否禁用回显
     ///
-    /// 启用后本连接发送的消息不会回传给自身。
+    /// 启用后本连接发送的消息不会回传给自身
+    #[serde(default)]
     pub no_echo: bool,
     /// 最大重连次数
     ///
@@ -87,8 +88,10 @@ pub struct NatsConfig {
 
     // ── TLS ──
     /// 是否要求 TLS 连接
+    #[serde(default)]
     pub tls_required: bool,
     /// 是否先建立 TLS 再发送协议信息
+    #[serde(default)]
     pub tls_first: bool,
     /// TLS 根证书路径列表
     pub tls_root_certificates: Option<Vec<String>>,
@@ -127,10 +130,13 @@ pub struct NatsConfig {
     /// 默认值 `"_INBOX"`。
     pub inbox_prefix: Option<String>,
     /// 是否忽略集群发现的服务器
+    #[serde(default)]
     pub ignore_discovered_servers: bool,
     /// 是否保留服务器连接顺序
+    #[serde(default)]
     pub retain_servers_order: bool,
     /// 是否跳过 Subject 合法性校验
+    #[serde(default)]
     pub skip_subject_validation: bool,
     /// 绑定本地地址
     ///
