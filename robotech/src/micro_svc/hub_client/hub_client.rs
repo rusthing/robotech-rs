@@ -20,6 +20,9 @@ use tokio::sync::watch;
 use tokio::task::JoinHandle;
 use tracing::{error, info, warn};
 
+/// 刷新作用域在配置中心使用的 data_id 默认值。
+pub const REFRESH_SCOPE_DATA_ID: &str = "refresh-scope.toml";
+
 static HUB_CLIENT: ArcSwapOption<HubClient> = ArcSwapOption::const_empty();
 
 static RETRY_NEW_HUB_CLIENT_JOIN_HANDLE: ArcSwapOption<JoinHandle<()>> =
@@ -222,9 +225,7 @@ pub struct HubClient {
     retry_interval: Duration,
     refresh_interval: Duration,
     join_handles: Mutex<Vec<JoinHandle<()>>>,
-    /// 刷新作用域在配置中心使用的 data_id
-    refresh_scope: String,
-}
+    }
 
 impl Drop for HubClient {
     fn drop(&mut self) {
@@ -318,12 +319,11 @@ impl HubClient {
             retry_interval,
             refresh_interval,
             join_handles: Mutex::new(Vec::new()),
-            refresh_scope: micro_svc_config.refresh_scope.clone(),
         })
     }
 
     pub fn is_refresh_scope_key(&self, data_id: &str) -> bool {
-        &self.refresh_scope == data_id
+        REFRESH_SCOPE_DATA_ID == data_id
     }
 
     /// 拉取所有配置项；单个配置项后端拉取失败时回退到本地快照，快照也不存在则报错。
@@ -357,6 +357,25 @@ impl HubClient {
                         );
                         if let Some(item) = self.load_snapshot(config_key) {
                             warn!("using snapshot for config: {}", config_key);
+                            all.push(item);
+                        } else if self.is_refresh_scope_key(&config_key.data_id) {
+                            warn!(
+                                "refresh-scope key not found in config center, creating it"
+                            );
+                            let item = ConfigItem {
+                                key: config_key.clone(),
+                                content: String::new(),
+                                format: FileFormat::Toml,
+                            };
+                            if let Err(e) = config_center_client
+                                .set_config(config_key, "")
+                                .await
+                            {
+                                warn!(
+                                    "failed to create refresh-scope key in config center: {e:?}"
+                                );
+                            }
+                            self.save_snapshot(&item);
                             all.push(item);
                         } else {
                             return Err(CfgError::Init(e.to_string()));
@@ -409,7 +428,7 @@ impl HubClient {
             .and_then(|keys| keys.first())
             .ok_or_else(|| CfgError::NotInit("no config keys available".to_string()))?;
 
-        let data_id = self.refresh_scope.clone();
+        let data_id = REFRESH_SCOPE_DATA_ID.to_string();
 
         let scope_key = ConfigKey::new(
             template_key.namespace.clone(),
@@ -723,7 +742,7 @@ fn build_branch<C: ConfigCenterClient + RegistryCenterClient + 'static>(
         config_keys.push(config_key);
 
         // 刷新作用域 key 也纳入配置中心监听与拉取
-        let data_id = micro_svc_config.refresh_scope.clone();
+        let data_id = REFRESH_SCOPE_DATA_ID.to_string();
         config_keys.push(ConfigKey::new(
             namespace.clone(),
             group.clone(),
