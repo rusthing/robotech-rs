@@ -239,7 +239,7 @@ pub async fn publish<T: Serialize + std::fmt::Debug>(
 /// ## 返回值
 ///
 /// 返回 [`Arc<JoinHandle<()>>`]，可调用 `.abort()` 停止消费。
-pub async fn subscriber<F, Fut>(
+pub async fn subscribe<F, Fut>(
     queue: &str,
     consumer_tag: &str,
     prefetch_count: Option<u16>,
