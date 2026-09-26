@@ -56,6 +56,10 @@ pub async fn build_cfg(
         .try_deserialize()
         .map_err(CfgError::Deserialize)?;
 
+    if let Some(name) = &app_name {
+        crate::env::set_app_name(name.clone());
+    }
+
     let config_builder = Config::builder();
 
     // 加载配置文件

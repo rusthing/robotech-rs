@@ -1,7 +1,8 @@
 use crate::env::EnvError;
+use arc_swap::ArcSwap;
 use std::env;
 use std::path::PathBuf;
-use std::sync::OnceLock;
+use std::sync::{Arc, LazyLock, OnceLock};
 use uuid::Uuid;
 
 /// # 全局应用环境
@@ -9,6 +10,23 @@ use uuid::Uuid;
 /// 存储初始化后的应用环境信息（见 [`AppEnv`]），由 [`init_env`] 完成初始化，
 /// 仅允许设置一次。
 pub static APP_ENV: OnceLock<AppEnv> = OnceLock::new();
+
+/// # 应用名称（全局可覆盖）
+///
+/// 初始值为可执行文件名（不含扩展名），后续可通过配置中心的 `app_name` 覆盖。
+/// 使用 [`get_app_name`] 读取，[`set_app_name`] 设置。
+static APP_NAME: LazyLock<ArcSwap<String>> =
+    LazyLock::new(|| ArcSwap::from(Arc::new(String::new())));
+
+/// 获取当前应用名称
+pub fn get_app_name() -> String {
+    APP_NAME.load_full().as_ref().clone()
+}
+
+/// 设置应用名称（通常在加载配置后，用配置中的 app_name 覆盖初始值）
+pub fn set_app_name(name: String) {
+    APP_NAME.store(Arc::new(name));
+}
 
 /// # 应用环境信息
 ///
@@ -66,6 +84,9 @@ pub fn init_env() -> Result<(), EnvError> {
         .to_string_lossy()
         .to_string();
 
+    // 初始化全局应用名称（后续可通过配置覆盖）
+    let app_file_name_without_ext_clone = app_file_name_without_ext.clone();
+
     let env = AppEnv {
         app_file_path,
         app_file_path_without_ext,
@@ -76,5 +97,8 @@ pub fn init_env() -> Result<(), EnvError> {
     };
 
     APP_ENV.set(env).map_err(|_| EnvError::SetAppEnv())?;
+
+    set_app_name(app_file_name_without_ext_clone);
+
     Ok(())
 }
