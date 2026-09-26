@@ -14,6 +14,7 @@ mod rabbitmq_error;
 mod rabbitmq_utils;
 
 pub use lapin::ExchangeKind;
+pub use lapin::types::FieldTable;
 pub use rabbitmq_config::*;
 pub use rabbitmq_error::*;
 pub use rabbitmq_utils::*;

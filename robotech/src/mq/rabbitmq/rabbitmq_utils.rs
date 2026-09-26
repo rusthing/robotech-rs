@@ -127,12 +127,14 @@ pub async fn declare_exchange(
 /// - `durable`: 是否持久化，默认 `true`。
 /// - `auto_delete`: 是否自动删除，默认 `false`。
 /// - `exclusive`: 是否独占，默认 `false`。
+/// - `arguments`: 队列额外参数（如 `x-message-ttl`、`x-max-length` 等）。
 pub async fn declare_queue(
     channel: &Channel,
     queue: &str,
     durable: Option<bool>,
     auto_delete: Option<bool>,
     exclusive: Option<bool>,
+    arguments: Option<FieldTable>,
 ) -> Result<(), RabbitMqError> {
     let options = QueueDeclareOptions {
         durable: durable.unwrap_or(true),
@@ -141,7 +143,7 @@ pub async fn declare_queue(
         ..QueueDeclareOptions::default()
     };
     channel
-        .queue_declare(queue.into(), options, FieldTable::default())
+        .queue_declare(queue.into(), options, arguments.unwrap_or_default())
         .await
         .map_err(|e| RabbitMqError::Channel(format!("声明 Queue {queue} 失败: {e}")))?;
     debug!("Queue 声明成功: {queue}");
