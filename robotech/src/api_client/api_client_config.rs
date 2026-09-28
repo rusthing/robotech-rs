@@ -9,7 +9,7 @@ use wheel_rs::serde::duration_serde;
 /// # API 客户端配置键
 ///
 /// 配置文件中的 `api` 段，用于读取 API 客户端配置。
-pub const API_CLIENT_CONFIG_KEY: &str = "api";
+pub const API_CLIENT_CONFIG_KEY_PREFIX: &str = "api";
 
 /// # API 配置枚举
 ///

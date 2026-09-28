@@ -1,3 +1,4 @@
+mod api_client;
 mod bootstrap;
 mod dao;
 mod db;
@@ -8,6 +9,7 @@ mod svc;
 mod vo;
 mod web;
 
+use crate::api_client::api_client_macro;
 use crate::bootstrap::{bootstrap_macro, BootstrapArgs};
 use crate::dao::{dao_macro, DaoArgs};
 use crate::db::MigrateArgs;
@@ -318,6 +320,28 @@ pub fn api_doc(args: TokenStream, input: TokenStream) -> TokenStream {
     let args = parse_macro_input!(args as ApiDocArgs);
     let input = parse_macro_input!(input as ItemStruct);
     api_doc_macro(args, input).into()
+}
+
+/// 属性宏：为 API Client 聚合结构体生成 static、getter 和 setup 函数
+///
+/// 该宏会解析结构体名称（必须是 `XxxApiClient` 形式），根据命名字段列表生成
+/// setup 函数，自动从 `apis_config` 中获取对应key的 `ApiClientConfig`，
+/// 为每个字段创建对应的 `XxxApiClient` 实例。
+///
+/// - config key 由结构体名称推导：`MsgApiClient` → `"msg"`，`OssApiClient` → `"oss"`
+/// - 生成的 getter 和 setup 函数命名也据此推导：`get_msg_api_client()`、`setup_msg_api_client()`
+///
+/// # 使用示例
+/// ```
+/// #[api_client]
+/// pub struct OssApiClient {
+///     pub file_client: OssFileApiClient,
+/// }
+/// ```
+#[proc_macro_attribute]
+pub fn api_client(_args: TokenStream, input: TokenStream) -> TokenStream {
+    let input = parse_macro_input!(input as ItemStruct);
+    api_client_macro(input).into()
 }
 
 /// 属性宏：为 Feign API 客户端结构体自动生成 `build_headers` 辅助方法
