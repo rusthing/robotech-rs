@@ -1,18 +1,19 @@
-//! # RoResult 枚举定义了API响应的结果状态
+//! # 响应结果枚举（RoResult）模块
 //!
-//! 该模块定义了统一的API响应结果类型，包括成功、参数错误、警告和失败四种状态
+//! 定义统一的 API 响应结果状态枚举，包括成功、参数错误、警告和失败四种状态，
+/// 以及对应的序列化/反序列化与显示实现。
 
 use serde::{Deserialize, Serialize};
 use std::fmt;
 use utoipa::ToSchema;
 
-/// # API响应结果枚举
+/// # API 响应结果枚举
 ///
-/// 定义了四种可能的API响应结果状态：
-/// - Success: 操作成功
-/// - IllegalArgument: 参数错误
-/// - Warn: 警告状态
-/// - Fail: 操作失败
+/// 定义四种可能的 API 响应结果状态：
+/// - `Success`: 操作成功
+/// - `IllegalArgument`: 参数错误
+/// - `Warn`: 警告状态
+/// - `Fail`: 操作失败
 #[derive(ToSchema, Debug, Copy, Clone, PartialEq)]
 pub enum RoResult {
     Success,
@@ -68,23 +69,28 @@ impl RoResult {
         &ENUM_METADATA[*self as usize]
     }
 
-    /// # 根据ID获取对应的枚举对象
+    /// # 根据 ID 获取对应的枚举对象
     ///
     /// ## 参数
-    /// * `id` - 枚举值的ID
+    /// * `id` - 枚举值的 ID（见 [`ENUM_METADATA`]）
     ///
     /// ## 返回值
-    /// 如果找到对应的枚举值，返回Some(RoResult)，否则返回None
+    /// 找到对应的枚举值时返回 `Some(RoResult)`，否则返回 `None`
     pub fn new(id: i8) -> Option<Self> {
-        ENUM_METADATA
-            .iter()
-            .position(|metadata| metadata.id == id)
-            .map(|index| unsafe { std::mem::transmute(index as u8) })
+        match id {
+            1 => Some(RoResult::Success),
+            -1 => Some(RoResult::IllegalArgument),
+            -2 => Some(RoResult::Warn),
+            -3 => Some(RoResult::Fail),
+            _ => None,
+        }
     }
 }
 
 impl fmt::Display for RoResult {
     /// # 格式化输出枚举值信息
+    ///
+    /// 输出格式为 `RoResult {{ index: {index}, id: {id}, name: {name}, note: {note} }}`。
     ///
     /// ## 参数
     /// * `f` - 格式化器

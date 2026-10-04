@@ -18,12 +18,14 @@ pub static APP_ENV: OnceLock<AppEnv> = OnceLock::new();
 static APP_NAME: LazyLock<ArcSwap<String>> =
     LazyLock::new(|| ArcSwap::from(Arc::new(String::new())));
 
-/// 获取当前应用名称
+/// 获取当前应用名称。
+///
+/// 返回初始值（可执行文件名）或通过 [`set_app_name`] 覆盖后的值。
 pub fn get_app_name() -> String {
     APP_NAME.load_full().as_ref().clone()
 }
 
-/// 设置应用名称（通常在加载配置后，用配置中的 app_name 覆盖初始值）
+/// 设置应用名称（通常在加载配置后，用配置中的 `app_name` 覆盖初始值）。
 pub fn set_app_name(name: String) {
     APP_NAME.store(Arc::new(name));
 }
@@ -43,7 +45,7 @@ pub struct AppEnv {
     pub app_file_name: String,
     /// 当前执行文件名（不含扩展名）
     pub app_file_name_without_ext: String,
-    /// 当前实例ID
+    /// 当前实例 ID（UUID v4，每次启动唯一）
     pub instance_id: String,
 }
 

@@ -34,9 +34,11 @@ where
     C: ConnectionTrait,
     Arc<C>: From<Arc<DatabaseConnection>>,
 {
+    // 传入的 db 已存在则直接返回
     if let Some(db) = db {
         Ok(db)
     } else {
+        // 从全局连接池获取
         get_db_conn()
             .map_err(|_| DaoError::GetDbConn())
             .map(|conn| conn.into())
@@ -91,7 +93,7 @@ pub fn build_like_condition<T>(keyword: &str, cols: &[T]) -> Condition
 where
     T: ColumnTrait,
 {
-    cols.into_iter().fold(Condition::any(), |condition, col| {
+    cols.iter().fold(Condition::any(), |condition, col| {
         condition.add(Func::lower(Expr::col(*col)).like(format!("%{}%", keyword.to_lowercase())))
     })
 }
@@ -117,13 +119,15 @@ where
     Q: QueryOrder,
 {
     if let Some(order_by) = order_by {
-        for order_by in order_by.split(",") {
+        for order_by in order_by.split(',') {
+            // 解析排序方向：以 :desc 结尾为降序，否则为升序（:asc 可选）
             let (col, order) = if order_by.trim().to_lowercase().ends_with(":desc") {
                 (order_by.trim().replace(":desc", ""), false)
             } else {
                 (order_by.trim().replace(":asc", ""), true)
             };
-            let col_parts: Vec<&str> = col.split(".").collect();
+            // 解析列名：支持 "列名" 或 "表名.列名" 两种形式
+            let col_parts: Vec<&str> = col.split('.').collect();
             let col = if col_parts.len() == 1 {
                 Expr::col(col)
             } else if col_parts.len() == 2 {

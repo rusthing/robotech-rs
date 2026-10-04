@@ -147,6 +147,16 @@ impl DaoError {
         DaoError::DuplicateKey(unique_filed.clone(), value)
     }
 
+    /// # 从正则匹配中解析外键元数据
+    ///
+    /// 从正则表达式匹配结果中提取外键表名、外键列名与主键表名，
+    /// 通过外键注册表查询对应的 `ForeignKey` 元数据。
+    ///
+    /// ## 参数
+    /// * `caps` - 正则表达式匹配结果，包含 `fk_table`、`fk_column`、`pk_table` 命名捕获组
+    ///
+    /// ## 返回值
+    /// 查询成功返回 `Ok(ForeignKey)`；注册表未初始化或未找到时返回 `Err(DaoError)`
     fn parse_violate_fk(caps: Captures) -> Result<ForeignKey, DaoError> {
         let fk_table = caps["fk_table"].to_string();
         let fk_column = caps["fk_column"].to_string();
@@ -171,6 +181,7 @@ impl DaoError {
         Ok(foreign_key.clone())
     }
 
+    /// 将外键约束违反匹配结果转换为 `InsertViolateFk` 错误
     fn parse_insert_violate_fk(caps: Captures) -> DaoError {
         match Self::parse_violate_fk(caps) {
             Ok(foreign_key) => DaoError::InsertViolateFk(foreign_key),
@@ -178,6 +189,7 @@ impl DaoError {
         }
     }
 
+    /// 将外键约束违反匹配结果转换为 `DeleteViolateFk` 错误
     fn parse_delete_violate_fk(caps: Captures) -> DaoError {
         match Self::parse_violate_fk(caps) {
             Ok(foreign_key) => DaoError::DeleteViolateFk(foreign_key),

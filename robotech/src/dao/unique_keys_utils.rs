@@ -77,8 +77,8 @@ pub fn push_unique_key(
     key_remark: String,
 ) {
     let columns: Vec<String> = key_name.split(',').map(|s| s.trim().to_string()).collect();
-    if columns.len() == 0 {
-        panic!("No fields provided for unique index")
+    if columns.is_empty() {
+        panic!("No fields provided for unique index");
     }
     let unique_key = UniqueKey::builder()
         .table(table)
@@ -86,17 +86,18 @@ pub fn push_unique_key(
         .key_remark(key_remark)
         .build();
     if columns.len() == 1 {
-        // 添加postgre类的key
+        // 添加 PostgreSQL 格式的键：ak_{key_name}_{table}
         let key = format!("ak_{}_{}", unique_key.key_name, unique_key.table);
         unique_keys.insert(key, unique_key.clone());
-        // 添加mysql9类的key
+        // 添加 MySQL 格式的键：{table}.ak_{key_name}
         let key = format!("{}.ak_{}", unique_key.table, unique_key.key_name);
         unique_keys.insert(key, unique_key);
     } else {
-        // 添加postgre类的key
+        // 复合键：多个列名以 _and_ 连接
+        // 添加 PostgreSQL 格式的键：ak_{col1_and_col2}_{table}
         let key = format!("ak_{}_{}", columns.join("_and_"), unique_key.table);
         unique_keys.insert(key, unique_key.clone());
-        // 添加mysql9类的key
+        // 添加 MySQL 格式的键：{table}.ak_{col1_and_col2}
         let key = format!("{}.ak_{}", unique_key.table, columns.join("_and_"));
         unique_keys.insert(key, unique_key);
     }

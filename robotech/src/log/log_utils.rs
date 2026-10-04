@@ -25,10 +25,15 @@ use tracing_subscriber::{fmt, reload, EnvFilter};
 use wheel_rs::config_utils::diff_config;
 use wheel_rs::file_utils::{watch_file_changed, FileWatcher};
 
-/// 日志文件输出锁
-/// 解决锁在初始化方法结束后被提前释放导致后续日志不能输出
+/// 日志文件输出锁。
+///
+/// 解决 `WorkerGuard` 在初始化方法结束后被提前释放导致后续日志无法输出的问题。
 static LOG_GUARD: RwLock<Option<WorkerGuard>> = RwLock::new(None);
 
+/// 自定义控制台日志格式化器。
+///
+/// 在控制台输出中按日志级别设置不同颜色、显示时间、级别、target、
+/// 文件行号（可点击超链接），并可选打印 span 链（函数名与参数）。
 struct CustomConsoleFormatter {
     /// 时间格式
     timer_format: String,
@@ -37,6 +42,11 @@ struct CustomConsoleFormatter {
 }
 
 impl CustomConsoleFormatter {
+    /// 创建自定义控制台格式化器。
+    ///
+    /// ## 参数
+    /// * `timer_format` - 时间格式字符串
+    /// * `show_spans` - 是否打印 span 链
     pub fn new(timer_format: String, show_spans: bool) -> Self {
         Self {
             timer_format,
@@ -141,6 +151,7 @@ where
     }
 }
 
+/// 构建控制台输出层宏
 macro_rules! creat_console_layer {
     ($console_time_format:expr, $show_spans:expr) => {
         fmt::layer()
@@ -155,6 +166,7 @@ macro_rules! creat_console_layer {
     };
 }
 
+/// 构建文件输出层宏（JSON 格式，带时间戳、文件名与行号）
 macro_rules! creat_file_layer {
     ($file_time_format:expr,$non_blocking:expr) => {
         fmt::layer()
@@ -182,6 +194,7 @@ pub struct LogWatcher {
 }
 
 impl Drop for LogWatcher {
+    /// 退出时 abort 后台日志热更新任务
     fn drop(&mut self) {
         self.reload_join_handle.abort();
     }
@@ -238,7 +251,7 @@ impl LogWatcher {
             .filename_prefix(format!("{}.log", app_file_name)) // 文件名前缀
             .filename_suffix("json") // 文件后缀，如 "log", "txt" 等
             .build(log_dir_path) // 日志目录
-            .map_err(|e| LogError::CreateFileAppender(e))?;
+            .map_err(LogError::CreateFileAppender)?;
         let (non_blocking, log_guard) = tracing_appender::non_blocking(file_appender);
         let file_layer = creat_file_layer!(file_time_format, non_blocking);
         {
@@ -357,10 +370,17 @@ impl LogWatcher {
     }
 }
 
+/// 构建日志配置对象。
+///
+/// 仅构建日志配置（`log` 配置文件），不涉及配置中心初始化。
 async fn build_log_cfg(app_dir: &PathBuf) -> crate::cfg::Result<(Config, Vec<String>)> {
     build_cfg(app_dir, "LOG", None, "log", None).await
 }
 
+/// 创建 tracing 环境过滤器。
+///
+/// 优先使用 `RUST_LOG` 环境变量作为基础级别，未设置时使用配置文件中的 `level`；
+/// 再叠加 `modules` 中按模块（target）覆盖的日志级别。
 fn create_env_filter(level: String, modules: &HashMap<String, String>) -> EnvFilter {
     // 如果 RUST_LOG 存在就用它作为 base level,否则用配置文件里的 level
     let mut filter_string = env::var("RUST_LOG").unwrap_or(level);

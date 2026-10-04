@@ -8,7 +8,7 @@ use arc_swap::ArcSwap;
 use config::{Config, Value};
 use std::collections::HashMap;
 use std::future::Future;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::pin::Pin;
 use std::sync::Arc;
 use std::time::Duration;
@@ -40,6 +40,7 @@ impl<T> Drop for AppWatcher<T>
 where
     T: Clone + serde::de::DeserializeOwned + Send + Sync + 'static,
 {
+    /// 退出时 abort 后台配置监听任务
     fn drop(&mut self) {
         self.watch_join_handle.abort();
     }
@@ -203,6 +204,9 @@ where
     }
 }
 
+/// 构建应用配置对象。
+///
+/// 加载应用配置文件，并从环境变量（前缀 `APP`）中覆盖配置项。
 async fn build_app_cfg(
     config_file_path: Option<String>,
     app_dir: &PathBuf,
@@ -244,8 +248,17 @@ fn register_config_center_watch(
     })
 }
 
-/// 监控应用程序的文件变化，当文件更新时优雅退出应用程序
-pub fn watch_app_file(app_file_path: &PathBuf, debounce_delay: Duration) -> Result<FileWatcher> {
+/// # 监听应用程序文件变化并触发优雅退出
+///
+/// 当应用程序自身的可执行文件被更新时，通过发送 `quit` 信号触发优雅退出。
+///
+/// ## 参数
+/// * `app_file_path` - 应用程序文件路径
+/// * `debounce_delay` - 文件变更去抖动延迟
+///
+/// ## 返回值
+/// 返回 `Ok(FileWatcher)`；监听创建失败时返回 `Err(AppError)`
+pub fn watch_app_file(app_file_path: &Path, debounce_delay: Duration) -> Result<FileWatcher> {
     let files = vec![app_file_path.to_string_lossy().to_string()];
     Ok(watch_file_changed(files, debounce_delay, |_| async {
         info!("应用程序的文件已更新，优雅退出");
@@ -298,7 +311,7 @@ where
     Ok(())
 }
 
-/// 优雅退出
+/// 向当前进程发送 `quit` 信号，触发优雅退出
 fn quit() {
     let _ = send_signal_by_instruction("quit", get_current_pid());
 }

@@ -1,3 +1,7 @@
+//! # 日志配置模块
+//!
+//! 定义日志初始化与热更新所需的配置结构体（`LogConfig`）及其默认值。
+
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use tracing_appender::rolling::Rotation;
@@ -50,18 +54,22 @@ impl Default for LogConfig {
     }
 }
 
+/// 默认日志级别为 `info`
 fn level_default() -> String {
     "info".to_string()
 }
 
+/// 默认控制台时间格式为 `%H:%M:%S%.6f`
 fn console_time_format_default() -> String {
     "%H:%M:%S%.6f".to_string()
 }
 
+/// 默认文件时间格式为 `%Y-%m-%d %H:%M:%S%.6f`
 fn file_time_format_default() -> String {
     "%Y-%m-%d %H:%M:%S%.6f".to_string()
 }
 
+/// 默认日志滚动策略为按小时滚动
 fn log_rotation_default() -> Rotation {
     Rotation::HOURLY
 }

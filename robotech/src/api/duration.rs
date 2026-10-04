@@ -2,7 +2,9 @@ use serde::{Deserialize, Serialize};
 use std::ops::Deref;
 use std::time::Duration as StdDuration;
 
-/// `Duration` 的包装类型，用于 DTO/VO 中与数据库 `String` 类型的互转。
+/// # Duration 包装类型
+///
+/// 用于 DTO/VO 中与数据库 `String` 类型的互转。
 ///
 /// 实现 `Serialize`/`Deserialize`（序列化为毫秒数）、`ToSchema`（映射为 String 类型），
 /// 以及 `From<String>`/`Into<String>`（通过 `humantime` 解析/格式化）。
@@ -12,19 +14,23 @@ use std::time::Duration as StdDuration;
 pub struct Duration(pub StdDuration);
 
 impl Duration {
+    /// 从秒数创建 `Duration`
     pub fn from_secs(secs: u64) -> Self {
         Self(StdDuration::from_secs(secs))
     }
 
+    /// 从毫秒数创建 `Duration`
     pub fn from_millis(millis: u64) -> Self {
         Self(StdDuration::from_millis(millis))
     }
 
+    /// 返回内部的 `std::time::Duration`
     pub fn as_duration(&self) -> StdDuration {
         self.0
     }
 }
 
+/// 解引用为 `std::time::Duration`，方便直接调用其方法
 impl Deref for Duration {
     type Target = StdDuration;
 
@@ -57,12 +63,14 @@ impl From<Duration> for String {
     }
 }
 
+/// 序列化为毫秒数（u64）
 impl Serialize for Duration {
     fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
         self.0.as_millis().serialize(serializer)
     }
 }
 
+/// 从毫秒数（u64）反序列化
 impl<'de> Deserialize<'de> for Duration {
     fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
         let millis = u64::deserialize(deserializer)?;
@@ -70,6 +78,7 @@ impl<'de> Deserialize<'de> for Duration {
     }
 }
 
+/// OpenAPI schema 映射为 String 类型
 impl utoipa::PartialSchema for Duration {
     fn schema() -> utoipa::openapi::RefOr<utoipa::openapi::schema::Schema> {
         utoipa::openapi::schema::Object::with_type(utoipa::openapi::schema::SchemaType::new(
@@ -85,6 +94,7 @@ impl utoipa::ToSchema for Duration {
     }
 }
 
+/// 从数据库 `String` 列读取并通过 `humantime` 解析为 `Duration`
 #[cfg(feature = "db")]
 impl sea_orm::TryGetable for Duration {
     fn try_get_by<I: sea_orm::ColIdx>(

@@ -17,7 +17,7 @@ use wheel_rs::urn_utils::Urn;
 /// # 全局 HTTP 客户端
 ///
 /// 基于 reqwest 的全局复用客户端，供所有 API 请求使用。
-pub static REQWEST_CLIENT: LazyLock<Client> = LazyLock::new(|| Client::new());
+pub static REQWEST_CLIENT: LazyLock<Client> = LazyLock::new(Client::new);
 
 /// # API 客户端工具
 ///
@@ -27,6 +27,7 @@ pub static REQWEST_CLIENT: LazyLock<Client> = LazyLock::new(|| Client::new());
 pub struct ApiClientUtils;
 
 impl ApiClientUtils {
+    /// 构建请求（组装 URL、headers、params、body 与认证信息）
     fn build_request<D: Serialize + ?Sized>(
         method: Method,
         base_url: &str,
@@ -71,14 +72,14 @@ impl ApiClientUtils {
                         sub: sub.clone(),
                         iss: iss.clone(),
                         iat: now.timestamp(),
-                        exp: (now + expires_in.clone()).timestamp(),
+                        exp: (now + *expires_in).timestamp(),
                     };
                     let token = encode(
                         &jsonwebtoken::Header::new(jsonwebtoken::Algorithm::from_str(
                             algorithm.as_str(),
                         )?),
                         &claim,
-                        &EncodingKey::from_base64_secret(&private_key)?,
+                        &EncodingKey::from_base64_secret(private_key)?,
                     )?;
                     request_builder = request_builder.bearer_auth(token);
                 }
@@ -88,6 +89,7 @@ impl ApiClientUtils {
         Ok((urn, request_builder))
     }
 
+    /// 发送请求并检查状态码
     async fn send(urn: &Urn, request_builder: RequestBuilder) -> Result<Response, ApiClientError> {
         let response = request_builder
             .send()
@@ -105,6 +107,7 @@ impl ApiClientUtils {
         Ok(response)
     }
 
+    /// 将响应体解析为 `Ro<E>` JSON 对象
     async fn response_json<E>(urn: &Urn, response: Response) -> Result<Ro<E>, ApiClientError>
     where
         E: DeserializeOwned,
@@ -121,7 +124,21 @@ impl ApiClientUtils {
         Ok(result)
     }
 
-    /// 执行请求的通用方法
+    /// # 执行请求的通用方法
+    ///
+    /// 构建、发送请求并将响应解析为 `Ro<E>`。
+    ///
+    /// ## 参数
+    /// * `method` - HTTP 方法
+    /// * `base_url` - 基础 URL
+    /// * `uri` - 请求 URI
+    /// * `params` - 可选的查询参数
+    /// * `body` - 可选的请求体
+    /// * `headers` - 可选的请求头
+    /// * `auth` - 可选的认证策略
+    ///
+    /// ## 返回值
+    /// 返回 `Ok(Ro<E>)`；请求或解析失败时返回 `Err(ApiClientError)`
     #[log_call]
     pub async fn request<D, E>(
         method: Method,
@@ -142,9 +159,21 @@ impl ApiClientUtils {
         Self::response_json(&urn, response).await
     }
 
-    /// 执行Webhook方法
-    /// 根据请求方法智能识别data应该是params还是body
-    /// GET方法为params，其它方法为body
+    /// # 执行 Webhook 请求
+    ///
+    /// 根据请求方法智能识别 `data` 应该作为 params 还是 body：
+    /// GET 方法为 params，其它方法为 body。
+    ///
+    /// ## 参数
+    /// * `method` - HTTP 方法
+    /// * `base_url` - 基础 URL
+    /// * `uri` - 请求 URI
+    /// * `data` - 可选的请求数据（params 或 body）
+    /// * `headers` - 可选的请求头
+    /// * `auth` - 可选的认证策略
+    ///
+    /// ## 返回值
+    /// 返回 `Ok(Ro<E>)`；请求或解析失败时返回 `Err(ApiClientError)`
     #[log_call]
     pub async fn webhook<D, E>(
         method: Method,
@@ -164,7 +193,17 @@ impl ApiClientUtils {
         }
     }
 
-    /// 执行GET请求的通用方法
+    /// # 执行 GET 请求
+    ///
+    /// ## 参数
+    /// * `base_url` - 基础 URL
+    /// * `uri` - 请求 URI
+    /// * `params` - 可选的查询参数
+    /// * `headers` - 可选的请求头
+    /// * `auth` - 可选的认证策略
+    ///
+    /// ## 返回值
+    /// 返回 `Ok(Ro<serde_json::Value>)`；请求或解析失败时返回 `Err(ApiClientError)`
     #[log_call]
     pub async fn get<D: Serialize + ?Sized + std::fmt::Debug>(
         base_url: &str,
@@ -179,7 +218,17 @@ impl ApiClientUtils {
         Self::response_json(&urn, response).await
     }
 
-    /// 执行GET请求的通用方法，返回bytes
+    /// # 执行 GET 请求并返回字节流
+    ///
+    /// ## 参数
+    /// * `base_url` - 基础 URL
+    /// * `uri` - 请求 URI
+    /// * `params` - 可选的查询参数
+    /// * `headers` - 可选的请求头
+    /// * `auth` - 可选的认证策略
+    ///
+    /// ## 返回值
+    /// 返回 `Ok(Vec<u8>)`；请求或解析失败时返回 `Err(ApiClientError)`
     #[log_call]
     pub async fn get_bytes<D: Serialize + ?Sized + std::fmt::Debug>(
         base_url: &str,
@@ -199,7 +248,17 @@ impl ApiClientUtils {
         Ok(result.to_vec())
     }
 
-    /// 执行POST请求的通用方法
+    /// # 执行 POST 请求
+    ///
+    /// ## 参数
+    /// * `base_url` - 基础 URL
+    /// * `uri` - 请求 URI
+    /// * `body` - 可选的请求体
+    /// * `headers` - 可选的请求头
+    /// * `auth` - 可选的认证策略
+    ///
+    /// ## 返回值
+    /// 返回 `Ok(Ro<serde_json::Value>)`；请求或解析失败时返回 `Err(ApiClientError)`
     #[log_call]
     pub async fn post<D: Serialize + ?Sized + std::fmt::Debug>(
         base_url: &str,
@@ -213,7 +272,17 @@ impl ApiClientUtils {
         let response = Self::send(&urn, request_builder).await?;
         Self::response_json(&urn, response).await
     }
-    /// 执行PUT请求的通用方法
+    /// # 执行 PUT 请求
+    ///
+    /// ## 参数
+    /// * `base_url` - 基础 URL
+    /// * `uri` - 请求 URI
+    /// * `headers` - 可选的请求头
+    /// * `body` - 请求体
+    /// * `auth` - 可选的认证策略
+    ///
+    /// ## 返回值
+    /// 返回 `Ok(Ro<serde_json::Value>)`；请求或解析失败时返回 `Err(ApiClientError)`
     #[log_call]
     pub async fn put<D: Serialize + ?Sized + std::fmt::Debug>(
         base_url: &str,
@@ -227,7 +296,17 @@ impl ApiClientUtils {
         let response = Self::send(&urn, request_builder).await?;
         Self::response_json(&urn, response).await
     }
-    /// 执行DELETE请求的通用方法
+    /// # 执行 DELETE 请求
+    ///
+    /// ## 参数
+    /// * `base_url` - 基础 URL
+    /// * `uri` - 请求 URI
+    /// * `body` - 可选的请求体
+    /// * `headers` - 可选的请求头
+    /// * `auth` - 可选的认证策略
+    ///
+    /// ## 返回值
+    /// 返回 `Ok(Ro<serde_json::Value>)`；请求或解析失败时返回 `Err(ApiClientError)`
     #[log_call]
     pub async fn delete<D: Serialize + ?Sized + std::fmt::Debug>(
         base_url: &str,
@@ -242,7 +321,17 @@ impl ApiClientUtils {
         Self::response_json(&urn, response).await
     }
 
-    /// 执行post multipart请求的通用方法
+    /// # 执行 POST multipart 请求
+    ///
+    /// ## 参数
+    /// * `base_url` - 基础 URL
+    /// * `uri` - 请求 URI
+    /// * `form` - multipart 表单
+    /// * `headers` - 可选的请求头
+    /// * `auth` - 可选的认证策略
+    ///
+    /// ## 返回值
+    /// 返回 `Ok(Ro<serde_json::Value>)`；请求或解析失败时返回 `Err(ApiClientError)`
     #[log_call]
     pub async fn multipart(
         base_url: &str,

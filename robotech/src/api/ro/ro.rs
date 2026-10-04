@@ -1,4 +1,7 @@
-//! # Response Object (RO) 模块，用于统一API响应格式
+//! # 统一响应结构体（RO）模块
+//!
+//! 定义统一的 API 响应结构体 `Ro<E>`，封装结果状态、消息、时间戳以及可选的
+//! 额外数据、详情和业务编码。
 
 use crate::api::RoResult;
 use chrono::Utc;
@@ -25,8 +28,7 @@ pub struct Ro<E> {
     pub result: RoResult,
     /// 响应消息，对结果的简要描述
     pub msg: String,
-    /// 时间戳，记录响应生成的时间（毫秒）
-    /// 这里默认值为当前时间戳，懒得考虑系统时间错误的问题
+    /// 时间戳，记录响应生成的时间（毫秒），默认值为当前时间戳
     #[builder(default = Utc::now().timestamp_millis() as u64)]
     #[serde(with = "u64_serde")]
     pub timestamp: u64,
@@ -45,7 +47,7 @@ impl<E> Ro<E> {
     /// # 判断结果是否为成功
     ///
     /// ## 返回值
-    /// 如果结果为Success，则返回true；否则返回false
+    /// 结果为 `Success` 时返回 `true`，否则返回 `false`
     pub fn is_ok(&self) -> bool {
         self.result == RoResult::Success
     }
@@ -53,7 +55,7 @@ impl<E> Ro<E> {
     /// # 判断结果是否有错误
     ///
     /// ## 返回值
-    /// 如果结果不为Success，则返回true；否则返回false
+    /// 结果不为 `Success` 时返回 `true`，否则返回 `false`
     pub fn is_err(&self) -> bool {
         self.result != RoResult::Success
     }

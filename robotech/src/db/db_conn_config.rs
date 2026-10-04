@@ -1,6 +1,7 @@
 //! # 数据库配置模块
 //!
-//! 该模块定义了数据库连接相关的配置结构体和默认值
+//! 定义数据库连接配置结构体（`DbConnConfig`）及其到 SeaORM
+//! [`ConnectOptions`](sea_orm::ConnectOptions) 的转换实现。
 
 use sea_orm::ConnectOptions;
 use serde::{Deserialize, Serialize};
@@ -18,130 +19,131 @@ pub const DB_CONN_CONFIG_KEY: &str = "db";
 
 /// # 数据库配置结构体
 ///
-/// 用于存储数据库连接所需的各种配置参数
+/// 用于存储数据库连接所需的各种配置参数。
+///
+/// 字段说明请参考 [`ConnectOptions`](sea_orm::ConnectOptions) 的对应方法。
 #[derive(Debug, Serialize, Deserialize, Clone)]
 #[serde(rename_all = "kebab-case")]
 pub struct DbConnConfig {
-    /// The URI of the database
+    /// 数据库连接 URI
     pub(crate) url: String,
-    /// Maximum number of connections for a pool
+    /// 连接池最大连接数
     pub(crate) max_connections: Option<u32>,
-    /// Minimum number of connections for a pool
+    /// 连接池最小连接数
     pub(crate) min_connections: Option<u32>,
-    /// The connection timeout for a packet connection
-    #[serde(default, with = "duration_option_serde")] // ← 加 default
+    /// 连接超时时间
+    #[serde(default, with = "duration_option_serde")]
     pub(crate) connect_timeout: Option<Duration>,
-    /// Maximum idle time for a particular connection to prevent
-    /// network resource exhaustion
-    #[serde(default, with = "duration_option_option_serde")] // ← 加 default
+    /// 连接最大空闲时间（防止网络资源耗尽）
+    #[serde(default, with = "duration_option_option_serde")]
     pub(crate) idle_timeout: Option<Option<Duration>>,
-    /// Set the maximum amount of time to spend waiting for acquiring a connection
-    #[serde(default, with = "duration_option_serde")] // ← 加 default
+    /// 获取连接的最大等待时间
+    #[serde(default, with = "duration_option_serde")]
     pub(crate) acquire_timeout: Option<Duration>,
-    /// Set the maximum lifetime of individual connections
-    #[serde(default, with = "duration_option_option_serde")] // ← 加 default
+    /// 单个连接的最大生命周期
+    #[serde(default, with = "duration_option_option_serde")]
     pub(crate) max_lifetime: Option<Option<Duration>>,
-    /// Enable SQLx statement logging
+    /// 是否启用 SQLx 语句日志
     pub(crate) sqlx_logging: Option<bool>,
-    /// Record SQL statements in tracing spans
+    /// 是否在 tracing span 中记录 SQL 语句
     pub(crate) record_stmt_in_spans: Option<bool>,
-    /// SQLx statement logging level (ignored if `sqlx_logging` is false)
-    #[serde(default, with = "log_filter_option_serde")] // ← 加 default
+    /// SQLx 语句日志级别（`sqlx_logging` 为 false 时忽略）
+    #[serde(default, with = "log_filter_option_serde")]
     pub(crate) sqlx_logging_level: Option<log::LevelFilter>,
-    /// SQLx slow statements logging level (ignored if `sqlx_logging` is false)
-    #[serde(default, with = "log_filter_option_serde")] // ← 加 default
+    /// SQLx 慢语句日志级别（`sqlx_logging` 为 false 时忽略）
+    #[serde(default, with = "log_filter_option_serde")]
     pub(crate) sqlx_slow_statements_logging_level: Option<log::LevelFilter>,
-    /// SQLx slow statements duration threshold (ignored if `sqlx_logging` is false)
-    #[serde(default, with = "duration_option_serde")] // ← 加 default
+    /// SQLx 慢语句阈值（`sqlx_logging` 为 false 时忽略）
+    #[serde(default, with = "duration_option_serde")]
     pub(crate) sqlx_slow_statements_logging_threshold: Option<Duration>,
-    /// set sqlcipher key
+    /// SQLCipher 密钥
     pub(crate) sqlcipher_key: Option<Cow<'static, str>>,
-    /// Schema search path (PostgreSQL only)
+    /// Schema 搜索路径（仅 PostgreSQL）
     pub(crate) schema_search_path: Option<String>,
-    /// Application name (PostgreSQL only)
+    /// 应用名称（仅 PostgreSQL）
     pub(crate) application_name: Option<String>,
-    /// Statement timeout (PostgreSQL only)
-    #[serde(default, with = "duration_option_serde")] // ← 加 default
+    /// 语句超时时间（仅 PostgreSQL）
+    #[serde(default, with = "duration_option_serde")]
     pub(crate) statement_timeout: Option<Duration>,
+    /// 获取连接前是否先 ping 测试
     pub(crate) test_before_acquire: Option<bool>,
-    /// If set, a pooled connection is pinged before being handed out only when it has been
-    /// idle for at least this long (see [`ConnectOptions::test_before_acquire_if_idle_for`]).
+    /// 仅当连接空闲时间达到此阈值时才 ping 测试（见 [`ConnectOptions::test_before_acquire_if_idle_for`]）
     pub(crate) test_before_acquire_if_idle_for: Option<Duration>,
-    /// Only establish connections to the DB as needed. If set to `true`, the db connection will
-    /// be created using SQLx's [connect_lazy](https://docs.rs/sqlx/latest/sqlx/struct.Pool.html#method.connect_lazy)
-    /// method.
+    /// 是否按需建立连接（使用 SQLx 的 `connect_lazy` 方法）
     pub(crate) connect_lazy: Option<bool>,
 }
 
-impl Into<ConnectOptions> for DbConnConfig {
-    fn into(self) -> ConnectOptions {
-        let mut opt = ConnectOptions::new(self.url);
+/// 将 `DbConnConfig` 转换为 SeaORM 的 [`ConnectOptions`]，
+/// 仅设置有值的字段，无值字段使用 SeaORM 默认值。
+impl From<DbConnConfig> for ConnectOptions {
+    fn from(config: DbConnConfig) -> ConnectOptions {
+        let mut opt = ConnectOptions::new(config.url);
 
         // 连接池
-        if let Some(v) = self.max_connections {
+        if let Some(v) = config.max_connections {
             opt.max_connections(v);
         }
-        if let Some(v) = self.min_connections {
+        if let Some(v) = config.min_connections {
             opt.min_connections(v);
         }
-        if let Some(v) = self.connect_timeout {
+        if let Some(v) = config.connect_timeout {
             opt.connect_timeout(v);
         }
-        if let Some(v) = self.idle_timeout {
+        if let Some(v) = config.idle_timeout {
             opt.idle_timeout(v);
         }
-        if let Some(v) = self.acquire_timeout {
+        if let Some(v) = config.acquire_timeout {
             opt.acquire_timeout(v);
         }
-        if let Some(v) = self.max_lifetime {
+        if let Some(v) = config.max_lifetime {
             opt.max_lifetime(v);
         }
 
         // SQLx 日志
-        if let Some(v) = self.sqlx_logging {
+        if let Some(v) = config.sqlx_logging {
             opt.sqlx_logging(v);
         }
-        if let Some(v) = self.record_stmt_in_spans {
+        if let Some(v) = config.record_stmt_in_spans {
             opt.record_stmt_in_spans(v);
         }
-        if let Some(v) = self.sqlx_logging_level {
+        if let Some(v) = config.sqlx_logging_level {
             opt.sqlx_logging_level(v);
         }
 
         // sqlx_slow_statements_logging_settings 是组合 setter，没有独立 setter
         // 任一项有值则两者一起设置，无值的用 SeaORM 默认值
-        if self.sqlx_slow_statements_logging_level.is_some()
-            || self.sqlx_slow_statements_logging_threshold.is_some()
+        if config.sqlx_slow_statements_logging_level.is_some()
+            || config.sqlx_slow_statements_logging_threshold.is_some()
         {
-            let level = self
+            let level = config
                 .sqlx_slow_statements_logging_level
                 .unwrap_or(log::LevelFilter::Off);
-            let threshold = self
+            let threshold = config
                 .sqlx_slow_statements_logging_threshold
                 .unwrap_or(Duration::from_secs(1));
             opt.sqlx_slow_statements_logging_settings(level, threshold);
         }
 
         // 扩展
-        if let Some(v) = self.sqlcipher_key {
+        if let Some(v) = config.sqlcipher_key {
             opt.sqlcipher_key(v);
         }
-        if let Some(v) = self.schema_search_path {
+        if let Some(v) = config.schema_search_path {
             opt.set_schema_search_path(v);
         }
-        if let Some(v) = self.application_name {
+        if let Some(v) = config.application_name {
             opt.set_application_name(v);
         }
-        if let Some(v) = self.statement_timeout {
+        if let Some(v) = config.statement_timeout {
             opt.statement_timeout(v);
         }
-        if let Some(v) = self.test_before_acquire {
+        if let Some(v) = config.test_before_acquire {
             opt.test_before_acquire(v);
         }
-        if let Some(v) = self.test_before_acquire_if_idle_for {
+        if let Some(v) = config.test_before_acquire_if_idle_for {
             opt.test_before_acquire_if_idle_for(v);
         }
-        if let Some(v) = self.connect_lazy {
+        if let Some(v) = config.connect_lazy {
             opt.connect_lazy(v);
         }
 

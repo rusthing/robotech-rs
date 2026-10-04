@@ -6,7 +6,7 @@ use crate::micro_svc::{get_configs, get_hub_client};
 use crate::micro_svc::{setup_hub_client, MicroSvcConfig, MICRO_SVC_CONFIG_KEY};
 use config::builder::DefaultState;
 use config::{Config, ConfigBuilder};
-use std::path::{Path, PathBuf};
+use std::path::Path;
 #[cfg(any(feature = "config-center", feature = "registry-center"))]
 use tracing::warn;
 
@@ -34,7 +34,7 @@ pub type Result<T> = core::result::Result<T, CfgError>;
 /// ## 错误
 /// 配置文件构建失败时返回 `CfgError::Build`；反序列化失败时返回 `CfgError::Deserialize`
 pub async fn build_cfg(
-    app_dir: &PathBuf,
+    app_dir: &Path,
     env_var_prefix: &str,
     app_file_name_without_ext: Option<&str>,
     cfg_file_name_without_ext: &str,
@@ -185,7 +185,7 @@ async fn init_hub_client(
 ///
 /// 支持的配置文件格式：toml, json, json5, yml, yaml, ini, ron
 fn add_cfg_files(
-    app_dir: &PathBuf,
+    app_dir: &Path,
     cfg_file_name_without_ext: &str,
     cfg_file_path: &Option<String>,
     mut config: ConfigBuilder<DefaultState>,
@@ -207,6 +207,19 @@ fn add_cfg_files(
     Ok((config, files))
 }
 
+/// # 向配置构建器添加单个配置源
+///
+/// 根据文件路径（可含扩展名）构建 `config::File` 并添加到配置构建器。
+/// `.json` 后缀的文件会以 Json5 格式加载；文件不存在时直接跳过。
+///
+/// ## 参数
+/// * `config` - 配置构建器
+/// * `file_path_without_ext` - 文件路径（不含扩展名）
+/// * `ext` - 可选的文件扩展名（如 `"toml"`、`"json"`）
+/// * `files` - 成功加载的文件路径列表，用于后续监听
+///
+/// ## 返回值
+/// 返回添加了配置源的构建器；文件不存在时原样返回
 fn add_source(
     config: ConfigBuilder<DefaultState>,
     file_path_without_ext: &str,

@@ -30,6 +30,7 @@ impl U8 {
     pub fn value(&self) -> u8 {
         self.0
     }
+    /// 返回 `u8` 的最大值
     pub fn max() -> Self {
         Self(u8::MAX)
     }
@@ -94,6 +95,7 @@ impl U16 {
     pub fn value(&self) -> u16 {
         self.0
     }
+    /// 返回 `u16` 的最大值
     pub fn max() -> Self {
         Self(u16::MAX)
     }
@@ -158,6 +160,7 @@ impl U32 {
     pub fn value(&self) -> u32 {
         self.0
     }
+    /// 返回 `u32` 的最大值
     pub fn max() -> Self {
         Self(u32::MAX)
     }
@@ -210,6 +213,7 @@ impl U64 {
         self.0
     }
 
+    /// 返回 `u64` 的最大值
     pub fn max() -> Self {
         Self(u64::MAX)
     }
@@ -336,6 +340,7 @@ impl U128 {
     pub fn value(&self) -> u128 {
         self.0
     }
+    /// 返回 `u128` 的最大值
     pub fn max() -> Self {
         Self(u128::MAX)
     }

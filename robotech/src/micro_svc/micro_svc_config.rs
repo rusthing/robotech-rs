@@ -1,3 +1,7 @@
+//! # 微服务配置模块
+//!
+//! 定义微服务全局配置结构体（`MicroSvcConfig`）及其在配置文件中的键名。
+
 #[cfg(any(feature = "config-center", feature = "registry-center"))]
 use crate::micro_svc::{ConsulConfig, EtcdConfig, NacosConfig};
 use serde::{Deserialize, Serialize};

@@ -45,7 +45,7 @@ pub mod mq;
 pub mod redis;
 #[cfg(feature = "app")]
 pub mod signal;
-#[cfg(any(feature = "app"))]
+#[cfg(feature = "app")]
 pub mod svc;
 pub mod tsdb;
 #[cfg(feature = "web")]

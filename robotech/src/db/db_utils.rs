@@ -8,7 +8,7 @@ use std::sync::Arc;
 use tracing::info;
 use wheel_rs::config_utils::has_config_changed;
 
-/// 数据库连接
+/// 全局数据库连接池（`ArcSwapOption` 支持无锁热更新）
 static DB_CONN: ArcSwapOption<DbConn> = ArcSwapOption::const_empty();
 
 /// # 获取数据库连接

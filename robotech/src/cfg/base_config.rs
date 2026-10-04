@@ -24,6 +24,7 @@ pub struct BaseConfig {
     pub watch_debounce_delay: Duration,
 }
 
+/// 默认监听防抖延迟时间为 3 秒
 fn watch_debounce_delay_default() -> Duration {
     Duration::from_secs(3)
 }
