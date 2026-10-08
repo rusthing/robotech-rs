@@ -1,7 +1,7 @@
 use wheel_rs::ipnet_utils::get_local_ip;
 
 use crate::cfg::CfgError;
-use crate::env::{AppEnv, EnvError, APP_ENV};
+use crate::env::{APP_ENV, AppEnv, EnvError};
 use crate::micro_svc::hub_client_config::HubClientConfig;
 use crate::micro_svc::{ConfigCenterClient, ConfigCenterConfig, ConfigItem, ConfigKey};
 use crate::micro_svc::{ConsulClient, EtcdClient, MicroSvcConfig, NacosClient};
@@ -225,7 +225,7 @@ pub struct HubClient {
     retry_interval: Duration,
     refresh_interval: Duration,
     join_handles: Mutex<Vec<JoinHandle<()>>>,
-    }
+}
 
 impl Drop for HubClient {
     fn drop(&mut self) {
@@ -359,21 +359,14 @@ impl HubClient {
                             warn!("using snapshot for config: {}", config_key);
                             all.push(item);
                         } else if self.is_refresh_scope_key(&config_key.data_id) {
-                            warn!(
-                                "refresh-scope key not found in config center, creating it"
-                            );
+                            warn!("refresh-scope key not found in config center, creating it");
                             let item = ConfigItem {
                                 key: config_key.clone(),
                                 content: String::new(),
                                 format: FileFormat::Toml,
                             };
-                            if let Err(e) = config_center_client
-                                .set_config(config_key, "")
-                                .await
-                            {
-                                warn!(
-                                    "failed to create refresh-scope key in config center: {e:?}"
-                                );
+                            if let Err(e) = config_center_client.set_config(config_key, "").await {
+                                warn!("failed to create refresh-scope key in config center: {e:?}");
                             }
                             self.save_snapshot(&item);
                             all.push(item);
@@ -383,8 +376,6 @@ impl HubClient {
                     }
                 }
             }
-        } else {
-            Err(CfgError::NotInit("no config keys available".to_string()))?
         }
 
         Ok(all)
@@ -707,9 +698,10 @@ fn build_branch<C: ConfigCenterClient + RegistryCenterClient + 'static>(
 
     // 服务名如果配置为空，在前面传进来的就会是应用名，这里不可能为空
     // 但为了安全起见，仍然使用 ok_or 提供错误信息而非直接 unwrap
-    let svc_name = &micro_svc_config.svc_name.clone().ok_or_else(|| {
-        CfgError::NotInit("svc_name is not configured".to_string())
-    })?;
+    let svc_name = &micro_svc_config
+        .svc_name
+        .clone()
+        .ok_or_else(|| CfgError::NotInit("svc_name is not configured".to_string()))?;
     let profile = &micro_svc_config.profile;
     let namespace = hub_client_config.namespace.clone();
     let group = hub_client_config.group.clone().or_else(|| profile.clone());
