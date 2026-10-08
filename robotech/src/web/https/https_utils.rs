@@ -129,7 +129,18 @@ pub fn build_https(
 
                             async move {
                                 use tower::ServiceExt;
-                                Ok::<_, Infallible>(router.oneshot(request).await.unwrap())
+                                // 处理路由匹配失败的情况，避免 unwrap 导致 panic
+                                match router.oneshot(request).await {
+                                    Ok(response) => Ok::<_, Infallible>(response),
+                                    Err(_) => {
+                                        // 路由未匹配时返回 404
+                                        let response = axum::response::Response::builder()
+                                            .status(axum::http::StatusCode::NOT_FOUND)
+                                            .body(axum::body::Body::empty())
+                                            .unwrap();
+                                        Ok(response)
+                                    }
+                                }
                             }
                         });
                         let builder = server::conn::auto::Builder::new(TokioExecutor::new());

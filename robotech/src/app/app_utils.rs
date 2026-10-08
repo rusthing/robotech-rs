@@ -312,6 +312,7 @@ where
 }
 
 /// 向当前进程发送 `quit` 信号，触发优雅退出
+/// 注意：此函数为同步函数，在异步上下文中调用时不会阻塞
 fn quit() {
     let _ = send_signal_by_instruction("quit", get_current_pid());
 }

@@ -120,16 +120,20 @@ where
 {
     if let Some(order_by) = order_by {
         for order_by in order_by.split(',') {
+            let order_by = order_by.trim();
             // 解析排序方向：以 :desc 结尾为降序，否则为升序（:asc 可选）
-            let (col, order) = if order_by.trim().to_lowercase().ends_with(":desc") {
-                (order_by.trim().replace(":desc", ""), false)
+            // 使用 strip_suffix 只移除后缀，避免误替换字段名中的 ":desc" 或 ":asc"
+            let (col, order) = if let Some(col) = order_by.strip_suffix(":desc") {
+                (col, false)
+            } else if let Some(col) = order_by.strip_suffix(":asc") {
+                (col, true)
             } else {
-                (order_by.trim().replace(":asc", ""), true)
+                (order_by, true)
             };
             // 解析列名：支持 "列名" 或 "表名.列名" 两种形式
             let col_parts: Vec<&str> = col.split('.').collect();
             let col = if col_parts.len() == 1 {
-                Expr::col(col)
+                Expr::col(col.to_string())
             } else if col_parts.len() == 2 {
                 Expr::col((col_parts[0].to_string(), col_parts[1].to_string()))
             } else {

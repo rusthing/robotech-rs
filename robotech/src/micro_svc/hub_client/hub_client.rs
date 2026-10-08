@@ -705,7 +705,11 @@ fn build_branch<C: ConfigCenterClient + RegistryCenterClient + 'static>(
 > {
     let AppEnv { app_dir, .. } = APP_ENV.get().ok_or(EnvError::GetAppEnv())?;
 
-    let svc_name = &micro_svc_config.svc_name.clone().unwrap(); // 服务名如果配置为空，在前面传进来的就会是应用名，这里不可能为空
+    // 服务名如果配置为空，在前面传进来的就会是应用名，这里不可能为空
+    // 但为了安全起见，仍然使用 ok_or 提供错误信息而非直接 unwrap
+    let svc_name = &micro_svc_config.svc_name.clone().ok_or_else(|| {
+        CfgError::NotInit("svc_name is not configured".to_string())
+    })?;
     let profile = &micro_svc_config.profile;
     let namespace = hub_client_config.namespace.clone();
     let group = hub_client_config.group.clone().or_else(|| profile.clone());

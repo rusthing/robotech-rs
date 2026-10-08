@@ -36,7 +36,10 @@ pub type Result<T> = core::result::Result<T, CfgError>;
 pub async fn build_cfg(
     app_dir: &Path,
     env_var_prefix: &str,
+    #[cfg(any(feature = "config-center", feature = "registry-center"))]
     app_file_name_without_ext: Option<&str>,
+    #[cfg(not(any(feature = "config-center", feature = "registry-center")))]
+    _app_file_name_without_ext: Option<&str>,
     cfg_file_name_without_ext: &str,
     cfg_file_path: Option<String>,
 ) -> Result<(Config, Vec<String>)> {
@@ -89,7 +92,6 @@ pub async fn build_cfg(
     #[cfg(any(feature = "config-center", feature = "registry-center"))]
     if let Some(app_file_name_without_ext) = app_file_name_without_ext {
         // 初始化配置中心和注册中心的客户端
-        #[cfg(any(feature = "config-center", feature = "registry-center"))]
         init_hub_client(
             config_builder.clone(),
             app_name.unwrap_or(app_file_name_without_ext.to_string()),

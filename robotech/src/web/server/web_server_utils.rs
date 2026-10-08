@@ -546,30 +546,34 @@ fn get_listen_binds(
     }
     // 解析监听地址
     for listen in &listens {
-        // 解析地址，从右侧开始分割，最多产生2部分，可以支持IPv4和IPv6，parts[0]为端口，parts[1]为IP地址
-        let parts: Vec<&str> = listen.rsplitn(2, ':').collect();
-        match parts.len() {
-            1 => {
-                let port: u16 = listen
-                    .parse()
-                    .map_err(|_| WebServerError::ParsePort(listen.to_string()))?;
-                if port != 0 {
-                    is_random_port = false;
-                }
-                listen_binds.push(("0.0.0.0".to_string(), port));
+        // 解析地址，支持 IPv4 和 IPv6（带方括号）格式
+        // IPv6 格式如 "[::1]:8080"，需要先去除方括号再解析
+        let (bind, port_str) = if listen.starts_with('[') {
+            // IPv6 格式：[::1]:8080
+            if let Some(bracket_end) = listen.find(']') {
+                let bind = listen[1..bracket_end].to_string();
+                let port_str = &listen[bracket_end + 2..]; // 跳过 "]:"
+                (bind, port_str)
+            } else {
+                return Err(WebServerError::ParsePort(listen.to_string()));
             }
-            2 => {
-                let port: u16 = parts[0]
-                    .parse()
-                    .map_err(|_| WebServerError::ParsePort(listen.to_string()))?;
-                if port != 0 {
-                    is_random_port = false;
-                }
-                let bind = parts[1].to_string();
-                listen_binds.push((bind, port));
+        } else {
+            // IPv4 格式：127.0.0.1:8080 或仅端口 8080
+            let parts: Vec<&str> = listen.rsplitn(2, ':').collect();
+            if parts.len() == 2 {
+                (parts[1].to_string(), parts[0])
+            } else {
+                ("0.0.0.0".to_string(), parts[0])
             }
-            _ => Err(WebServerError::ParsePort(listen.to_string()))?,
+        };
+        
+        let port: u16 = port_str
+            .parse()
+            .map_err(|_| WebServerError::ParsePort(listen.to_string()))?;
+        if port != 0 {
+            is_random_port = false;
         }
+        listen_binds.push((bind, port));
     }
     Ok((is_random_port, listen_binds))
 }
