@@ -232,6 +232,13 @@ impl From<i64> for U64 {
     }
 }
 
+// Entity(i32) -> U64:如果不会为负,单向转换总是安全的
+impl From<i32> for U64 {
+    fn from(v: i32) -> Self {
+        U64(v as u64)
+    }
+}
+
 impl From<U64> for i64 {
     fn from(id: U64) -> Self {
         id.0 as i64
