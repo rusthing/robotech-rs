@@ -537,7 +537,7 @@ pub(super) fn dao_macro(args: DaoArgs, input: ItemStruct) -> TokenStream {
             condition: Condition,
             order_by: &Option<String>,
             mut page_num: U64,
-            page_size: U64,
+            mut page_size: U64,
             db: &C
         ) -> Result<(U64, U64, Vec<M>), DaoError>
         where
@@ -702,7 +702,7 @@ pub(super) fn dao_macro(args: DaoArgs, input: ItemStruct) -> TokenStream {
             condition: Condition,
             order_by: &Option<String>,
             mut page_num: U64,
-            page_size: U64,
+            mut page_size: U64,
             db: &C
         ) -> Result<(U64, U64, Vec<ModelEx>), DaoError>
         where
