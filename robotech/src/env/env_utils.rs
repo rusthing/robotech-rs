@@ -65,8 +65,7 @@ pub fn init_env() -> Result<(), EnvError> {
     let app_file_path = env::current_exe().map_err(EnvError::GetAppPath)?;
 
     // 获取当前执行文件路径(不带后缀)
-    let mut app_file_path_without_ext = app_file_path.clone();
-    app_file_path_without_ext.pop();
+    let app_file_path_without_ext = app_file_path.clone().with_extension("");
 
     // 获取当前执行文件所在目录
     let mut app_dir = app_file_path.clone();

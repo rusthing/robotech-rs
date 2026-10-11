@@ -1,11 +1,11 @@
 use crate::web::middleware::{
-    forbidden_urns_middleware, ip_ban_middleware, local_only_middleware, local_only_urns_middleware,
-    ForbiddenUrnsState, IpBanState, LocalOnlyUrnsState,
+    ForbiddenUrnsState, IpBanState, LocalOnlyUrnsState, forbidden_urns_middleware,
+    ip_ban_middleware, local_only_middleware, local_only_urns_middleware,
 };
 use crate::web::{
-    build_cors, build_https, HttpsConfig, WebServerConfig, WebServerError, WEB_SERVER_CONFIG_KEY,
+    HttpsConfig, WEB_SERVER_CONFIG_KEY, WebServerConfig, WebServerError, build_cors, build_https,
 };
-use axum::{debug_handler, middleware, routing::get, Router};
+use axum::{Router, debug_handler, middleware, routing::get};
 use config::Value;
 use linkme::distributed_slice;
 use robotech_macros::log_call;
@@ -79,14 +79,13 @@ pub fn get_health_check_url_http_protocol() -> Option<String> {
         .map(|u| (**u).clone())
 }
 
-fn set_web_service_handles(value: Vec<JoinHandle<()>>) -> Result<(), WebServerError> {
+fn set_web_service_handles(value: Vec<JoinHandle<()>>) {
     WEB_SERVICE_HANDLES.store(Some(Arc::new(value)));
-    Ok(())
 }
 
-fn take_web_service_handles() -> Result<Option<Vec<JoinHandle<()>>>, WebServerError> {
+fn take_web_service_handles() -> Option<Vec<JoinHandle<()>>> {
     let arc_opt = WEB_SERVICE_HANDLES.swap(None);
-    Ok(match arc_opt {
+    match arc_opt {
         Some(arc) => match Arc::try_unwrap(arc) {
             Ok(v) => Some(v),
             Err(arc) => {
@@ -98,17 +97,16 @@ fn take_web_service_handles() -> Result<Option<Vec<JoinHandle<()>>>, WebServerEr
             }
         },
         None => None,
-    })
+    }
 }
 
-fn set_stop_web_service_sender(value: broadcast::Sender<()>) -> Result<(), WebServerError> {
+fn set_stop_web_service_sender(value: broadcast::Sender<()>) {
     STOP_WEB_SERVICE_SENDER.store(Some(Arc::new(value)));
-    Ok(())
 }
 
-fn take_stop_web_service_sender() -> Result<Option<broadcast::Sender<()>>, WebServerError> {
+fn take_stop_web_service_sender() -> Option<broadcast::Sender<()>> {
     let arc_opt = STOP_WEB_SERVICE_SENDER.swap(None);
-    Ok(arc_opt.map(|arc| (*arc).clone()))
+    arc_opt.map(|arc| (*arc).clone())
 }
 
 /// # 健康检查端点
@@ -179,8 +177,8 @@ pub async fn setup_web_server(
             ))?;
         }
 
-        let mut old_web_service_handles = take_web_service_handles()?;
-        let stop_old_web_service_sender = take_stop_web_service_sender()?;
+        let mut old_web_service_handles = take_web_service_handles();
+        let stop_old_web_service_sender = take_stop_web_service_sender();
 
         if is_random_port {
             // 如果是随机端口，则不会开启复用端口(无意义)
@@ -324,8 +322,8 @@ pub async fn setup_web_server(
             }
         }
 
-        set_web_service_handles(web_service_handles)?;
-        set_stop_web_service_sender(stop_web_service_sender)?;
+        set_web_service_handles(web_service_handles);
+        set_stop_web_service_sender(stop_web_service_sender);
         HEALTH_CHECK_URL_HTTP_PROTOCOL.store(Some(Arc::new(http_protocol.to_string())));
     }
     Ok(())
@@ -450,12 +448,12 @@ async fn wait_for_web_server_ready(
 /// * `Ok(())` - 服务已停止
 /// * `Err(WebServerError)` - 停止信号发送失败或服务任务等待失败
 pub async fn stop_web_service() -> Result<(), WebServerError> {
-    if let Some(stop_web_service_sender) = take_stop_web_service_sender()? {
+    if let Some(stop_web_service_sender) = take_stop_web_service_sender() {
         stop_web_service_sender
             .send(())
             .map_err(|e| WebServerError::StopService(e.to_string()))?;
     }
-    if let Some(web_service_handles) = take_web_service_handles()? {
+    if let Some(web_service_handles) = take_web_service_handles() {
         for web_service_handle in web_service_handles {
             let _ = web_service_handle
                 .await
@@ -566,7 +564,7 @@ fn get_listen_binds(
                 ("0.0.0.0".to_string(), parts[0])
             }
         };
-        
+
         let port: u16 = port_str
             .parse()
             .map_err(|_| WebServerError::ParsePort(listen.to_string()))?;

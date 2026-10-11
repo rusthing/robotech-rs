@@ -1,7 +1,11 @@
+use crate::api::U64;
 use crate::cst::user_id_cst::{CURRENT_MS_HEADER_NAME, USER_ID_HEADER_NAME};
 use axum::http::HeaderMap;
+use std::borrow::Cow;
 use validator;
-use crate::api::U64;
+
+const ERR_MISSING: &str = "missing_header";
+const ERR_FORMAT: &str = "invalid_header_format";
 
 /// # 从 HTTP 请求头中获取当前用户ID
 ///
@@ -26,18 +30,18 @@ pub fn get_current_user_id(headers: &HeaderMap) -> Result<U64, validator::Valida
         .get(USER_ID_HEADER_NAME)
         .ok_or_else(|| {
             let msg = format!("缺少必要参数<{}>", USER_ID_HEADER_NAME);
-            validator::ValidationError::new(Box::leak(msg.into_boxed_str()))
+            validator::ValidationError::new(ERR_MISSING).with_message(Cow::Owned(msg))
         })?
         .to_str()
         .map_err(|_| {
             let msg = format!("参数<{}>格式不正确", USER_ID_HEADER_NAME);
-            validator::ValidationError::new(Box::leak(msg.into_boxed_str()))
+            validator::ValidationError::new(ERR_FORMAT).with_message(Cow::Owned(msg))
         })?
         .parse::<u64>()
         .map(U64)
         .map_err(|_| {
             let msg = format!("参数<{}>格式不正确", USER_ID_HEADER_NAME);
-            validator::ValidationError::new(Box::leak(msg.into_boxed_str()))
+            validator::ValidationError::new(ERR_FORMAT).with_message(Cow::Owned(msg))
         })
 }
 
@@ -63,13 +67,13 @@ pub fn get_current_ms(headers: &HeaderMap) -> Result<Option<U64>, validator::Val
             .to_str()
             .map_err(|_| {
                 let msg = format!("参数<{}>格式不正确", CURRENT_MS_HEADER_NAME);
-                validator::ValidationError::new(Box::leak(msg.into_boxed_str()))
+                validator::ValidationError::new(ERR_FORMAT).with_message(Cow::Owned(msg))
             })?
             .parse::<u64>()
             .map(|ms| Some(U64(ms)))
             .map_err(|_| {
                 let msg = format!("参数<{}>格式不正确", CURRENT_MS_HEADER_NAME);
-                validator::ValidationError::new(Box::leak(msg.into_boxed_str()))
+                validator::ValidationError::new(ERR_FORMAT).with_message(Cow::Owned(msg))
             }),
     }
 }

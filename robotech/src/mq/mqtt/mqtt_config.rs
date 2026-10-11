@@ -12,13 +12,10 @@ use wheel_rs::serde::{duration_serde, vec_serde};
 #[serde(rename_all = "kebab-case")]
 pub struct MqttConfig {
     /// 客户端ID(唯一，接收离线消息的条件之一)
-    #[serde()]
     pub client_id: String,
     /// mqtt服务器地址
-    #[serde()]
     pub host: String,
     /// mqtt服务器端口
-    #[serde()]
     pub port: u16,
     /// mqtt服务器保持连接时间间隔
     #[serde(with = "duration_serde", default = "default_keep_alive")]
@@ -27,10 +24,8 @@ pub struct MqttConfig {
     #[serde(default = "default_clean_session")]
     pub clean_session: bool,
     /// mqtt服务器用户名
-    #[serde()]
     pub username: Option<String>,
     /// mqtt服务器密码
-    #[serde()]
     pub password: Option<String>,
     /// mqtt服务器消息缓存容量
     #[serde(default = "default_cap")]

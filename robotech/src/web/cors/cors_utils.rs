@@ -22,13 +22,27 @@ pub fn build_cors(cors_config: &Option<CorsConfig>) -> Result<Option<CorsLayer>,
         debug!("构建CORS: {:?}", cors_config);
         let mut cors = CorsLayer::default();
 
+        let allow_credentials = cors_config.allow_credentials.unwrap_or(false);
+        if allow_credentials {
+            cors = cors.allow_credentials(true);
+        }
+
         if let Some(ref allowed_origins) = cors_config.allowed_origins {
             for origin in allowed_origins {
                 cors = cors.allow_origin(origin.parse::<http::HeaderValue>().map_err(|_| {
-                    WebServerError::ParseCors("allowed_origins".to_string(), origin.to_string())
+                    WebServerError::ParseCors(
+                        "allowed_origins".to_string(),
+                        "allow-credentials=true 时不能使用通配符来源".to_string(),
+                    )
                 })?);
             }
         } else {
+            if allow_credentials {
+                return Err(WebServerError::ParseCors(
+                    "allowed_origins".to_string(),
+                    "any".to_string(),
+                ));
+            }
             cors = cors.allow_origin(tower_http::cors::Any);
         }
 
@@ -68,10 +82,6 @@ pub fn build_cors(cors_config: &Option<CorsConfig>) -> Result<Option<CorsLayer>,
 
         if let Some(max_age) = cors_config.max_age {
             cors = cors.max_age(max_age);
-        }
-
-        if cors_config.allow_credentials.unwrap_or(false) {
-            cors = cors.allow_credentials(true);
         }
 
         Ok(Some(cors))

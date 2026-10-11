@@ -1,7 +1,7 @@
-//! # Redis Stream 模块
+//! # Redis 模块
 //!
-//! 基于 `redis` crate 提供 Redis Stream 的发布与订阅能力，包括连接管理
-//! （`RedisStreamConfig`）与流操作工具（`redis_stream_utils`）。
+//! 基于 `redis` crate 提供 Redis 的能力，包括连接管理
+//! （`RedisConfig`）与操作工具（`redis_utils`）。
 
 mod redis_config;
 mod redis_stream_utils;

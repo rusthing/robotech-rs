@@ -77,8 +77,8 @@ pub fn push_unique_key(
     key_remark: String,
 ) {
     let columns: Vec<String> = key_name.split(',').map(|s| s.trim().to_string()).collect();
-    if columns.is_empty() {
-        panic!("No fields provided for unique index");
+    if columns.iter().any(|c| c.is_empty()) {
+        panic!("唯一键 {key_name} 包含空的字段名");
     }
     let unique_key = UniqueKey::builder()
         .table(table)

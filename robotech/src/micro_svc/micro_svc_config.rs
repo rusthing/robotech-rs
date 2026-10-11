@@ -38,7 +38,6 @@ pub struct MicroSvcConfig {
     ///
     /// 默认值为 `"refresh-scope.toml"`。该 key 会自动纳入配置中心的监听与拉取列表。
     /// 业务层通过 [`set_refresh_scope`] 精确更新某个字段的值，不冲掉其它字段。
-    /// 设置为 `None` 可禁用刷新作用域功能。
     #[cfg(any(feature = "config-center", feature = "registry-center"))]
     #[serde(default = "refresh_scope_data_id_default")]
     pub refresh_scope: String,

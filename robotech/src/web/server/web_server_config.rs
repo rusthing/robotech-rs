@@ -65,7 +65,7 @@ pub struct WebServerConfig {
     #[serde(default)]
     pub cors: Option<CorsConfig>,
 
-    /// 是否暴露健康检查(默认不暴露，只能本地访问)
+    /// 健康检查配置(默认暴露)
     #[serde(default)]
     pub health_check: HealthCheckConfig,
 

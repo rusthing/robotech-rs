@@ -1,15 +1,9 @@
 //! etcd 后端适配器。
 //!
 //! etcd 本身只是 KV 存储，没有"配置中心"这个原生概念，所以这里自己定义了一套
-//! key 的目录规范：`/{namespace}/config/{group}/{data_id}`，value 就是配置原文。
+//! key 的目录规范：`/config/{namespace}/{group}/{data_id}`，value 就是配置原文。
 //! 这套规范只在本 crate 内部使用（对应设计讨论里说的"Layer B"），跟 Nacos/Consul
 //! 的线上格式没有任何关系，也不需要有关系。
-//!
-//! 注意：本文件基于 `etcd-hub_client` crate 已公开文档的 API 编写（`Client::connect` /
-//! `hub_client.get` / `hub_client.put` / `hub_client.watch`），但本地沙箱没有网络无法执行
-//! `cargo build` 做真实编译校验，接入前建议先 `cargo check --features etcd` 跑一遍，
-//! 关注 `kv.value_str()` / `event.event_type()` / `kv.mod_revision()` 这几个方法名
-//! 是否与你锁定的具体版本一致。
 use crate::micro_svc::config_center::{
     ConfigCenterClient, ConfigCenterError, ConfigItem, ConfigKey,
 };

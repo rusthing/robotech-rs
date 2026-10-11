@@ -9,7 +9,6 @@ use wheel_rs::urn_utils::Urn;
 #[serde(rename_all = "kebab-case")]
 pub struct WebhookConfig {
     /// 目标 URN（格式: `方法:URL`，例如 `POST:http://127.0.0.1:8080/api/hook`）
-    #[serde()]
     pub urn: Urn,
     /// 可选的认证策略
     #[serde(default)]

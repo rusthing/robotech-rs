@@ -1,5 +1,5 @@
-use crate::micro_svc::config_center::{ConfigCenterError, ConfigItem};
 use crate::micro_svc::ConfigKey;
+use crate::micro_svc::config_center::{ConfigCenterError, ConfigItem};
 use async_trait::async_trait;
 use tokio::sync::watch;
 use tokio::task::JoinHandle;
@@ -22,7 +22,7 @@ pub trait ConfigCenterClient: Send + Sync {
     /// 变更感知机制，在各自的实现内部被吸收掉，对上层统一表现为同一种 channel 事件流。
     async fn watch(
         &self,
-        keys: &ConfigKey,
+        key: &ConfigKey,
         config_changed_sender: watch::Sender<()>,
     ) -> Result<Option<JoinHandle<()>>, ConfigCenterError>;
 
@@ -30,9 +30,5 @@ pub trait ConfigCenterClient: Send + Sync {
     ///
     /// 写入后，所有 watch 该 key 的实例会自动感知到变更，
     /// 触发 reload → diff_config → setup() 链路。
-    async fn set_config(
-        &self,
-        key: &ConfigKey,
-        content: &str,
-    ) -> Result<(), ConfigCenterError>;
+    async fn set_config(&self, key: &ConfigKey, content: &str) -> Result<(), ConfigCenterError>;
 }
