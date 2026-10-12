@@ -42,20 +42,23 @@ pub async fn publish_to_stream_if_not_exists(
 
 /// # 统一读取流消息
 /// 同时支持普通读取（XREAD）和消费者组读取（XREADGROUP）。
-/// 默认阻塞等待新消息，可避免空轮询浪费 CPU 与网络。
+/// 当 block_duration 为 Some 时阻塞等待新消息，可避免空轮询浪费 CPU 与网络；
+/// 为 None 时非阻塞立即返回。
 /// 注意：阻塞期间会独占 Redis 连接，请勿在高并发、连接池场景中使用；
 /// 适合每个 Worker 持有独立连接的场景。
 /// - stream_key: 流的键名。
 /// - last_id: 起始消息 ID，"0" 表示从头开始，">" 表示仅接收新消息（仅消费者组模式有效）。
 /// - count: 单次最多读取的消息数量。
-/// - block_ms: 阻塞超时时间（毫秒）。Some(0) 表示永久阻塞直到有新消息；Some(N) 表示最多等待 N 毫秒，超时返回空结果；None 表示非阻塞立即返回。
+/// - block_duration: 阻塞超时时间。Some(&Duration::ZERO) 表示永久阻塞直到有新消息；
+///   Some(&Duration::from_millis(N)) 表示最多等待 N 毫秒，超时返回空结果；
+///   None 表示非阻塞立即返回。
 /// - group: 消费者组信息。None 表示普通读取；Some((group_name, consumer_name)) 表示以消费者组方式读取。
 /// 返回 StreamReadReply 结构体，无新消息时其中的 stream 列表为空。
 pub async fn read_from_stream(
     stream_key: &str,
     last_id: &str,
     count: usize,
-    block_duration: Option<&Duration>,
+    block_duration: &Option<Duration>,
     group: Option<(&str, &str)>,
 ) -> Result<StreamReadReply, RedisError> {
     let mut conn = get_redis_conn()?;
