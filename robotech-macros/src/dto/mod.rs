@@ -598,6 +598,12 @@ fn generate_into_attr(field: &Field) -> Attribute {
                             #[into(match ~ {Some(v)=>ActiveValue::Set(String::from(v)),None=>ActiveValue::NotSet})]
                         )
                     }
+                    "f64" | "f32" => {
+                        // Option<f64> -> ActiveValue<Decimal>
+                        syn::parse_quote!(
+                            #[into(match ~ {Some(v)=>ActiveValue::Set(sea_orm::prelude::Decimal::try_from(v).unwrap_or_default()),None=>ActiveValue::NotSet})]
+                        )
+                    }
                     _ => {
                         syn::parse_quote!(
                             #[into(match ~ {Some(v)=>ActiveValue::Set(v.into()),None=>ActiveValue::NotSet})]
