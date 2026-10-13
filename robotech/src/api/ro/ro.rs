@@ -60,6 +60,19 @@ impl<E> Ro<E> {
         self.result != RoResult::Success
     }
 
+    /// # 判断业务编码是否匹配指定编码
+    ///
+    /// 检查 `code` 是否与传入的 `expected` 编码相等。
+    ///
+    /// ## 参数
+    /// * `expected` - 期望的业务编码
+    ///
+    /// ## 返回值
+    /// `code` 与 `expected` 相等时返回 `true`，否则返回 `false`
+    pub fn is_warn_code(&self, expected: &str) -> bool {
+        self.code.as_deref() == Some(expected)
+    }
+
     /// # 创建一个成功的响应对象
     ///
     /// ## 参数

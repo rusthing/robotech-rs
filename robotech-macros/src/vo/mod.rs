@@ -300,7 +300,7 @@ fn handle_fields_client(input: &DeriveInput, is_ex: bool) -> Result<TokenStream,
                             }
                             quote! { #field_ty }
                         } else {
-                            quote! { #field_ty }
+                            map_unsigned_type(field_ty)
                         };
 
                         let original_attrs: Vec<_> = field
