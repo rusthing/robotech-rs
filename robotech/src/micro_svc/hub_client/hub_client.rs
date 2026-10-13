@@ -1,7 +1,7 @@
 use wheel_rs::ipnet_utils::get_local_ip;
 
 use crate::cfg::CfgError;
-use crate::env::{APP_ENV, AppEnv, EnvError};
+use crate::env::{get_app_instance_id, APP_ENV, AppEnv, EnvError};
 use crate::micro_svc::hub_client_config::HubClientConfig;
 use crate::micro_svc::{ConfigCenterClient, ConfigCenterConfig, ConfigItem, ConfigKey};
 use crate::micro_svc::{ConsulClient, EtcdClient, MicroSvcConfig, NacosClient};
@@ -653,10 +653,16 @@ fn build_service_instance(
     let group = registry_key.group.clone();
     let svc_name = registry_key.svc_name.clone();
     let ip = get_local_ip(sub_net)?;
-    let port = get_web_listen_port().ok_or(RegistryCenterError::WebServerNotRunning)?;
-    let instance_id = format!("{svc_name}-{}-{port}", ip.replace('.', "-"));
-    let health_check_url = get_health_check_url_http_protocol()
-        .map(|prefix| format!("{}://{}:{}{}", prefix, ip, port, get_health_check_uri()));
+
+    let (instance_id, port, health_check_url) = if let Some(port) = get_web_listen_port() {
+        let id = get_app_instance_id();
+        let health_check_url = get_health_check_url_http_protocol()
+            .map(|prefix| format!("{}://{}:{}{}", prefix, ip, port, get_health_check_uri()));
+        (id, port, health_check_url)
+    } else {
+        (get_app_instance_id(), 0u16, None)
+    };
+
     Ok(ServiceInstance {
         namespace,
         group,

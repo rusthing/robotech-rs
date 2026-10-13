@@ -26,7 +26,7 @@ pub struct ServiceInstance {
     pub group: Option<String>,
     /// 服务名
     pub svc_name: String,
-    /// 实例唯一 ID（形如 `{svc_name}-{ip}-{port}`，IP 中的点替换为短横线）
+    /// 实例唯一 ID（Web 服务为 `{app_name}-{ip}-{port}`，非 Web 服务为 `{app_name}-{ulid}`）
     pub instance_id: String,
     /// 实例 IP 地址
     pub ip: String,

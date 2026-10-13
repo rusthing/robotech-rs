@@ -1,3 +1,4 @@
+use crate::env::{get_app_name, set_app_instance_id};
 use crate::web::middleware::{
     ForbiddenUrnsState, IpBanState, LocalOnlyUrnsState, forbidden_urns_middleware,
     ip_ban_middleware, local_only_middleware, local_only_urns_middleware,
@@ -22,6 +23,7 @@ use tracing::{debug, error, info};
 use utoipa::openapi::OpenApi;
 use utoipa_swagger_ui::{SwaggerUi, Url};
 use wheel_rs::config_utils::has_config_changed;
+use wheel_rs::ipnet_utils::get_local_ip;
 use wheel_rs::process::terminate_process;
 
 /// # 路由注册切片
@@ -592,6 +594,14 @@ fn bind_and_start(
         // 在 serve 之前获取实际端口
         let actual_addr = tcp_listener.local_addr()?;
         WEB_LISTEN_PORT.store(actual_addr.port(), Ordering::Relaxed);
+
+        // 获取端口后立即更新全局实例 ID
+        if let Ok(ip) = get_local_ip(None) {
+            let app_name = get_app_name();
+            let instance_id = format!("{app_name}-{}-{}", ip.replace('.', "-"), actual_addr.port());
+            set_app_instance_id(instance_id);
+        }
+
         let tokio_listener = tokio::net::TcpListener::from_std(tcp_listener)
             .map_err(|e| WebServerError::Socket(format!("转换为 tokio listener失败: {:#}", e)))?;
 
