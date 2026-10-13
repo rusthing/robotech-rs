@@ -12,6 +12,8 @@ use tracing::{info, warn};
 /// `start_refresh_loop` 按 `refresh_interval` 周期刷新。
 pub struct ServiceDiscovery {
     svc_name: String,
+    namespace: Option<String>,
+    group: Option<String>,
     instances: ArcSwap<Vec<ServiceInstance>>,
     refresh_interval: Duration,
     _refresh_handle: Mutex<Option<JoinHandle<()>>>,
@@ -22,6 +24,28 @@ impl ServiceDiscovery {
     pub fn new(svc_name: &str, refresh_interval: Duration) -> Self {
         Self {
             svc_name: svc_name.to_string(),
+            namespace: None,
+            group: None,
+            instances: ArcSwap::from_pointee(Vec::new()),
+            refresh_interval,
+            _refresh_handle: Mutex::new(None),
+        }
+    }
+
+    /// 创建带指定 namespace/group 的服务发现器。
+    ///
+    /// 传入的 namespace/group 会覆盖 HubClient 自身的 namespace/group，
+    /// 用于发现其他环境或命名空间中的服务。
+    pub fn with_namespace_and_group(
+        svc_name: &str,
+        refresh_interval: Duration,
+        namespace: Option<String>,
+        group: Option<String>,
+    ) -> Self {
+        Self {
+            svc_name: svc_name.to_string(),
+            namespace,
+            group,
             instances: ArcSwap::from_pointee(Vec::new()),
             refresh_interval,
             _refresh_handle: Mutex::new(None),
@@ -33,7 +57,8 @@ impl ServiceDiscovery {
     /// ## 错误
     /// 后端注册中心不可用或未配置时返回 `CfgError`。
     pub async fn init(&self) -> Result<(), crate::cfg::CfgError> {
-        let instances = discover_service(&self.svc_name).await?;
+        let instances =
+            discover_service(&self.svc_name, self.namespace.clone(), self.group.clone()).await?;
         info!(
             "service discovery: {} found {} instances",
             self.svc_name,
@@ -55,11 +80,13 @@ impl ServiceDiscovery {
     pub fn start_refresh_loop(self: &Arc<Self>) {
         let this = Arc::clone(self);
         let svc_name = self.svc_name.clone();
+        let namespace = self.namespace.clone();
+        let group = self.group.clone();
         let interval = self.refresh_interval;
         let join_handle = tokio::spawn(async move {
             loop {
                 tokio::time::sleep(interval).await;
-                match discover_service(&svc_name).await {
+                match discover_service(&svc_name, namespace.clone(), group.clone()).await {
                     Ok(instances) => {
                         info!(
                             "service discovery: {} refreshed {} instances",

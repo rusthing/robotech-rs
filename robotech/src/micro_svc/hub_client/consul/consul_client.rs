@@ -307,9 +307,19 @@ impl RegistryCenterClient for ConsulClient {
             meta: HashMap<String, String>,
         }
 
+        let ns_prefix = namespace
+            .as_ref()
+            .map(|n| format!("{}-", n))
+            .unwrap_or_default();
+        let group_prefix = group
+            .as_ref()
+            .map(|g| format!("{}-", g))
+            .unwrap_or_default();
+        let full_svc_name = format!("{}{}{}", ns_prefix, group_prefix, svc_name);
+
         let url = format!(
             "{}/v1/health/service/{}?passing=true",
-            self.base_url, svc_name
+            self.base_url, full_svc_name
         );
         let resp = self
             .reqwest_client

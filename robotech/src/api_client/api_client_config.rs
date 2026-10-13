@@ -22,8 +22,17 @@ pub enum ApiClientConfig {
     /// 微服务模式
     #[serde(rename_all = "kebab-case")]
     MicroSvc {
-        /// 服务名，用于服务发现
+        /// 服务名，用于服务发现（不包含 namespace/group 前缀，
+        /// 前缀由本配置的 namespace/group 或 HubClient 的 profile 自动拼接）
         svc_name: String,
+        /// 命名空间，用于注册中心的服务分组（Consul/etcd 会拼入服务名，
+        /// Nacos 作为原生 namespace 使用）。未配置时使用 HubClient 自身的 namespace。
+        #[serde(default)]
+        namespace: Option<String>,
+        /// 分组/环境标识，用于注册中心的服务分组（Consul/etcd 会拼入服务名，
+        /// Nacos 作为原生 group 使用）。未配置时使用 HubClient 自身的 group（即 profile）。
+        #[serde(default)]
+        group: Option<String>,
         /// 认证策略
         #[serde(default)]
         auth: Option<ApiAuthStrategy>,

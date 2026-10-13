@@ -105,13 +105,19 @@ impl FeignApiClient {
         match config {
             ApiClientConfig::MicroSvc {
                 svc_name,
+                namespace,
+                group,
                 auth: _,
                 max_failures,
                 cooldown_duration,
                 refresh_interval,
             } => {
-                let service_discovery =
-                    Arc::new(ServiceDiscovery::new(&svc_name, refresh_interval));
+                let service_discovery = Arc::new(ServiceDiscovery::with_namespace_and_group(
+                    &svc_name,
+                    refresh_interval,
+                    namespace,
+                    group,
+                ));
                 if let Err(e) = service_discovery.init().await {
                     warn!(
                         "service discovery init failed for '{}': {:?}, will retry on first request",

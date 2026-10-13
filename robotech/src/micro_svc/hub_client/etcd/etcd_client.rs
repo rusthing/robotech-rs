@@ -286,7 +286,15 @@ impl RegistryCenterClient for EtcdClient {
         group: Option<String>,
         svc_name: &str,
     ) -> Result<Vec<ServiceInstance>, RegistryCenterError> {
-        let prefix = format!("/registry/{}", svc_name);
+        let ns_prefix = namespace
+            .as_ref()
+            .map(|n| format!("{}/", n))
+            .unwrap_or_default();
+        let group_prefix = group
+            .as_ref()
+            .map(|g| format!("{}/", g))
+            .unwrap_or_default();
+        let prefix = format!("/registry/{}{}{}", ns_prefix, group_prefix, svc_name);
         let mut client = self.etcd_client.clone();
         let resp = client
             .get(prefix, Some(GetOptions::new().with_prefix()))

@@ -118,12 +118,20 @@ pub async fn get_configs() -> Result<Vec<ConfigItem>, CfgError> {
 
 /// 发现指定服务的所有健康实例。
 ///
+/// `namespace` / `group` 用于覆盖 HubClient 自身的 namespace/group：
+/// - 传入 `Some(v)` 使用指定值
+/// - 传入 `None` 回退到 HubClient 自身的配置
+///
 /// ## 错误
 /// 注册中心未配置或后端请求失败时返回 `CfgError::NotInit`。
-pub async fn discover_service(svc_name: &str) -> Result<Vec<ServiceInstance>, CfgError> {
+pub async fn discover_service(
+    svc_name: &str,
+    namespace: Option<String>,
+    group: Option<String>,
+) -> Result<Vec<ServiceInstance>, CfgError> {
     let hub_client = get_hub_client()?;
     hub_client
-        .discover(svc_name)
+        .discover(svc_name, namespace, group)
         .await
         .map_err(|e| CfgError::NotInit(format!("discover service failed: {e:?}",)))
 }
@@ -600,11 +608,16 @@ impl HubClient {
 
     /// 发现指定服务的健康实例列表。
     ///
+    /// `namespace` / `group` 传入 `None` 时使用 HubClient 自身的配置，
+    /// 传入 `Some(v)` 时覆盖自身配置。
+    ///
     /// ## 错误
     /// 注册中心未配置时返回 `RegistryCenterError::BackendNotEnabled`。
     pub async fn discover(
         &self,
         svc_name: &str,
+        namespace: Option<String>,
+        group: Option<String>,
     ) -> Result<Vec<ServiceInstance>, RegistryCenterError> {
         let registry = self
             .registry
@@ -612,9 +625,19 @@ impl HubClient {
             .ok_or(RegistryCenterError::BackendNotEnabled(
                 "registry center not configured".to_string(),
             ))?;
-        let namespace = self.registry_key.as_ref().and_then(|k| k.namespace.clone());
-        let group = self.registry_key.as_ref().and_then(|k| k.group.clone());
-        registry.discover(namespace, group, svc_name).await
+        let effective_namespace = namespace.or_else(|| {
+            self.registry_key
+                .as_ref()
+                .and_then(|k| k.namespace.clone())
+        });
+        let effective_group = group.or_else(|| {
+            self.registry_key
+                .as_ref()
+                .and_then(|k| k.group.clone())
+        });
+        registry
+            .discover(effective_namespace, effective_group, svc_name)
+            .await
     }
 
     fn add_join_handles(&self, handles: Vec<JoinHandle<()>>) {
