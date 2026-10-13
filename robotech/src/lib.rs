@@ -7,6 +7,7 @@
 //!
 //! - `api_client`：HTTP API 客户端（需启用 feature `api-client`）
 //! - `app`：应用级配置与生命周期管理（需启用 feature `app`）
+//! - `cache`：缓存抽象（`cache-local-nats` 本地 NATS 缓存，`cache-distributed-redis` 分布式 Redis 缓存）
 //! - `cfg`：配置构建与解析
 //! - `cst`：常量定义
 //! - `dao`：数据访问对象（需启用 feature `db`）
@@ -29,6 +30,7 @@ pub mod api;
 pub mod api_client;
 #[cfg(feature = "app")]
 pub mod app;
+pub mod cache;
 pub mod cfg;
 pub mod cst;
 #[cfg(feature = "db")]
