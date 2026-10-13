@@ -18,11 +18,11 @@ pub use nats::publish_cache_refresh_signal;
 
 pub async fn setup_local_cache<C, F, Fut>(
     subject: &str,
-    storage: &'static arc_swap::ArcSwap<C>,
+    storage: &'static arc_swap::ArcSwapOption<C>,
     rebuild_fn: F,
 ) -> anyhow::Result<std::sync::Arc<tokio::task::JoinHandle<()>>>
 where
-    C: Default + Send + Sync + 'static,
+    C: Send + Sync + 'static,
     F: Fn() -> Fut + Send + Sync + 'static,
     Fut: std::future::Future<Output = anyhow::Result<C>> + Send + 'static,
 {

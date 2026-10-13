@@ -1,10 +1,10 @@
 //! # NATS 本地缓存
 //!
-//! 基于 `ArcSwap` 的无锁本地内存缓存 + JetStream 持久化刷新信号。
+//! 基于 `ArcSwapOption` 的无锁本地内存缓存 + JetStream 持久化刷新信号。
 //!
 //! ## 工作原理
 //!
-//! 1. **存储**：`ArcSwap<C>` 无锁并发读
+//! 1. **存储**：`ArcSwapOption<C>` 无锁并发读
 //! 2. **同步**：任何节点的写操作通过 JetStream 发布刷新信号，所有节点收到后执行全量重建
 //! 3. **启动**：应用启动时直接查询 DB 全量加载，不从 JetStream 重放历史
 //! 4. **断网恢复**：durable consumer 在 NATS 服务端保留进度，重连后自动接续
@@ -12,7 +12,7 @@
 //! ## 与旧版差异
 //!
 //! - ❌ 不再细分 Add/Modify/Del 事件，统一为刷新信号
-//! - ❌ 不再使用 `RwLock<HashMap<TypeId, ...>>`，改用业务侧持有的独立 `ArcSwap`
+//! - ❌ 不再使用 `RwLock<HashMap<TypeId, ...>>`，改用业务侧持有的独立 `ArcSwapOption`
 //! - ❌ 不再使用 Core NATS，改用 JetStream（`publish(persistent=true)` + Push Consumer）
 //! - ✅ 消除精确增量更新的复杂 trait 和全量克隆开销
 //! - ✅ 真正无锁读（`ArcSwap::load_full()`）
@@ -20,11 +20,11 @@
 //! ## 使用示例
 //!
 //! ```ignore
-//! use arc_swap::ArcSwap;
+//! use arc_swap::ArcSwapOption;
 //! use robotech::cache::local::nats;
 //! use std::sync::Arc;
 //!
-//! static CACHE: ArcSwap<DtwCache> = ArcSwap::const_empty();
+//! static CACHE: ArcSwapOption<DtwCache> = ArcSwapOption::const_empty();
 //!
 //! // 启动 JetStream 消费者
 //! nats::setup_nats_cache(
@@ -45,7 +45,7 @@
 //! nats::publish_cache_refresh_signal("dtw.cache.refresh").await?;
 //! ```
 
-use arc_swap::ArcSwap;
+use arc_swap::ArcSwapOption;
 use async_nats::jetstream;
 use std::future::Future;
 use std::sync::Arc;
@@ -69,7 +69,7 @@ use crate::mq::nats::{
 /// - `stream_config`：Stream 配置（[`default_stream_config`] 提供合理默认值）
 /// - `consumer_config`：Push Consumer 配置（[`default_consumer_config`] 提供合理默认值，
 ///   内部会设置 `DeliverPolicy::New` 确保新建消费者不重放历史）
-/// - `storage`：`ArcSwap<C>` 静态引用，读端通过 `load_full()` 获取快照
+/// - `storage`：`ArcSwapOption<C>` 静态引用，读端通过 `load_full()` 获取快照
 /// - `rebuild_fn`：异步重建函数，返回新的缓存数据
 ///
 /// ## 返回值
@@ -79,11 +79,11 @@ pub async fn setup_nats_cache<C, F, Fut>(
     subject: &str,
     stream_config: jetstream::stream::Config,
     consumer_config: jetstream::consumer::push::Config,
-    storage: &'static ArcSwap<C>,
+    storage: &'static ArcSwapOption<C>,
     rebuild_fn: F,
 ) -> anyhow::Result<Arc<JoinHandle<()>>>
 where
-    C: Default + Send + Sync + 'static,
+    C: Send + Sync + 'static,
     F: Fn() -> Fut + Send + Sync + 'static,
     Fut: Future<Output = anyhow::Result<C>> + Send + 'static,
 {
@@ -105,7 +105,7 @@ where
             async move {
                 match rebuild_fn().await {
                     Ok(new_cache) => {
-                        storage.store(Arc::new(new_cache));
+                        storage.store(Some(Arc::new(new_cache)));
                         info!("缓存刷新完成");
                         Ok(())
                     }
