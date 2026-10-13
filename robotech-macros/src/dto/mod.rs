@@ -152,7 +152,7 @@ pub fn crud_dto_macro(args: CrudDtoArgs, input: ItemStruct) -> TokenStream {
         #[serde(default, rename_all = "camelCase")]
         #[owned_into(ActiveModel)]
         #[ghosts(
-            updator_id: Default::default(),
+            updater_id: Default::default(),
             update_ms: Default::default(),
         )]
         #[builder]
@@ -166,7 +166,7 @@ pub fn crud_dto_macro(args: CrudDtoArgs, input: ItemStruct) -> TokenStream {
             #[builder(default, setter(strip_option))]
             pub _current_ms: Option<U64>,
             #[serde(skip_deserializing)]
-            #[into(creator_id, ActiveValue::Set(~.into()))]
+            #[into(creater_id, ActiveValue::Set(~.into()))]
             pub _current_user_id: U64,
         }
 
@@ -176,7 +176,7 @@ pub fn crud_dto_macro(args: CrudDtoArgs, input: ItemStruct) -> TokenStream {
         #[serde(default, rename_all = "camelCase")]
         #[owned_into(ActiveModel)]
         #[ghosts(
-            creator_id: Default::default(),
+            creater_id: Default::default(),
             create_ms: Default::default(),
         )]
         #[builder]
@@ -191,7 +191,7 @@ pub fn crud_dto_macro(args: CrudDtoArgs, input: ItemStruct) -> TokenStream {
             #[builder(default, setter(strip_option))]
             pub _current_ms: Option<U64>,
             #[serde(skip_deserializing)]
-            #[into(updator_id, ActiveValue::Set(~.into()))]
+            #[into(updater_id, ActiveValue::Set(~.into()))]
             pub _current_user_id: U64,
         }
 

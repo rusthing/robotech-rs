@@ -311,7 +311,7 @@ pub(super) fn dao_macro(args: DaoArgs, input: ItemStruct) -> TokenStream {
             /// 此函数负责向数据库中插入一个新的记录。它会自动处理以下逻辑：
             /// - 如果记录 ID 未设置（默认值），则生成一个新的唯一 ID
             /// - 如果创建时间戳未设置，则设置当前时间为创建和更新时间
-            /// - 将修改者 ID 设置为创建者 ID（因为是新建记录）
+            /// - 将更新者 ID 设置为创建者 ID（因为是新建记录）
             ///
             /// ## 参数
             /// * `active_model` - 包含待插入数据的 ActiveModel 实例
@@ -333,8 +333,8 @@ pub(super) fn dao_macro(args: DaoArgs, input: ItemStruct) -> TokenStream {
                     active_model.create_ms = now.clone();
                     active_model.update_ms = now;
                 }
-                // 添加时修改者就是创建者
-                active_model.updator_id = active_model.creator_id.clone();
+                // 添加时更新者就是创建者
+                active_model.updater_id = active_model.creater_id.clone();
                 // 执行数据库插入操作
                 active_model
                     .insert(db)
@@ -364,7 +364,7 @@ pub(super) fn dao_macro(args: DaoArgs, input: ItemStruct) -> TokenStream {
                 C: ConnectionTrait,
             {
                 // 保护创建者信息不能被修改
-                active_model.creator_id = ActiveValue::NotSet;
+                active_model.creater_id = ActiveValue::NotSet;
                 active_model.create_ms = ActiveValue::NotSet;
                 // 当修改时间未设置时，设置修改时间
                 if active_model.update_ms.is_not_set() {
