@@ -26,8 +26,8 @@ rabbitmq = ["dep:lapin", "dep:futures", "dep:bytes"]
 redis = ["dep:redis"]
 influxdb = ["dep:influxdb", "dep:reqwest"]
 macros = ["dep:robotech-macros"]
-cache-local-nats = ["nats"]
-cache-distributed-redis = ["redis"]
+local-cache = ["nats"]
+distributed-cache = ["redis"]
 
 [dependencies]
 log = { workspace = true }

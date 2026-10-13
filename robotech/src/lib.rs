@@ -7,7 +7,7 @@
 //!
 //! - `api_client`：HTTP API 客户端（需启用 feature `api-client`）
 //! - `app`：应用级配置与生命周期管理（需启用 feature `app`）
-//! - `cache`：缓存抽象（`cache-local-nats` 本地 NATS 缓存，`cache-distributed-redis` 分布式 Redis 缓存）
+//! - `cache`：缓存抽象（`local-cache` 本地缓存，`distributed-cache` 分布式缓存）
 //! - `cfg`：配置构建与解析
 //! - `cst`：常量定义
 //! - `dao`：数据访问对象（需启用 feature `db`）
