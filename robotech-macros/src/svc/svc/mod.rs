@@ -114,13 +114,19 @@ impl Parse for SvcArgs {
 ///
 /// 优先级：单方法钩子 > 写操作快捷方式（仅写方法生效）。
 ///
-/// ## 参数传递与变量遮蔽（`pass_var`）
+/// ## 参数传递与变量遮蔽
 ///
-/// 当 `pass_var` 为 `Some(var)` 时，单方法钩子（`before_<method>` / `after_<method>`）
-/// 会接收当前变量并将返回值写回（变量遮蔽），从而允许钩子修改核心数据：
+/// `pass_var` 为返回值变量（会被钩子返回值遮蔽，允许钩子修改核心数据）。
+///
+/// `pass_input` 为额外的输入参数，仅对 `after_<method>` 单方法钩子生效，
+/// 传入后钩子签名为 `fn(input, output) -> Result<output, E>`：
 ///
 /// ```ignore
+/// // before_xxx 钩子（无 pass_input）
 /// let var = hook_fn(var).await?;
+///
+/// // after_xxx 钩子（有 pass_input）
+/// let output = hook_fn(input, output).await?;
 /// ```
 ///
 /// `before_write` / `after_write` 快捷方式始终为无参副作用调用，不支持参数传递。
@@ -130,9 +136,13 @@ fn resolve_hook(
     per_method: &HashMap<String, syn::Path>,
     fallback: &Option<syn::Path>,
     pass_var: Option<TokenStream>,
+    pass_input: Option<TokenStream>,
 ) -> Option<TokenStream> {
     if let Some(fn_path) = per_method.get(method_name) {
         if let Some(var) = pass_var {
+            if let Some(input) = pass_input {
+                return Some(quote! { let #var = #fn_path(#input, #var).await?; });
+            }
             return Some(quote! { let #var = #fn_path(#var).await?; });
         }
         return Some(quote! { let _ = #fn_path().await; });
@@ -183,8 +193,8 @@ pub(crate) fn svc_macro(args: SvcArgs, input: ItemStruct) -> TokenStream {
     // 生成add方法
     if !skip.contains("add") {
         let is_write = WRITE_METHODS.contains(&"add");
-        let before_call = resolve_hook("add", is_write, &args.before, &args.before_write, Some(quote! { add_dto }));
-        let after_call = resolve_hook("add", is_write, &args.after, &args.after_write, Some(quote! { one }));
+        let before_call = resolve_hook("add", is_write, &args.before, &args.before_write, Some(quote! { add_dto }), None);
+        let after_call = resolve_hook("add", is_write, &args.after, &args.after_write, Some(quote! { one }), Some(quote! { add_dto }));
         generated_methods.push(quote! {
         /// # 添加新记录
         ///
@@ -211,7 +221,7 @@ pub(crate) fn svc_macro(args: SvcArgs, input: ItemStruct) -> TokenStream {
             // 先校验dto
             add_dto.validate()?;
 
-            let active_model: ActiveModel = add_dto.into();
+            let active_model: ActiveModel = add_dto.clone().into();
             let one = #vo_name::from(#dao_name::insert(active_model, db).await?);
             #after_call
             Ok(Ro::success("添加成功".to_string()).extra(Some(one)))
@@ -222,8 +232,8 @@ pub(crate) fn svc_macro(args: SvcArgs, input: ItemStruct) -> TokenStream {
     // 生成modify方法
     if !skip.contains("modify") {
         let is_write = WRITE_METHODS.contains(&"modify");
-        let before_call = resolve_hook("modify", is_write, &args.before, &args.before_write, Some(quote! { modify_dto }));
-        let after_call = resolve_hook("modify", is_write, &args.after, &args.after_write, Some(quote! { one }));
+        let before_call = resolve_hook("modify", is_write, &args.before, &args.before_write, Some(quote! { modify_dto }), None);
+        let after_call = resolve_hook("modify", is_write, &args.after, &args.after_write, Some(quote! { one }), Some(quote! { modify_dto }));
         generated_methods.push(quote! {
         /// # 修改记录
         ///
@@ -250,7 +260,7 @@ pub(crate) fn svc_macro(args: SvcArgs, input: ItemStruct) -> TokenStream {
             // 先校验dto
             modify_dto.validate()?;
 
-            let active_model: ActiveModel = modify_dto.into();
+            let active_model: ActiveModel = modify_dto.clone().into();
             let one = #vo_name::from(#dao_name::update(active_model, db).await?);
             #after_call
             Ok(Ro::success("修改成功".to_string()).extra(Some(one)))
@@ -260,8 +270,8 @@ pub(crate) fn svc_macro(args: SvcArgs, input: ItemStruct) -> TokenStream {
 
     // 生成save方法
     if !skip.contains("save") {
-        let before_call = resolve_hook("save", false, &args.before, &args.before_write, Some(quote! { save_dto }));
-        let after_call = resolve_hook("save", false, &args.after, &args.after_write, None);
+        let before_call = resolve_hook("save", false, &args.before, &args.before_write, Some(quote! { save_dto }), None);
+        let after_call = resolve_hook("save", false, &args.after, &args.after_write, None, None);
         generated_methods.push(quote! {
         /// # 保存记录
         ///
@@ -283,9 +293,9 @@ pub(crate) fn svc_macro(args: SvcArgs, input: ItemStruct) -> TokenStream {
         {
             #before_call
             let result = if let Some(id) = save_dto.id {
-                Self::modify(save_dto.into(), db).await
+                Self::modify(save_dto.clone().into(), db).await
             } else {
-                Self::add(save_dto.into(), db).await
+                Self::add(save_dto.clone().into(), db).await
             };
             #after_call
             result
@@ -296,8 +306,8 @@ pub(crate) fn svc_macro(args: SvcArgs, input: ItemStruct) -> TokenStream {
     // 生成del_by_id方法
     if !skip.contains("del_by_id") {
         let is_write = WRITE_METHODS.contains(&"del_by_id");
-        let before_call = resolve_hook("del_by_id", is_write, &args.before, &args.before_write, Some(quote! { id }));
-        let after_call = resolve_hook("del_by_id", is_write, &args.after, &args.after_write, Some(quote! { one }));
+        let before_call = resolve_hook("del_by_id", is_write, &args.before, &args.before_write, Some(quote! { id }), None);
+        let after_call = resolve_hook("del_by_id", is_write, &args.after, &args.after_write, Some(quote! { one }), Some(quote! { id }));
         generated_methods.push(quote! {
         /// # 删除记录
         ///
@@ -345,8 +355,8 @@ pub(crate) fn svc_macro(args: SvcArgs, input: ItemStruct) -> TokenStream {
     // 生成del_by_query_dto方法
     if !skip.contains("del_by_query_dto") {
         let is_write = WRITE_METHODS.contains(&"del_by_query_dto");
-        let before_call = resolve_hook("del_by_query_dto", is_write, &args.before, &args.before_write, Some(quote! { dto }));
-        let after_call = resolve_hook("del_by_query_dto", is_write, &args.after, &args.after_write, Some(quote! { rows_affected }));
+        let before_call = resolve_hook("del_by_query_dto", is_write, &args.before, &args.before_write, Some(quote! { dto }), None);
+        let after_call = resolve_hook("del_by_query_dto", is_write, &args.after, &args.after_write, Some(quote! { rows_affected }), Some(quote! { dto }));
         generated_methods.push(quote! {
         /// # 删除记录
         ///
@@ -386,8 +396,8 @@ pub(crate) fn svc_macro(args: SvcArgs, input: ItemStruct) -> TokenStream {
 
     // 生成get_by_id方法
     if !skip.contains("get_by_id") {
-        let before_call = resolve_hook("get_by_id", false, &args.before, &args.before_write, Some(quote! { id }));
-        let after_call = resolve_hook("get_by_id", false, &args.after, &args.after_write, Some(quote! { one }));
+        let before_call = resolve_hook("get_by_id", false, &args.before, &args.before_write, Some(quote! { id }), None);
+        let after_call = resolve_hook("get_by_id", false, &args.after, &args.after_write, Some(quote! { one }), Some(quote! { id }));
         generated_methods.push(quote! {
         /// # 根据id获取记录信息
         ///
@@ -420,8 +430,8 @@ pub(crate) fn svc_macro(args: SvcArgs, input: ItemStruct) -> TokenStream {
 
     // 生成get_by_query_dto方法
     if !skip.contains("get_by_query_dto") {
-        let before_call = resolve_hook("get_by_query_dto", false, &args.before, &args.before_write, Some(quote! { dto }));
-        let after_call = resolve_hook("get_by_query_dto", false, &args.after, &args.after_write, Some(quote! { one }));
+        let before_call = resolve_hook("get_by_query_dto", false, &args.before, &args.before_write, Some(quote! { dto }), None);
+        let after_call = resolve_hook("get_by_query_dto", false, &args.after, &args.after_write, Some(quote! { one }), Some(quote! { dto }));
         generated_methods.push(quote! {
         /// # 获取记录
         ///
@@ -458,8 +468,8 @@ pub(crate) fn svc_macro(args: SvcArgs, input: ItemStruct) -> TokenStream {
 
     // 生成list_by_query_dto方法
     if !skip.contains("list_by_query_dto") {
-        let before_call = resolve_hook("list_by_query_dto", false, &args.before, &args.before_write, Some(quote! { dto }));
-        let after_call = resolve_hook("list_by_query_dto", false, &args.after, &args.after_write, Some(quote! { all }));
+        let before_call = resolve_hook("list_by_query_dto", false, &args.before, &args.before_write, Some(quote! { dto }), None);
+        let after_call = resolve_hook("list_by_query_dto", false, &args.after, &args.after_write, Some(quote! { all }), Some(quote! { dto }));
         generated_methods.push(quote! {
         /// # 查询记录列表
         ///
@@ -498,8 +508,8 @@ pub(crate) fn svc_macro(args: SvcArgs, input: ItemStruct) -> TokenStream {
 
     // 生成page_by_query_dto方法
     if !skip.contains("page_by_query_dto") {
-        let before_call = resolve_hook("page_by_query_dto", false, &args.before, &args.before_write, Some(quote! { dto }));
-        let after_call = resolve_hook("page_by_query_dto", false, &args.after, &args.after_write, Some(quote! { models }));
+        let before_call = resolve_hook("page_by_query_dto", false, &args.before, &args.before_write, Some(quote! { dto }), None);
+        let after_call = resolve_hook("page_by_query_dto", false, &args.after, &args.after_write, Some(quote! { models }), Some(quote! { dto }));
         generated_methods.push(quote! {
         /// # 查询记录列表
         ///
@@ -552,8 +562,8 @@ pub(crate) fn svc_macro(args: SvcArgs, input: ItemStruct) -> TokenStream {
 
     // 生成get_ex_by_id方法
     if !skip.contains("get_ex_by_id") {
-        let before_call = resolve_hook("get_ex_by_id", false, &args.before, &args.before_write, Some(quote! { id }));
-        let after_call = resolve_hook("get_ex_by_id", false, &args.after, &args.after_write, Some(quote! { one }));
+        let before_call = resolve_hook("get_ex_by_id", false, &args.before, &args.before_write, Some(quote! { id }), None);
+        let after_call = resolve_hook("get_ex_by_id", false, &args.after, &args.after_write, Some(quote! { one }), Some(quote! { id }));
         generated_methods.push(quote! {
         /// # 根据id获取记录信息(附带获取关联表的信息)
         ///
@@ -588,8 +598,8 @@ pub(crate) fn svc_macro(args: SvcArgs, input: ItemStruct) -> TokenStream {
 
     // 生成get_ex_by_query_dto方法
     if !skip.contains("get_ex_by_query_dto") {
-        let before_call = resolve_hook("get_ex_by_query_dto", false, &args.before, &args.before_write, Some(quote! { dto }));
-        let after_call = resolve_hook("get_ex_by_query_dto", false, &args.after, &args.after_write, Some(quote! { one }));
+        let before_call = resolve_hook("get_ex_by_query_dto", false, &args.before, &args.before_write, Some(quote! { dto }), None);
+        let after_call = resolve_hook("get_ex_by_query_dto", false, &args.after, &args.after_write, Some(quote! { one }), Some(quote! { dto }));
         generated_methods.push(quote! {
         /// # 获取记录信息(附带获取关联表的信息)
         ///
@@ -628,8 +638,8 @@ pub(crate) fn svc_macro(args: SvcArgs, input: ItemStruct) -> TokenStream {
 
     // 生成list_ex_by_query_dto方法
     if !skip.contains("list_ex_by_query_dto") {
-        let before_call = resolve_hook("list_ex_by_query_dto", false, &args.before, &args.before_write, Some(quote! { dto }));
-        let after_call = resolve_hook("list_ex_by_query_dto", false, &args.after, &args.after_write, Some(quote! { all }));
+        let before_call = resolve_hook("list_ex_by_query_dto", false, &args.before, &args.before_write, Some(quote! { dto }), None);
+        let after_call = resolve_hook("list_ex_by_query_dto", false, &args.after, &args.after_write, Some(quote! { all }), Some(quote! { dto }));
         generated_methods.push(quote! {
         /// # 查询记录列表(附带获取关联表的信息)
         ///
@@ -672,8 +682,8 @@ pub(crate) fn svc_macro(args: SvcArgs, input: ItemStruct) -> TokenStream {
 
     // 生成page_ex_by_query_dto方法
     if !skip.contains("page_ex_by_query_dto") {
-        let before_call = resolve_hook("page_ex_by_query_dto", false, &args.before, &args.before_write, Some(quote! { dto }));
-        let after_call = resolve_hook("page_ex_by_query_dto", false, &args.after, &args.after_write, Some(quote! { list }));
+        let before_call = resolve_hook("page_ex_by_query_dto", false, &args.before, &args.before_write, Some(quote! { dto }), None);
+        let after_call = resolve_hook("page_ex_by_query_dto", false, &args.after, &args.after_write, Some(quote! { list }), Some(quote! { dto }));
         generated_methods.push(quote! {
         /// # 查询记录列表(附带获取关联表的信息)
         ///

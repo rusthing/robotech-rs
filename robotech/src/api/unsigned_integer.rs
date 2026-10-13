@@ -136,8 +136,9 @@ impl std::ops::Deref for U16 {
 
 /// # 无符号 32 位整数包装类型
 ///
-/// 用于表示数据库中的无符号整数，序列化时输出为裸数字而非嵌套对象；
-/// 支持与 `u32` / `i32` 互转，并实现 `Deref` 以便直接作为 `u32` 使用。
+/// 用于表示数据库中的无符号整数（如计数、时长毫秒数），
+/// 序列化时输出为裸数字而非嵌套对象；
+/// 支持与 `u32` / `i32` 互转，并实现 `Deref` 以及 SeaORM 的取值/绑定能力。
 #[derive(
     ToSchema,
     Clone,
@@ -185,6 +186,13 @@ impl From<U32> for i32 {
     }
 }
 
+// U32 -> u64: 无符号扩宽,总是安全,用于与 u64 时间戳之类的量做混合运算
+impl From<U32> for u64 {
+    fn from(v: U32) -> Self {
+        v.0 as u64
+    }
+}
+
 impl std::fmt::Display for U32 {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(f, "{}", self.0)
@@ -196,6 +204,50 @@ impl std::ops::Deref for U32 {
     type Target = u32;
     fn deref(&self) -> &u32 {
         &self.0
+    }
+}
+
+// ========= SeaORM四件套 =========
+impl TryFrom<U32> for Value {
+    type Error = std::num::TryFromIntError;
+    fn try_from(id: U32) -> Result<Self, Self::Error> {
+        Ok(Value::Int(Some(id.0 as i32)))
+    }
+}
+
+impl TryGetable for U32 {
+    fn try_get_by<I: ColIdx>(res: &QueryResult, idx: I) -> Result<Self, TryGetError> {
+        {
+            let v: i32 = <i32 as TryGetable>::try_get_by(res, idx)?;
+            Ok(Self(v as u32))
+        }
+    }
+}
+
+impl ValueType for U32 {
+    fn try_from(v: Value) -> Result<Self, ValueTypeErr> {
+        match v {
+            Value::Int(Some(x)) => Ok(Self(x as u32)),
+            _ => Err(ValueTypeErr),
+        }
+    }
+
+    fn type_name() -> String {
+        "U32".to_string()
+    }
+
+    fn array_type() -> ArrayType {
+        ArrayType::Int
+    }
+
+    fn column_type() -> ColumnType {
+        ColumnType::Integer
+    }
+}
+
+impl Nullable for U32 {
+    fn null() -> Value {
+        Value::Int(None)
     }
 }
 
