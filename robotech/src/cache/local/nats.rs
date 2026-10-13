@@ -1,205 +1,192 @@
 //! # NATS 本地缓存
 //!
-//! 基于 `ArcSwap` 的无锁本地内存缓存 + NATS 消息同步。
+//! 基于 `ArcSwap` 的无锁本地内存缓存 + JetStream 持久化刷新信号。
 //!
 //! ## 工作原理
 //!
-//! 1. **存储**：每个 `NatsCacheHandler` 对应一个独立缓存实例，存储在全局 `RwLock<HashMap>` 中
-//! 2. **同步**：通过 NATS Core Subscription 订阅指定主题，接收其他节点的变更事件
-//! 3. **发布**：`publish_cache_event` 将 CacheEvent 广播到指定主题，其他节点收到后调用 `apply_event` 精确更新
+//! 1. **存储**：`ArcSwap<C>` 无锁并发读
+//! 2. **同步**：任何节点的写操作通过 JetStream 发布刷新信号，所有节点收到后执行全量重建
+//! 3. **启动**：应用启动时直接查询 DB 全量加载，不从 JetStream 重放历史
+//! 4. **断网恢复**：durable consumer 在 NATS 服务端保留进度，重连后自动接续
+//!
+//! ## 与旧版差异
+//!
+//! - ❌ 不再细分 Add/Modify/Del 事件，统一为刷新信号
+//! - ❌ 不再使用 `RwLock<HashMap<TypeId, ...>>`，改用业务侧持有的独立 `ArcSwap`
+//! - ❌ 不再使用 Core NATS，改用 JetStream（`publish(persistent=true)` + Push Consumer）
+//! - ✅ 消除精确增量更新的复杂 trait 和全量克隆开销
+//! - ✅ 真正无锁读（`ArcSwap::load_full()`）
 //!
 //! ## 使用示例
 //!
 //! ```ignore
-//! use robotech::cache::local::nats::{NatsCacheHandler, publish_cache_event};
-//! use robotech::cache::CacheEvent;
+//! use arc_swap::ArcSwap;
+//! use robotech::cache::local::nats;
+//! use std::sync::Arc;
 //!
-//! #[derive(Default, Clone)]
-//! struct MyCache { data: HashMap<u64, Item> }
+//! static CACHE: ArcSwap<DtwCache> = ArcSwap::const_empty();
 //!
-//! impl NatsCacheHandler for MyCache {
-//!     fn topics() -> &'static [&'static str] { &["my.cache.topic"] }
-//!     fn apply_event(&mut self, topic: &str, event: &CacheEvent) { ... }
-//! }
+//! // 启动 JetStream 消费者
+//! nats::setup_nats_cache(
+//!     "dtw.cache.refresh",
+//!     nats::default_stream_config("dtw-cache"),
+//!     nats::default_consumer_config("dtw-cache-consumer"),
+//!     &CACHE,
+//!     || async { build_cache_from_db().await },
+//! ).await?;
 //!
-//! // 启动
-//! NatsCache::<MyCache>::setup().await?;
-//! NatsCache::<MyCache>::refresh(full_cache);
+//! // 启动时全量加载
+//! CACHE.store(Arc::new(build_cache_from_db().await));
 //!
-//! // 读取
-//! let snapshot = NatsCache::<MyCache>::get();
+//! // 读：零锁开销
+//! let snapshot = CACHE.load_full();
 //!
-//! // 发布变更
-//! publish_cache_event("my.cache.topic", &CacheEvent::Add(data)).await?;
+//! // 发布刷新信号
+//! nats::publish_cache_refresh_signal("dtw.cache.refresh").await?;
 //! ```
 
-use std::any::{Any, TypeId};
-use std::collections::HashMap;
-use std::marker::PhantomData;
-use std::sync::{Arc, RwLock};
-
+use arc_swap::ArcSwap;
+use async_nats::jetstream;
+use std::future::Future;
+use std::sync::Arc;
 use tokio::task::JoinHandle;
 use tracing::{error, info};
 
-use crate::cache::CacheEvent;
-use crate::mq::nats::{publish as nats_publish, subscribe as nats_subscribe};
+use crate::cache::CacheRefreshSignal;
+use crate::mq::nats::{
+    get_or_create_stream, publish as nats_publish,
+    subscribe as nats_subscribe,
+};
 
-type CacheMap = RwLock<HashMap<TypeId, Arc<dyn Any + Send + Sync>>>;
-
-fn cache_map() -> &'static CacheMap {
-    use std::sync::OnceLock;
-    static MAP: OnceLock<CacheMap> = OnceLock::new();
-    MAP.get_or_init(|| RwLock::new(HashMap::new()))
-}
-
-type HandleMap = std::sync::Mutex<HashMap<TypeId, Vec<Arc<JoinHandle<()>>>>>;
-
-fn handle_map() -> &'static HandleMap {
-    use std::sync::OnceLock;
-    static MAP: OnceLock<HandleMap> = OnceLock::new();
-    MAP.get_or_init(|| std::sync::Mutex::new(HashMap::new()))
-}
-
-/// # 缓存精确更新处理器
+/// # 启动 NATS 缓存消费者
 ///
-/// 业务方实现此 trait 以定义收到 NATS 消息后如何精确更新缓存。
-///
-/// ## 必要约束
-///
-/// - `Default`：未初始化时的默认空缓存
-/// - `Clone`：`update()` 时复制现有缓存
-/// - `Send + Sync + 'static`：跨线程共享
-pub trait NatsCacheHandler: Default + Clone + Send + Sync + 'static {
-    /// 在 rcu 闭包中精确更新缓存。
-    ///
-    /// 根据 `topic` 和 `event` 对 `self` 做原地修改，调用者负责原子替换。
-    fn apply_event(&mut self, topic: &str, event: &CacheEvent);
-
-    /// 需要订阅的 NATS 主题列表。
-    fn topics() -> &'static [&'static str];
-}
-
-/// # NATS 本地缓存管理器
-///
-/// 泛型 `H` 必须实现 [`NatsCacheHandler`]。
-///
-/// 通过静态方法操作缓存。同一类型 `H` 只有一个全局缓存实例。
-pub struct NatsCache<H: NatsCacheHandler>(PhantomData<H>);
-
-impl<H: NatsCacheHandler> NatsCache<H> {
-    /// # 启动 NATS 订阅
-    ///
-    /// 遍历 [`NatsCacheHandler::topics`] 中的每个主题启动 Core NATS 订阅。
-    /// 收到消息后自动反序列化为 [`CacheEvent`] 并调用 [`Self::update`]。
-    ///
-    /// 应在应用启动时调用一次，通常由 `bootstrap!` 宏自动接管。
-    ///
-    /// ## 参数
-    ///
-    /// 无。
-    ///
-    /// ## 返回值
-    ///
-    /// 成功时缓存即处于就绪状态（为空），需随后调用 [`Self::refresh`] 做全量加载。
-    pub async fn setup() -> anyhow::Result<()> {
-        let topics = H::topics();
-        if topics.is_empty() {
-            return Ok(());
-        }
-
-        let mut handles = Vec::new();
-
-        for topic in topics {
-            let handle = nats_subscribe(
-                topic,
-                None,
-                None,
-                None,
-                |msg| async move {
-                    let topic = msg.subject.to_string();
-                    let payload = serde_json::from_slice::<CacheEvent>(&msg.payload);
-                    match payload {
-                        Ok(event) => {
-                            NatsCache::<H>::update(|cache| cache.apply_event(&topic, &event));
-                            Ok(())
-                        }
-                        Err(e) => {
-                            error!("反序列化缓存事件失败 (topic={topic}): {e}");
-                            Ok(())
-                        }
-                    }
-                },
-            )
-            .await?;
-
-            info!("NATS cache subscriber started for topic: {topic}");
-            handles.push(handle);
-        }
-
-        handle_map()
-            .lock()
-            .unwrap()
-            .insert(TypeId::of::<H>(), handles);
-
-        Ok(())
-    }
-
-    /// # 获取缓存快照
-    ///
-    /// 返回当前缓存的共享只读副本。若未初始化则返回默认空值。
-    ///
-    /// ## 性能
-    ///
-    /// 使用 `RwLock::read` 获取快照，并发读不互斥。退出锁后持有独立的 `Arc`。
-    pub fn get() -> Arc<H> {
-        let map = cache_map().read().unwrap();
-        map.get(&TypeId::of::<H>())
-            .and_then(|arc| Arc::downcast::<H>(arc.clone()).ok())
-            .unwrap_or_else(|| Arc::new(H::default()))
-    }
-
-    /// # 全量替换缓存
-    ///
-    /// 启动时或收到全量刷新信号时调用，直接交换整个缓存实例。
-    pub fn refresh(cache: H) {
-        cache_map()
-            .write()
-            .unwrap()
-            .insert(TypeId::of::<H>(), Arc::new(cache));
-    }
-
-    /// # 原子 rcu 更新
-    ///
-    /// 复制当前缓存，原地执行修改闭包，再原子替换。
-    ///
-    /// 在 NATS 消息处理中调用，保证单线程顺序执行（NATS 消息天然有序）。
-    pub fn update(f: impl FnOnce(&mut H)) {
-        let mut map = cache_map().write().unwrap();
-        let current = map
-            .get(&TypeId::of::<H>())
-            .and_then(|arc| Arc::downcast::<H>(arc.clone()).ok())
-            .unwrap_or_else(|| Arc::new(H::default()));
-
-        let mut new_cache = (*current).clone();
-        f(&mut new_cache);
-        map.insert(TypeId::of::<H>(), Arc::new(new_cache));
-    }
-}
-
-/// # 发布缓存变更事件
-///
-/// 将 [`CacheEvent`] 通过 Core NATS 发布到指定主题。
-/// 通常用于 SVC 的 `after_*` 回调中，通知其他节点更新缓存。
+/// 创建 JetStream Push Consumer，收到刷新信号后调用 `rebuild_fn` 重建缓存
+/// 并通过 `storage` 原子替换。
 ///
 /// ## 参数
 ///
-/// - `topic`：NATS 主题
-/// - `event`：缓存变更事件
+/// - `subject`：JetStream Subject
+/// - `stream_config`：Stream 配置（[`default_stream_config`] 提供合理默认值）
+/// - `consumer_config`：Push Consumer 配置（[`default_consumer_config`] 提供合理默认值，
+///   内部会设置 `DeliverPolicy::New` 确保新建消费者不重放历史）
+/// - `storage`：`ArcSwap<C>` 静态引用，读端通过 `load_full()` 获取快照
+/// - `rebuild_fn`：异步重建函数，返回新的缓存数据
 ///
 /// ## 返回值
 ///
-/// 成功返回 `Ok(())`，失败返回错误。
-pub async fn publish_cache_event(topic: &str, event: &CacheEvent) -> anyhow::Result<()> {
-    nats_publish(topic, event, false).await?;
+/// 成功返回订阅句柄，可调用 `.abort()` 停止消费。
+pub async fn setup_nats_cache<C, F, Fut>(
+    subject: &str,
+    stream_config: jetstream::stream::Config,
+    consumer_config: jetstream::consumer::push::Config,
+    storage: &'static ArcSwap<C>,
+    rebuild_fn: F,
+) -> anyhow::Result<Arc<JoinHandle<()>>>
+where
+    C: Default + Send + Sync + 'static,
+    F: Fn() -> Fut + Send + Sync + 'static,
+    Fut: Future<Output = anyhow::Result<C>> + Send + 'static,
+{
+    let rebuild_fn = Arc::new(rebuild_fn);
+
+    // 启动时删除旧 consumer，避免重放历史消息。
+    // 全量刷新由 main.rs 在 subscribe 之后显式调用。
+    if let Some(ref consumer_name) = consumer_config.name {
+        cleanup_stale_consumer(&stream_config, consumer_name).await;
+    }
+
+    let handle = nats_subscribe(
+        subject,
+        None,
+        Some(stream_config),
+        Some(consumer_config),
+        move |_msg| {
+            let rebuild_fn = Arc::clone(&rebuild_fn);
+            async move {
+                match rebuild_fn().await {
+                    Ok(new_cache) => {
+                        storage.store(Arc::new(new_cache));
+                        info!("缓存刷新完成");
+                        Ok(())
+                    }
+                    Err(e) => {
+                        error!("缓存全量重建失败: {e}");
+                        Ok(())
+                    }
+                }
+            }
+        },
+    )
+    .await?;
+
+    info!("NATS 缓存消费者启动完成 (subject={subject})");
+    Ok(handle)
+}
+
+/// # 发布缓存刷新信号
+///
+/// 通过 JetStream 持久化发布，所有订阅该 subject 的节点收到后执行全量重建。
+///
+/// 用于 SVC `after_*` 回调：任何写操作成功后调用此函数通知其他节点。
+pub async fn publish_cache_refresh_signal(subject: &str) -> anyhow::Result<()> {
+    let signal = CacheRefreshSignal::new();
+    nats_publish(subject, &signal, true).await?;
     Ok(())
+}
+
+/// # 默认 Stream 配置
+///
+/// - `subjects` 包含指定的 subject（`>` 通配符版本以便扩展）
+/// - 文件持久化，无消息数/大小限制（由后续 TTL 控制）
+/// - 每节点独立 consumer，不做负载均衡
+pub fn default_stream_config(stream_name: &str) -> jetstream::stream::Config {
+    jetstream::stream::Config {
+        name: stream_name.to_string(),
+        subjects: vec![format!("{stream_name}.>")],
+        storage: jetstream::stream::StorageType::File,
+        max_messages: -1,
+        max_bytes: -1,
+        max_age: std::time::Duration::from_secs(604800), // 7 天 TTL
+        ..Default::default()
+    }
+}
+
+/// # 默认 Push Consumer 配置
+///
+/// - `DeliverPolicy::New`：新建消费者不重放历史消息
+/// - `AckPolicy::Explicit`：处理完成后 ACK
+/// - `name` 设置为 consumer_name，确保 durable（断网重连保障）
+pub fn default_consumer_config(consumer_name: &str) -> jetstream::consumer::push::Config {
+    jetstream::consumer::push::Config {
+        name: Some(consumer_name.to_string()),
+        deliver_policy: jetstream::consumer::DeliverPolicy::New,
+        ack_policy: jetstream::consumer::AckPolicy::Explicit,
+        ..Default::default()
+    }
+}
+
+/// # 清理旧的 Push Consumer
+///
+/// 启动时删除同名 consumer，确保不重放历史消息。
+/// 删除失败不影响后续流程（consumer 可能不存在或权限不足）。
+async fn cleanup_stale_consumer(
+    stream_config: &jetstream::stream::Config,
+    consumer_name: &str,
+) {
+    match get_or_create_stream(stream_config.clone()).await {
+        Ok(stream) => {
+            if let Err(e) = stream.delete_consumer(consumer_name).await {
+                if e.to_string().contains("not found") {
+                    info!("旧 consumer 不存在，无需清理: {consumer_name}");
+                } else {
+                    error!("删除旧 consumer 失败: {e}");
+                }
+            } else {
+                info!("已清理旧 consumer: {consumer_name}");
+            }
+        }
+        Err(e) => {
+            error!("获取 Stream 失败，跳过 consumer 清理: {e}");
+        }
+    }
 }
