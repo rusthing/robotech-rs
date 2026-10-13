@@ -52,7 +52,7 @@ use std::sync::Arc;
 use tokio::task::JoinHandle;
 use tracing::{error, info};
 
-use crate::cache::CacheRefreshSignal;
+use super::CacheRefreshSignal;
 use crate::mq::nats::{
     get_or_create_stream, publish as nats_publish,
     subscribe as nats_subscribe,

@@ -5,5 +5,4 @@
 //! 当前实现：
 //! - `redis`：基于 Redis 的分布式缓存（需启用 feature `distributed-cache`）
 
-#[cfg(feature = "redis")]
 pub mod redis;
