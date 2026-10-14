@@ -627,7 +627,35 @@ fn generate_builder_attr() -> Attribute {
     )
 }
 
-/// 生成serde属性
+/// # 生成serde属性
+///
+/// 仅对 `Option<String>` 字段生成（宏会把它包成 `Option<Option<String>>`）。
+///
+/// ## 为什么必须三个属性一起生成
+///
+/// 外层 `Option` 的语义是「DTO 里有没有这个字段」——这是部分更新（modify）的基础：
+/// 没传的字段不更新，显式传 `null` 的才置空。`deserialize_with` 已经把这个语义
+/// 落到了服务端（`null` → `Some(None)`），但如果不同时给**序列化侧**补
+/// `serialize_with` + `skip_serializing_if`，客户端未设置的字段会被 serde 默认
+/// 序列化成 JSON `null`，服务端再还原成 `Some(None)`，
+/// 于是「没传」和「传了 null」被抹平成同一个值，所有未设置的 `Option<String>`
+/// 字段都会被 UPDATE 成 NULL（典型症状：worker 上报执行结果时不设
+/// `executor_instance`，INSERT 写入的实例号就被下一次 UPDATE 抹平）。
+///
+/// 三件套的效果：
+///
+/// | 字段值 | JSON | 服务端还原 | 落到列 |
+/// |---|---|---|---|
+/// | `None` | （key 不存在） | `None` | `ActiveValue::NotSet` 不更新 |
+/// | `Some(None)` | `null` | `Some(None)` | `ActiveValue::Set(None)` 置空 |
+/// | `Some(Some(v))` | `v` | `Some(Some(v))` | 设为 `v` |
+///
+/// 之所以只有 `Option<String>` 需要关心：`Option<u64>` / `Option<Duration>` 等
+/// 类型没有被挂 `deserialize_with`，走 serde 默认行为（`null` → 外层 `None`），
+/// 本来就是对的。
+///
+/// 字段上若已手写了 `#[serde(...)]`，本函数不会被调用（见调用处的 `has_serde` 判断），
+/// 手写优先。
 fn generate_serde_attr(field: &Field) -> Option<Attribute> {
     let ty = &field.ty;
     if let syn::Type::Path(type_path) = ty {
@@ -641,7 +669,11 @@ fn generate_serde_attr(field: &Field) -> Option<Attribute> {
                                 if let Some(inner_segment) = inner_path.path.segments.last() {
                                     if inner_segment.ident == "String" {
                                         return Some(syn::parse_quote!(
-                                            #[serde(deserialize_with = "option_option_serde::deserialize")]
+                                            #[serde(
+                                                deserialize_with = "option_option_serde::deserialize",
+                                                serialize_with = "option_option_serde::serialize",
+                                                skip_serializing_if = "option_option_serde::is_none"
+                                            )]
                                         ));
                                     }
                                 }
