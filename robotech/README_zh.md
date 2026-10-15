@@ -472,6 +472,55 @@ let app = Router::new()
     .layer(CorsLayer::permissive());
 ```
 
+### 9. 字典枚举（Dic）
+
+**规范**：所有字典枚举（`*/src/dic/*.rs`）的 HTTP 表示必须是**整数**（对应数据库的
+`INT2` 列），**不是**变体名字符串。统一使用 `#[dic]` 属性宏生成 serde 与 OpenAPI schema，
+禁止手写 `Serialize` / `Deserialize` / `ToSchema`。
+
+```rust
+use robotech::macros::dic;
+
+#[dic]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, AsRefStr, Display, EnumString)]
+#[strum(serialize_all = "kebab-case")]
+pub enum JobType {
+    /// 手动
+    Manual = 0,
+    /// Cron 表达式
+    Cron = 1,
+    /// 固定延迟
+    FixedDelay = 2,
+    /// 固定频率
+    FixedRate = 3,
+}
+```
+
+**`#[dic]` 生成的内容**：
+
+| 生成的实现 | 行为 |
+|-----------|------|
+| `Serialize` | 序列化为 `i16`（HTTP 返回 `"jobType": 3`） |
+| `Deserialize` | 只接受 `i16`；非法值直接报错，**不回落默认变体** |
+| `PartialSchema` | OpenAPI 声明为 `integer`，描述自动生成 `0=Manual, 1=Cron, ...` |
+| `ToSchema` | schema 名 = 枚举名 |
+
+**约束**：
+
+- 枚举必须**非泛型**，且所有变体都是**无字段**的（`Fields::Unit`）；
+- 每个变体的判别式必须是 **i16 范围内的整数字面量**（省略时按「上一个 + 1」递增）；
+- 宏会从 `#[derive(...)]` 中自动摘除 `Serialize` / `Deserialize` / `ToSchema`，
+  其余派生（`Debug` / `Clone` / `AsRefStr` / `Display` / `EnumString` 等）原样保留；
+- `AsRefStr` / `Display` / `EnumString` 保留用于**非 HTTP 场景**（日志、`value()` 等），
+  它们的 kebab-case 表示与 HTTP 的整数表示互不影响。
+
+**配套约定**：
+
+- 数据库列一般是 `INT2`，MO 里写 `i16`；DDL 中文注释、字典枚举文件的判别式、
+  PowerDesigner 模型三处保持同步。
+- 前端类型用数字字面量联合（`type JobType = 0 | 1 | 2 | 3`），
+  映射表用 `Record<number, string>`，不要按字符串匹配。
+
 ## 快速开始
 
 ### 先决条件
@@ -639,6 +688,10 @@ cargo run --features web,db
 ### 控制器宏
 
 - `impl_controller` - 自动生成控制器路由
+
+### 字典枚举宏
+
+- `dic` - 把无字段枚举的 HTTP 序列化统一为整数，并自动生成 OpenAPI schema（详见「核心特性 9」）
 
 完整文档见：[robotech-macros](../robotech-macros/README.md)
 

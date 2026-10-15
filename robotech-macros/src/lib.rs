@@ -2,6 +2,7 @@ mod api_client;
 mod bootstrap;
 mod dao;
 mod db;
+mod dic;
 mod dto;
 mod feign;
 mod log;
@@ -13,6 +14,7 @@ use crate::api_client::api_client_macro;
 use crate::bootstrap::{bootstrap_macro, BootstrapArgs};
 use crate::dao::{dao_macro, DaoArgs};
 use crate::db::MigrateArgs;
+use crate::dic::dic_macro;
 use crate::dto::{crud_dto_macro, CrudDtoArgs};
 use crate::feign::feign_macro;
 use crate::log::{log_call_macro, LogCallArgs};
@@ -20,7 +22,7 @@ use crate::svc::{db_unwrap_macro, svc_macro, DbUnwrapArgs, SvcArgs};
 use crate::vo::{vo_macro, VoArgs};
 use crate::web::{api_doc_macro, ctrl_macro, router_macro, ApiDocArgs, CtrlArgs, RouterArgs};
 use proc_macro::TokenStream;
-use syn::{parse_macro_input, DeriveInput, ItemFn, ItemStruct};
+use syn::{parse_macro_input, DeriveInput, ItemEnum, ItemFn, ItemStruct};
 
 /// 属性宏：在进入方法时使用 log 库记录方法名、参数及参数值
 ///
@@ -373,4 +375,43 @@ pub fn api_client(_args: TokenStream, input: TokenStream) -> TokenStream {
 pub fn feign(_args: TokenStream, input: TokenStream) -> TokenStream {
     let input = parse_macro_input!(input as ItemStruct);
     feign_macro(input).into()
+}
+
+/// 属性宏：把「字典枚举」的 serde 表示统一成整数
+///
+/// Rust 默认把 C 风格枚举序列化成**变体名字符串**（`FixedRate` → `"FixedRate"`），
+/// 这与字典枚举的语义不符 —— 枚举在库里是 `INT2`、注释写着 `0=手动分派, 1=cron...`，
+/// 只有 HTTP 层是字符串，等于同一条数据有两套表示，而且改个变体名就成了破坏性变更。
+///
+/// `#[dic]` 会把序列化统一成**变体判别式（整数）**，并把 OpenAPI schema 也描述成整数。
+///
+/// 生成的实现：
+/// - `serde::Serialize`：输出 `i16` 判别式；
+/// - `serde::Deserialize`：只接受整数，非法值直接报错（不静默回落到默认变体）；
+/// - `utoipa::PartialSchema` + `utoipa::ToSchema`：schema 为 `integer`，
+///   description 带上 `值=变体名` 对照表，Swagger 上依然可读。
+///
+/// # 使用示例
+/// ```ignore
+/// use robotech::macros::dic;
+///
+/// #[dic]
+/// #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, AsRefStr, Display, EnumString)]
+/// #[strum(serialize_all = "kebab-case")]
+/// pub enum JobType {
+///     /// 手动分派
+///     Manual = 0,
+///     /// cron 表达式
+///     Cron = 1,
+/// }
+/// ```
+///
+/// 派生列表里不需要（也建议不要）再写 `Serialize` / `Deserialize` / `ToSchema`，
+/// 宏会自动摘掉它们避免实现冲突。
+///
+/// 约束：只支持 C 风格枚举（单元变体）；判别式必须是整数字面量且在 `i16` 范围内。
+#[proc_macro_attribute]
+pub fn dic(_args: TokenStream, input: TokenStream) -> TokenStream {
+    let input = parse_macro_input!(input as ItemEnum);
+    dic_macro(input).into()
 }

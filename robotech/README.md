@@ -372,6 +372,58 @@ let app = Router::new()
     .layer(CorsLayer::permissive());
 ```
 
+### 9. Dictionary Enums (Dic)
+
+**Convention**: every dictionary enum (`*/src/dic/*.rs`) MUST be represented over HTTP as an
+**integer** (matching the `INT2` database column), **never** as a variant-name string.
+Use the `#[dic]` attribute macro to generate serde and the OpenAPI schema; do not hand-write
+`Serialize` / `Deserialize` / `ToSchema`.
+
+```rust
+use robotech::macros::dic;
+
+#[dic]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, AsRefStr, Display, EnumString)]
+#[strum(serialize_all = "kebab-case")]
+pub enum JobType {
+    /// Manual
+    Manual = 0,
+    /// Cron expression
+    Cron = 1,
+    /// Fixed delay
+    FixedDelay = 2,
+    /// Fixed rate
+    FixedRate = 3,
+}
+```
+
+**What `#[dic]` generates**:
+
+| Generated impl | Behavior |
+|----------------|----------|
+| `Serialize` | Serializes to `i16` (HTTP returns `"jobType": 3`) |
+| `Deserialize` | Accepts `i16` only; invalid values fail loudly, **never fall back to a default variant** |
+| `PartialSchema` | Declares `integer` in OpenAPI, description auto-built as `0=Manual, 1=Cron, ...` |
+| `ToSchema` | Schema name = enum name |
+
+**Constraints**:
+
+- The enum must be **non-generic** and all variants must be **fieldless** (`Fields::Unit`);
+- Each variant discriminant must be an **integer literal within `i16`** (when omitted, it is
+  `previous + 1`);
+- The macro strips `Serialize` / `Deserialize` / `ToSchema` from `#[derive(...)]` automatically
+  and keeps every other derive (`Debug` / `Clone` / `AsRefStr` / `Display` / `EnumString`, ...)
+  untouched;
+- `AsRefStr` / `Display` / `EnumString` remain for **non-HTTP use** (logging, `value()`, ...);
+  their kebab-case form is independent of the HTTP integer form.
+
+**Related conventions**:
+
+- The database column is normally `INT2` and the MO field is `i16`; keep the DDL comment,
+  the enum discriminants and the PowerDesigner model in sync.
+- On the frontend, type enums as numeric literal unions (`type JobType = 0 | 1 | 2 | 3`) and
+  map labels with `Record<number, string>` — never match on strings.
+
 ## Quick Start
 
 ### Prerequisites
@@ -539,6 +591,10 @@ The project provides numerous macros to simplify development:
 ### Controller Macros
 
 - `impl_controller` - Auto-generate controller routes
+
+### Dictionary Enum Macros
+
+- `dic` - Unify fieldless enums to integer HTTP serialization and auto-generate the OpenAPI schema (see "Core Features 9")
 
 Full documentation at: [robotech-macros](../robotech-macros/)
 
