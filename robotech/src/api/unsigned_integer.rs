@@ -69,6 +69,50 @@ impl std::ops::Deref for U8 {
     }
 }
 
+// ========= SeaORM四件套 =========
+impl TryFrom<U8> for Value {
+    type Error = std::num::TryFromIntError;
+    fn try_from(id: U8) -> Result<Self, Self::Error> {
+        Ok(Value::TinyInt(Some(id.0 as i8)))
+    }
+}
+
+impl TryGetable for U8 {
+    fn try_get_by<I: ColIdx>(res: &QueryResult, idx: I) -> Result<Self, TryGetError> {
+        {
+            let v: i8 = <i8 as TryGetable>::try_get_by(res, idx)?;
+            Ok(Self(v as u8))
+        }
+    }
+}
+
+impl ValueType for U8 {
+    fn try_from(v: Value) -> Result<Self, ValueTypeErr> {
+        match v {
+            Value::TinyInt(Some(x)) => Ok(Self(x as u8)),
+            _ => Err(ValueTypeErr),
+        }
+    }
+
+    fn type_name() -> String {
+        "U8".to_string()
+    }
+
+    fn array_type() -> ArrayType {
+        ArrayType::TinyInt
+    }
+
+    fn column_type() -> ColumnType {
+        ColumnType::TinyInteger
+    }
+}
+
+impl Nullable for U8 {
+    fn null() -> Value {
+        Value::TinyInt(None)
+    }
+}
+
 /// # 无符号 16 位整数包装类型
 ///
 /// 用于表示数据库中的无符号整数，序列化时输出为裸数字而非嵌套对象；
@@ -131,6 +175,50 @@ impl std::ops::Deref for U16 {
     type Target = u16;
     fn deref(&self) -> &u16 {
         &self.0
+    }
+}
+
+// ========= SeaORM四件套 =========
+impl TryFrom<U16> for Value {
+    type Error = std::num::TryFromIntError;
+    fn try_from(id: U16) -> Result<Self, Self::Error> {
+        Ok(Value::SmallInt(Some(id.0 as i16)))
+    }
+}
+
+impl TryGetable for U16 {
+    fn try_get_by<I: ColIdx>(res: &QueryResult, idx: I) -> Result<Self, TryGetError> {
+        {
+            let v: i16 = <i16 as TryGetable>::try_get_by(res, idx)?;
+            Ok(Self(v as u16))
+        }
+    }
+}
+
+impl ValueType for U16 {
+    fn try_from(v: Value) -> Result<Self, ValueTypeErr> {
+        match v {
+            Value::SmallInt(Some(x)) => Ok(Self(x as u16)),
+            _ => Err(ValueTypeErr),
+        }
+    }
+
+    fn type_name() -> String {
+        "U16".to_string()
+    }
+
+    fn array_type() -> ArrayType {
+        ArrayType::SmallInt
+    }
+
+    fn column_type() -> ColumnType {
+        ColumnType::SmallInteger
+    }
+}
+
+impl Nullable for U16 {
+    fn null() -> Value {
+        Value::SmallInt(None)
     }
 }
 
@@ -466,6 +554,50 @@ impl std::ops::Deref for U128 {
     type Target = u128;
     fn deref(&self) -> &u128 {
         &self.0
+    }
+}
+
+// ========= SeaORM四件套 =========
+impl TryFrom<U128> for Value {
+    type Error = std::num::TryFromIntError;
+    fn try_from(id: U128) -> Result<Self, Self::Error> {
+        Ok(Value::BigInt(Some(id.0 as i64)))
+    }
+}
+
+impl TryGetable for U128 {
+    fn try_get_by<I: ColIdx>(res: &QueryResult, idx: I) -> Result<Self, TryGetError> {
+        {
+            let v: i64 = <i64 as TryGetable>::try_get_by(res, idx)?;
+            Ok(Self(v as u128))
+        }
+    }
+}
+
+impl ValueType for U128 {
+    fn try_from(v: Value) -> Result<Self, ValueTypeErr> {
+        match v {
+            Value::BigInt(Some(x)) => Ok(Self(x as u128)),
+            _ => Err(ValueTypeErr),
+        }
+    }
+
+    fn type_name() -> String {
+        "U128".to_string()
+    }
+
+    fn array_type() -> ArrayType {
+        ArrayType::BigInt
+    }
+
+    fn column_type() -> ColumnType {
+        ColumnType::BigInteger
+    }
+}
+
+impl Nullable for U128 {
+    fn null() -> Value {
+        Value::BigInt(None)
     }
 }
 
