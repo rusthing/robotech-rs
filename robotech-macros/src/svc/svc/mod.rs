@@ -735,8 +735,306 @@ pub(crate) fn svc_macro(args: SvcArgs, input: ItemStruct) -> TokenStream {
         });
     }
 
+    // ==================== Bean Searcher 兼容检索方法 ====================
+
+    // 生成search_by_id方法
+    if !skip.contains("search_by_id") {
+        let before_call = resolve_hook("search_by_id", false, &args.before, &args.before_write, Some(quote! { params }), None);
+        let after_call = resolve_hook("search_by_id", false, &args.after, &args.after_write, Some(quote! { one }), Some(quote! { params }));
+        generated_methods.push(quote! {
+        /// # 按 ID 检索单条记录
+        ///
+        /// 在 `id` 条件之上叠加检索参数中的附加条件，返回单条记录
+        ///
+        /// ## 参数
+        /// * `id` - 要查询的记录 ID
+        /// * `params` - 检索参数（字段条件按 Bean Searcher 规则，全局参数用原生 `_` 前缀）
+        /// * `db` - 数据库连接，如果未提供则使用全局数据库连接
+        ///
+        /// ## 返回值
+        /// * `Ok(Ro<Vo>)` - 查询成功，记录不存在时 `extra` 为 `None`
+        /// * `Err(SvcError)` - 查询失败
+        #[db_unwrap]
+        #[log_call]
+        pub async fn search_by_id<C>(
+            id: U64,
+            params: SearchParams,
+            #[skip_log]
+            db: Option<&C>
+        ) -> Result<Ro<#vo_name>, SvcError>
+        where
+            C: ConnectionTrait,
+        {
+            #before_call
+            let one = #dao_name::search_by_id::<_, #vo_name>(id, &params, db).await?;
+            #after_call
+            Ok(Ro::success("查询成功".to_string()).extra(one))
+        }
+        });
+    }
+
+    // 生成search_by_condition方法
+    if !skip.contains("search_by_condition") {
+        let before_call = resolve_hook("search_by_condition", false, &args.before, &args.before_write, Some(quote! { params }), None);
+        let after_call = resolve_hook("search_by_condition", false, &args.after, &args.after_write, Some(quote! { one }), Some(quote! { params }));
+        generated_methods.push(quote! {
+        /// # 按检索参数获取单条记录
+        ///
+        /// 根据检索参数查询数据库中的记录
+        ///
+        /// ## 参数
+        /// * `params` - 检索参数（字段条件按 Bean Searcher 规则，全局参数用原生 `_` 前缀）
+        /// * `db` - 数据库连接，如果未提供则使用全局数据库连接
+        ///
+        /// ## 返回值
+        /// * `Ok(Ro<Vo>)` - 查询成功，记录不存在时 `extra` 为 `None`
+        /// * `Err(SvcError)` - 查询失败
+        #[db_unwrap]
+        #[log_call]
+        pub async fn search_by_condition<C>(
+            params: SearchParams,
+            #[skip_log]
+            db: Option<&C>
+        ) -> Result<Ro<#vo_name>, SvcError>
+        where
+            C: ConnectionTrait,
+        {
+            #before_call
+            let one = #dao_name::search_by_condition::<_, #vo_name>(&params, db).await?;
+            #after_call
+            Ok(Ro::success("查询成功".to_string()).extra(one))
+        }
+        });
+    }
+
+    // 生成search_list方法
+    if !skip.contains("search_list") {
+        let before_call = resolve_hook("search_list", false, &args.before, &args.before_write, Some(quote! { params }), None);
+        let after_call = resolve_hook("search_list", false, &args.after, &args.after_write, Some(quote! { all }), Some(quote! { params }));
+        generated_methods.push(quote! {
+        /// # 按检索参数查询记录列表
+        ///
+        /// 根据检索参数查询数据库中的记录列表，支持排序
+        ///
+        /// ## 参数
+        /// * `params` - 检索参数（字段条件按 Bean Searcher 规则，全局参数用原生 `_` 前缀）
+        /// * `db` - 数据库连接，如果未提供则使用全局数据库连接
+        ///
+        /// ## 返回值
+        /// * `Ok(Ro<Vec<Vo>>)` - 查询成功，返回记录列表
+        /// * `Err(SvcError)` - 查询失败
+        #[db_unwrap]
+        #[log_call]
+        pub async fn search_list<C>(
+            params: SearchParams,
+            #[skip_log]
+            db: Option<&C>
+        ) -> Result<Ro<Vec<#vo_name>>, SvcError>
+        where
+            C: ConnectionTrait,
+        {
+            #before_call
+            let all = #dao_name::search_list::<_, #vo_name>(&params, db).await?;
+            #after_call
+            Ok(Ro::success("查询成功".to_string()).extra(Some(all)))
+        }
+        });
+    }
+
+    // 生成search_page方法
+    if !skip.contains("search_page") {
+        let before_call = resolve_hook("search_page", false, &args.before, &args.before_write, Some(quote! { params }), None);
+        let after_call = resolve_hook("search_page", false, &args.after, &args.after_write, Some(quote! { models }), Some(quote! { params }));
+        generated_methods.push(quote! {
+        /// # 按检索参数分页查询记录列表
+        ///
+        /// 根据检索参数分页查询数据库中的记录列表，支持排序
+        ///
+        /// ## 参数
+        /// * `params` - 检索参数（含分页与排序；字段条件按 Bean Searcher 规则，全局参数用原生 `_` 前缀）
+        /// * `db` - 数据库连接，如果未提供则使用全局数据库连接
+        ///
+        /// ## 返回值
+        /// * `Ok(Ro<PageRx<Vo>>)` - 查询成功，返回分页结果
+        /// * `Err(SvcError)` - 查询失败
+        #[db_unwrap]
+        #[log_call]
+        pub async fn search_page<C>(
+            params: SearchParams,
+            #[skip_log]
+            db: Option<&C>
+        ) -> Result<Ro<PageRx<#vo_name>>, SvcError>
+        where
+            C: ConnectionTrait,
+        {
+            #before_call
+            let (page_num, total, models) =
+                #dao_name::search_page::<_, #vo_name>(&params, db).await?;
+            #after_call
+            Ok(Ro::success("查询成功".to_string()).extra(Some(PageRx::builder()
+                .total(total)
+                .page_num(page_num)
+                .list(models)
+                .build()
+            )))
+        }
+        });
+    }
+
+    // 生成search_ex_by_id方法
+    if !skip.contains("search_ex_by_id") {
+        let before_call = resolve_hook("search_ex_by_id", false, &args.before, &args.before_write, Some(quote! { params }), None);
+        let after_call = resolve_hook("search_ex_by_id", false, &args.after, &args.after_write, Some(quote! { one }), Some(quote! { params }));
+        generated_methods.push(quote! {
+        /// # 按 ID 检索单条记录(附带获取关联表的信息)
+        ///
+        /// 在 `id` 条件之上叠加检索参数中的附加条件，返回单条记录及其关联数据
+        ///
+        /// ## 参数
+        /// * `id` - 要查询的记录 ID
+        /// * `params` - 检索参数（字段条件按 Bean Searcher 规则，全局参数用原生 `_` 前缀）
+        /// * `db` - 数据库连接，如果未提供则使用全局数据库连接
+        ///
+        /// ## 返回值
+        /// * `Ok(Ro<ExVo>)` - 查询成功，记录不存在时 `extra` 为 `None`
+        /// * `Err(SvcError)` - 查询失败
+        #[db_unwrap]
+        #[log_call]
+        pub async fn search_ex_by_id<C>(
+            id: U64,
+            params: SearchParams,
+            #[skip_log]
+            db: Option<&C>
+        ) -> Result<Ro<#ex_vo_name>, SvcError>
+        where
+            C: ConnectionTrait,
+        {
+            #before_call
+            let one: Option<#ex_vo_name> = #dao_name::search_ex_by_id(id, &params, db)
+                .await?
+                .map(|m| m.into());
+            #after_call
+            Ok(Ro::success("查询成功".to_string()).extra(one))
+        }
+        });
+    }
+
+    // 生成search_ex_by_condition方法
+    if !skip.contains("search_ex_by_condition") {
+        let before_call = resolve_hook("search_ex_by_condition", false, &args.before, &args.before_write, Some(quote! { params }), None);
+        let after_call = resolve_hook("search_ex_by_condition", false, &args.after, &args.after_write, Some(quote! { one }), Some(quote! { params }));
+        generated_methods.push(quote! {
+        /// # 按检索参数获取单条记录(附带获取关联表的信息)
+        ///
+        /// 根据检索参数查询记录及其关联数据
+        ///
+        /// ## 参数
+        /// * `params` - 检索参数（字段条件按 Bean Searcher 规则，全局参数用原生 `_` 前缀）
+        /// * `db` - 数据库连接，如果未提供则使用全局数据库连接
+        ///
+        /// ## 返回值
+        /// * `Ok(Ro<ExVo>)` - 查询成功，记录不存在时 `extra` 为 `None`
+        /// * `Err(SvcError)` - 查询失败
+        #[db_unwrap]
+        #[log_call]
+        pub async fn search_ex_by_condition<C>(
+            params: SearchParams,
+            #[skip_log]
+            db: Option<&C>
+        ) -> Result<Ro<#ex_vo_name>, SvcError>
+        where
+            C: ConnectionTrait,
+        {
+            #before_call
+            let one: Option<#ex_vo_name> = #dao_name::search_ex_by_condition(&params, db)
+                .await?
+                .map(|m| m.into());
+            #after_call
+            Ok(Ro::success("查询成功".to_string()).extra(one))
+        }
+        });
+    }
+
+    // 生成search_list_ex方法
+    if !skip.contains("search_list_ex") {
+        let before_call = resolve_hook("search_list_ex", false, &args.before, &args.before_write, Some(quote! { params }), None);
+        let after_call = resolve_hook("search_list_ex", false, &args.after, &args.after_write, Some(quote! { all }), Some(quote! { params }));
+        generated_methods.push(quote! {
+        /// # 按检索参数查询记录列表(附带获取关联表的信息)
+        ///
+        /// 根据检索参数查询记录列表及其关联数据，支持排序
+        ///
+        /// ## 参数
+        /// * `params` - 检索参数（字段条件按 Bean Searcher 规则，全局参数用原生 `_` 前缀）
+        /// * `db` - 数据库连接，如果未提供则使用全局数据库连接
+        ///
+        /// ## 返回值
+        /// * `Ok(Ro<Vec<ExVo>>)` - 查询成功，返回记录列表
+        /// * `Err(SvcError)` - 查询失败
+        #[db_unwrap]
+        #[log_call]
+        pub async fn search_list_ex<C>(
+            params: SearchParams,
+            #[skip_log]
+            db: Option<&C>
+        ) -> Result<Ro<Vec<#ex_vo_name>>, SvcError>
+        where
+            C: ConnectionTrait,
+        {
+            #before_call
+            let all: Vec<#ex_vo_name> = #dao_name::search_list_ex(&params, db)
+                .await?
+                .into_iter()
+                .map(|m| m.into())
+                .collect();
+            #after_call
+            Ok(Ro::success("查询成功".to_string()).extra(Some(all)))
+        }
+        });
+    }
+
+    // 生成search_page_ex方法
+    if !skip.contains("search_page_ex") {
+        let before_call = resolve_hook("search_page_ex", false, &args.before, &args.before_write, Some(quote! { params }), None);
+        let after_call = resolve_hook("search_page_ex", false, &args.after, &args.after_write, Some(quote! { list }), Some(quote! { params }));
+        generated_methods.push(quote! {
+        /// # 按检索参数分页查询记录列表(附带获取关联表的信息)
+        ///
+        /// 根据检索参数分页查询记录列表及其关联数据，支持排序
+        ///
+        /// ## 参数
+        /// * `params` - 检索参数（含分页与排序；字段条件按 Bean Searcher 规则，全局参数用原生 `_` 前缀）
+        /// * `db` - 数据库连接，如果未提供则使用全局数据库连接
+        ///
+        /// ## 返回值
+        /// * `Ok(Ro<PageRx<ExVo>>)` - 查询成功，返回分页结果
+        /// * `Err(SvcError)` - 查询失败
+        #[db_unwrap]
+        #[log_call]
+        pub async fn search_page_ex<C>(
+            params: SearchParams,
+            #[skip_log]
+            db: Option<&C>
+        ) -> Result<Ro<PageRx<#ex_vo_name>>, SvcError>
+        where
+            C: ConnectionTrait,
+        {
+            #before_call
+            let (page_num, total, models) = #dao_name::search_page_ex(&params, db).await?;
+            let list: Vec<#ex_vo_name> = models.into_iter().map(|m| m.into()).collect();
+            #after_call
+            Ok(Ro::success("查询成功".to_string()).extra(Some(PageRx::builder()
+                .total(total)
+                .page_num(page_num)
+                .list(list)
+                .build()
+            )))
+        }
+        });
+    }
+
     let expanded = quote! {
-        use robotech::dao::{begin_transaction, build_like_condition};
+        use robotech::dao::{begin_transaction, build_like_condition, SearchParams};
         use robotech::api::U64;
         use robotech::api::Ro;
         use robotech::api::rx::PageRx;

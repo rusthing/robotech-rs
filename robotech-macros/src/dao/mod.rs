@@ -732,12 +732,303 @@ pub(super) fn dao_macro(args: DaoArgs, input: ItemStruct) -> TokenStream {
     });
     }
 
+    // ==================== Bean Searcher 兼容检索方法 ====================
+
+    // 生成search_by_id方法
+    if !skip.contains("search_by_id") {
+        generated_members.push(quote! {
+            /// # 按 ID 检索单条记录
+            ///
+            /// 在 `id` 条件之上叠加检索参数中的附加条件，返回单条记录
+            ///
+            /// ## 参数
+            /// * `id` - 要查询的记录 ID
+            /// * `params` - 检索参数（字段条件按 Bean Searcher 规则，全局参数用原生 `_` 前缀）
+            /// * `db` - 数据库连接 trait 对象
+            ///
+            /// ## 返回值
+            /// 记录存在时返回 `Some(M)`，不存在返回 `None`；查询失败返回相应的错误信息
+            pub async fn search_by_id<C, M>(
+                id: U64,
+                params: &SearchParams,
+                db: &C,
+            ) -> Result<Option<M>, DaoError>
+            where
+                C: ConnectionTrait,
+                M: FromQueryResult,
+            {
+                let condition = build_search_condition(params, Self::LIKE_COLUMNS);
+                Entity::find_by_id(id.value() as i64)
+                    .filter(condition)
+                    .into_model::<M>()
+                    .one(db)
+                    .await
+                    .map_err(|e| DaoError::parse_db_err(e))
+            }
+        });
+    }
+
+    // 生成search_by_condition方法
+    if !skip.contains("search_by_condition") {
+        generated_members.push(quote! {
+            /// # 按检索参数获取单条记录
+            ///
+            /// 根据检索参数查询数据库中的记录
+            ///
+            /// ## 参数
+            /// * `params` - 检索参数（字段条件按 Bean Searcher 规则，全局参数用原生 `_` 前缀）
+            /// * `db` - 数据库连接 trait 对象
+            ///
+            /// ## 返回值
+            /// 记录存在时返回 `Some(M)`，不存在返回 `None`；查询失败返回相应的错误信息
+            pub async fn search_by_condition<C, M>(
+                params: &SearchParams,
+                db: &C,
+            ) -> Result<Option<M>, DaoError>
+            where
+                C: ConnectionTrait,
+                M: FromQueryResult,
+            {
+                let condition = build_search_condition(params, Self::LIKE_COLUMNS);
+                Entity::find()
+                    .filter(condition)
+                    .into_model::<M>()
+                    .one(db)
+                    .await
+                    .map_err(|e| DaoError::parse_db_err(e))
+            }
+        });
+    }
+
+    // 生成search_list方法
+    if !skip.contains("search_list") {
+        generated_members.push(quote! {
+            /// # 按检索参数查询记录列表
+            ///
+            /// 根据检索参数查询数据库中的记录列表，支持排序
+            ///
+            /// ## 参数
+            /// * `params` - 检索参数（字段条件按 Bean Searcher 规则，全局参数用原生 `_` 前缀）
+            /// * `db` - 数据库连接 trait 对象
+            ///
+            /// ## 返回值
+            /// 返回查询到的记录列表；查询失败返回相应的错误信息
+            pub async fn search_list<C, M>(
+                params: &SearchParams,
+                db: &C,
+            ) -> Result<Vec<M>, DaoError>
+            where
+                C: ConnectionTrait,
+                M: FromQueryResult,
+            {
+                let condition = build_search_condition(params, Self::LIKE_COLUMNS);
+                params
+                    .apply_order_by::<Column, _>(Entity::find().filter(condition))
+                    .into_model::<M>()
+                    .all(db)
+                    .await
+                    .map_err(|e| DaoError::parse_db_err(e))
+            }
+        });
+    }
+
+    // 生成search_page方法
+    if !skip.contains("search_page") {
+        generated_members.push(quote! {
+            /// # 按检索参数分页查询记录列表
+            ///
+            /// 根据检索参数分页查询数据库中的记录列表，支持排序
+            ///
+            /// ## 参数
+            /// * `params` - 检索参数（含分页与排序；字段条件按 Bean Searcher 规则，全局参数用原生 `_` 前缀）
+            /// * `db` - 数据库连接 trait 对象
+            ///
+            /// ## 返回值
+            /// 返回 `(页码, 总条数, 记录列表)` 三元组；查询失败返回相应的错误信息
+            pub async fn search_page<C, M>(
+                params: &SearchParams,
+                db: &C,
+            ) -> Result<(U64, U64, Vec<M>), DaoError>
+            where
+                C: ConnectionTrait,
+                M: FromQueryResult + Send + Sync,
+            {
+                let condition = build_search_condition(params, Self::LIKE_COLUMNS);
+                let page_num = params.page();
+                let page_size = params.size();
+                let paginator = params
+                    .apply_order_by::<Column, _>(Entity::find().filter(condition))
+                    .into_model::<M>()
+                    .paginate(db, page_size.value());
+                let total = paginator.num_items().await.map_err(DaoError::from)?;
+                if total == 0 {
+                    return Ok((U64(1), U64(0), vec![]));
+                }
+                let total_pages = total / page_size.value()
+                    + if total % page_size.value() > 0 { 1 } else { 0 };
+                let page_num = if page_num.value() > total_pages {
+                    U64(total_pages)
+                } else {
+                    page_num
+                };
+                let models = paginator
+                    .fetch_page(page_num.value() - 1)
+                    .await
+                    .map_err(|e| DaoError::parse_db_err(e))?;
+                Ok((page_num, U64(total), models))
+            }
+        });
+    }
+
+    // 生成search_ex_by_id方法
+    if !skip.contains("search_ex_by_id") {
+        generated_members.push(quote! {
+            /// # 按 ID 检索单条记录(附带获取关联表的信息)
+            ///
+            /// 在 `id` 条件之上叠加检索参数中的附加条件，返回单条记录及其关联数据
+            ///
+            /// ## 参数
+            /// * `id` - 要查询的记录 ID
+            /// * `params` - 检索参数（字段条件按 Bean Searcher 规则，全局参数用原生 `_` 前缀）
+            /// * `db` - 数据库连接 trait 对象
+            ///
+            /// ## 返回值
+            /// 记录存在时返回 `Some(ModelEx)`，不存在返回 `None`；查询失败返回相应的错误信息
+            pub async fn search_ex_by_id<C>(
+                id: U64,
+                params: &SearchParams,
+                db: &C,
+            ) -> Result<Option<ModelEx>, DaoError>
+            where
+                C: ConnectionTrait,
+            {
+                let condition = build_search_condition(params, Self::LIKE_COLUMNS);
+                Entity::load()
+                    .filter_by_id(id.value() as i64)
+                    .filter(condition)
+                    #(#find_with_related_calls)*
+                    .one(db)
+                    .await
+                    .map_err(|e| DaoError::parse_db_err(e))
+            }
+        });
+    }
+
+    // 生成search_ex_by_condition方法
+    if !skip.contains("search_ex_by_condition") {
+        generated_members.push(quote! {
+            /// # 按检索参数获取单条记录(附带获取关联表的信息)
+            ///
+            /// 根据检索参数查询记录及其关联数据
+            ///
+            /// ## 参数
+            /// * `params` - 检索参数（字段条件按 Bean Searcher 规则，全局参数用原生 `_` 前缀）
+            /// * `db` - 数据库连接 trait 对象
+            ///
+            /// ## 返回值
+            /// 记录存在时返回 `Some(ModelEx)`，不存在返回 `None`；查询失败返回相应的错误信息
+            pub async fn search_ex_by_condition<C>(
+                params: &SearchParams,
+                db: &C,
+            ) -> Result<Option<ModelEx>, DaoError>
+            where
+                C: ConnectionTrait,
+            {
+                let condition = build_search_condition(params, Self::LIKE_COLUMNS);
+                Entity::load()
+                    .filter(condition)
+                    #(#find_with_related_calls)*
+                    .one(db)
+                    .await
+                    .map_err(|e| DaoError::parse_db_err(e))
+            }
+        });
+    }
+
+    // 生成search_list_ex方法
+    if !skip.contains("search_list_ex") {
+        generated_members.push(quote! {
+            /// # 按检索参数查询记录列表(附带获取关联表的信息)
+            ///
+            /// 根据检索参数查询记录列表及其关联数据，支持排序
+            ///
+            /// ## 参数
+            /// * `params` - 检索参数（字段条件按 Bean Searcher 规则，全局参数用原生 `_` 前缀）
+            /// * `db` - 数据库连接 trait 对象
+            ///
+            /// ## 返回值
+            /// 返回查询到的记录列表；查询失败返回相应的错误信息
+            pub async fn search_list_ex<C>(
+                params: &SearchParams,
+                db: &C,
+            ) -> Result<Vec<ModelEx>, DaoError>
+            where
+                C: ConnectionTrait,
+            {
+                let condition = build_search_condition(params, Self::LIKE_COLUMNS);
+                params
+                    .apply_order_by::<Column, _>(Entity::load().filter(condition))
+                    #(#find_with_related_calls)*
+                    .all(db)
+                    .await
+                    .map_err(|e| DaoError::parse_db_err(e))
+            }
+        });
+    }
+
+    // 生成search_page_ex方法
+    if !skip.contains("search_page_ex") {
+        generated_members.push(quote! {
+            /// # 按检索参数分页查询记录列表(附带获取关联表的信息)
+            ///
+            /// 根据检索参数分页查询记录列表及其关联数据，支持排序
+            ///
+            /// ## 参数
+            /// * `params` - 检索参数（含分页与排序；字段条件按 Bean Searcher 规则，全局参数用原生 `_` 前缀）
+            /// * `db` - 数据库连接 trait 对象
+            ///
+            /// ## 返回值
+            /// 返回 `(页码, 总条数, 记录列表)` 三元组；查询失败返回相应的错误信息
+            pub async fn search_page_ex<C>(
+                params: &SearchParams,
+                db: &C,
+            ) -> Result<(U64, U64, Vec<ModelEx>), DaoError>
+            where
+                C: ConnectionTrait,
+            {
+                let condition = build_search_condition(params, Self::LIKE_COLUMNS);
+                let page_num = params.page();
+                let page_size = params.size();
+                let paginator = params
+                    .apply_order_by::<Column, _>(Entity::load().filter(condition))
+                    #(#find_with_related_calls)*
+                    .paginate(db, page_size.value());
+                let total = paginator.num_items().await.map_err(DaoError::from)?;
+                if total == 0 {
+                    return Ok((U64(1), U64(0), vec![]));
+                }
+                let total_pages = total / page_size.value()
+                    + if total % page_size.value() > 0 { 1 } else { 0 };
+                let page_num = if page_num.value() > total_pages {
+                    U64(total_pages)
+                } else {
+                    page_num
+                };
+                let models = paginator
+                    .fetch_page(page_num.value() - 1)
+                    .await
+                    .map_err(|e| DaoError::parse_db_err(e))?;
+                Ok((page_num, U64(total), models))
+            }
+        });
+    }
+
     let mo_crate_path = mo_crate.as_deref().unwrap_or("crate");
     let mo_crate_token: TokenStream =
         syn::parse_str(mo_crate_path).unwrap_or_else(|_| quote! { crate });
 
     let expanded = quote! {
-        use robotech::dao::{add_order_by, DaoError};
+        use robotech::dao::{add_order_by, build_search_condition, DaoError, SearchParams};
         use robotech::api::U64;
         use sea_orm::{
             ActiveModelTrait, ActiveValue, Condition, ConnectionTrait, EntityTrait, FromQueryResult, PaginatorTrait, QueryFilter, DeleteResult

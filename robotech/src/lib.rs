@@ -10,7 +10,7 @@
 //! - `cache`：缓存抽象（`local-cache` 本地缓存，`distributed-cache` 分布式缓存）
 //! - `cfg`：配置构建与解析
 //! - `cst`：常量定义
-//! - `dao`：数据访问对象（需启用 feature `db`）
+//! - `dao`：数据访问对象（完整能力需启用 feature `db`；仅启用 `api-client` 时只暴露检索参数类型）
 //! - `db`：数据库连接管理（需启用 feature `db`）
 //! - `env`：环境信息
 //! - `log`：日志初始化与热更新
@@ -33,7 +33,8 @@ pub mod app;
 pub mod cache;
 pub mod cfg;
 pub mod cst;
-#[cfg(feature = "db")]
+// 检索参数类型（`bean_searcher_utils`）不依赖数据库连接，因此在 feign 客户端侧同样需要可用
+#[cfg(any(feature = "db", feature = "api-client"))]
 pub mod dao;
 #[cfg(feature = "db")]
 pub mod db;

@@ -47,6 +47,15 @@ pub(crate) fn feign_macro(input: ItemStruct) -> TokenStream {
     let get_ex_by_query_dto_path = format!("{crud_path}/ex");
     let list_ex_by_query_dto_path = format!("{crud_path}/list-ex");
     let page_ex_by_query_dto_path = format!("{crud_path}/page-ex");
+    let search_root_path = format!("{crud_path}/search");
+    let search_by_id_path = format!("{search_root_path}/{{}}");
+    let search_by_condition_path = search_root_path.clone();
+    let search_list_path = format!("{search_root_path}/list");
+    let search_page_path = format!("{search_root_path}/page");
+    let search_ex_by_id_path = format!("{search_root_path}/ex/{{}}");
+    let search_ex_by_condition_path = format!("{search_root_path}/ex");
+    let search_list_ex_path = format!("{search_root_path}/list-ex");
+    let search_page_ex_path = format!("{search_root_path}/page-ex");
     let vo_name = format_ident!("{}Vo", entity_name);
     let ex_vo_name = format_ident!("{}ExVo", entity_name);
     let add_dto_name = format_ident!("{}AddDto", entity_name);
@@ -320,6 +329,176 @@ pub(crate) fn feign_macro(input: ItemStruct) -> TokenStream {
                     &url,
                     ::core::option::Option::Some(dto),
                     ::core::option::Option::None::<&#query_dto_name>,
+                    ::core::option::Option::Some(&headers),
+                )
+                .await
+        }
+    });
+
+    // search_by_id
+    generated_methods.push(quote! {
+        pub async fn search_by_id(
+            &self,
+            id: u64,
+            params: &robotech::dao::SearchParams,
+            current_user_id: u64,
+        ) -> ::core::result::Result<robotech::api::Ro<#vo_name>, robotech::api_client::ApiClientError> {
+            let url = ::std::format!(#search_by_id_path, id);
+            let headers = Self::build_headers(current_user_id, None)?;
+            self.client
+                .request::<robotech::dao::SearchParams, #vo_name>(
+                    ::reqwest::Method::GET,
+                    &url,
+                    ::core::option::Option::Some(params),
+                    ::core::option::Option::None::<&robotech::dao::SearchParams>,
+                    ::core::option::Option::Some(&headers),
+                )
+                .await
+        }
+    });
+
+    // search_by_condition
+    generated_methods.push(quote! {
+        pub async fn search_by_condition(
+            &self,
+            params: &robotech::dao::SearchParams,
+            current_user_id: u64,
+        ) -> ::core::result::Result<robotech::api::Ro<#vo_name>, robotech::api_client::ApiClientError> {
+            let url = #search_by_condition_path.to_string();
+            let headers = Self::build_headers(current_user_id, None)?;
+            self.client
+                .request::<robotech::dao::SearchParams, #vo_name>(
+                    ::reqwest::Method::GET,
+                    &url,
+                    ::core::option::Option::Some(params),
+                    ::core::option::Option::None::<&robotech::dao::SearchParams>,
+                    ::core::option::Option::Some(&headers),
+                )
+                .await
+        }
+    });
+
+    // search_list
+    generated_methods.push(quote! {
+        pub async fn search_list(
+            &self,
+            params: &robotech::dao::SearchParams,
+            current_user_id: u64,
+        ) -> ::core::result::Result<robotech::api::Ro<::std::vec::Vec<#vo_name>>, robotech::api_client::ApiClientError> {
+            let url = #search_list_path.to_string();
+            let headers = Self::build_headers(current_user_id, None)?;
+            self.client
+                .request::<robotech::dao::SearchParams, ::std::vec::Vec<#vo_name>>(
+                    ::reqwest::Method::GET,
+                    &url,
+                    ::core::option::Option::Some(params),
+                    ::core::option::Option::None::<&robotech::dao::SearchParams>,
+                    ::core::option::Option::Some(&headers),
+                )
+                .await
+        }
+    });
+
+    // search_page
+    generated_methods.push(quote! {
+        pub async fn search_page(
+            &self,
+            params: &robotech::dao::SearchParams,
+            current_user_id: u64,
+        ) -> ::core::result::Result<robotech::api::Ro<robotech::api::rx::PageRx<#vo_name>>, robotech::api_client::ApiClientError> {
+            let url = #search_page_path.to_string();
+            let headers = Self::build_headers(current_user_id, None)?;
+            self.client
+                .request::<robotech::dao::SearchParams, robotech::api::rx::PageRx<#vo_name>>(
+                    ::reqwest::Method::GET,
+                    &url,
+                    ::core::option::Option::Some(params),
+                    ::core::option::Option::None::<&robotech::dao::SearchParams>,
+                    ::core::option::Option::Some(&headers),
+                )
+                .await
+        }
+    });
+
+    // search_ex_by_id
+    generated_methods.push(quote! {
+        pub async fn search_ex_by_id(
+            &self,
+            id: u64,
+            params: &robotech::dao::SearchParams,
+            current_user_id: u64,
+        ) -> ::core::result::Result<robotech::api::Ro<#ex_vo_name>, robotech::api_client::ApiClientError> {
+            let url = ::std::format!(#search_ex_by_id_path, id);
+            let headers = Self::build_headers(current_user_id, None)?;
+            self.client
+                .request::<robotech::dao::SearchParams, #ex_vo_name>(
+                    ::reqwest::Method::GET,
+                    &url,
+                    ::core::option::Option::Some(params),
+                    ::core::option::Option::None::<&robotech::dao::SearchParams>,
+                    ::core::option::Option::Some(&headers),
+                )
+                .await
+        }
+    });
+
+    // search_ex_by_condition
+    generated_methods.push(quote! {
+        pub async fn search_ex_by_condition(
+            &self,
+            params: &robotech::dao::SearchParams,
+            current_user_id: u64,
+        ) -> ::core::result::Result<robotech::api::Ro<#ex_vo_name>, robotech::api_client::ApiClientError> {
+            let url = #search_ex_by_condition_path.to_string();
+            let headers = Self::build_headers(current_user_id, None)?;
+            self.client
+                .request::<robotech::dao::SearchParams, #ex_vo_name>(
+                    ::reqwest::Method::GET,
+                    &url,
+                    ::core::option::Option::Some(params),
+                    ::core::option::Option::None::<&robotech::dao::SearchParams>,
+                    ::core::option::Option::Some(&headers),
+                )
+                .await
+        }
+    });
+
+    // search_list_ex
+    generated_methods.push(quote! {
+        pub async fn search_list_ex(
+            &self,
+            params: &robotech::dao::SearchParams,
+            current_user_id: u64,
+        ) -> ::core::result::Result<robotech::api::Ro<::std::vec::Vec<#ex_vo_name>>, robotech::api_client::ApiClientError> {
+            let url = #search_list_ex_path.to_string();
+            let headers = Self::build_headers(current_user_id, None)?;
+            self.client
+                .request::<robotech::dao::SearchParams, ::std::vec::Vec<#ex_vo_name>>(
+                    ::reqwest::Method::GET,
+                    &url,
+                    ::core::option::Option::Some(params),
+                    ::core::option::Option::None::<&robotech::dao::SearchParams>,
+                    ::core::option::Option::Some(&headers),
+                )
+                .await
+        }
+    });
+
+    // search_page_ex
+    generated_methods.push(quote! {
+        pub async fn search_page_ex(
+            &self,
+            params: &robotech::dao::SearchParams,
+            current_user_id: u64,
+        ) -> ::core::result::Result<robotech::api::Ro<robotech::api::rx::PageRx<#ex_vo_name>>, robotech::api_client::ApiClientError> {
+            let url = #search_page_ex_path.to_string();
+            let headers = Self::build_headers(current_user_id, None)?;
+            self.client
+                .request::<robotech::dao::SearchParams, robotech::api::rx::PageRx<#ex_vo_name>>(
+                    ::reqwest::Method::GET,
+                    &url,
+                    ::core::option::Option::Some(params),
+                    ::core::option::Option::None::<&robotech::dao::SearchParams>,
                     ::core::option::Option::Some(&headers),
                 )
                 .await

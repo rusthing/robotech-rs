@@ -109,6 +109,15 @@ pub(crate) fn router_macro(args: RouterArgs, input: ItemStruct) -> TokenStream {
     let list_ex_by_query_dto_path = format!("{crud_path}/list-ex");
     let page_by_query_dto_path = format!("{crud_path}/page");
     let page_ex_by_query_dto_path = format!("{crud_path}/page-ex");
+    let search_root_path = format!("{crud_path}/search");
+    let search_by_id_path = format!("{search_root_path}/{{id}}");
+    let search_by_condition_path = search_root_path.clone();
+    let search_list_path = format!("{search_root_path}/list");
+    let search_page_path = format!("{search_root_path}/page");
+    let search_ex_by_id_path = format!("{search_root_path}/ex/{{id}}");
+    let search_ex_by_condition_path = format!("{search_root_path}/ex");
+    let search_list_ex_path = format!("{search_root_path}/list-ex");
+    let search_page_ex_path = format!("{search_root_path}/page-ex");
     let mut routes = vec![];
 
     for route_args in &args.routes {
@@ -129,6 +138,15 @@ pub(crate) fn router_macro(args: RouterArgs, input: ItemStruct) -> TokenStream {
         routes.push(quote! {#page_ex_by_query_dto_path, get(page_ex_by_query_dto)});
         routes.push(quote! {#get_by_id_path, get(get_by_id)}); // 这个放在后面，避免覆盖前面的list和page
         routes.push(quote! {#get_ex_by_id_path, get(get_ex_by_id)}); // 这个放在后面，避免覆盖前面的list和page
+        // Bean Searcher 兼容检索路由（静态路径在前，`{id}` 路径在后）
+        routes.push(quote! {#search_by_condition_path, get(search_by_condition)});
+        routes.push(quote! {#search_ex_by_condition_path, get(search_ex_by_condition)});
+        routes.push(quote! {#search_ex_by_id_path, get(search_ex_by_id)});
+        routes.push(quote! {#search_list_path, get(search_list)});
+        routes.push(quote! {#search_list_ex_path, get(search_list_ex)});
+        routes.push(quote! {#search_page_path, get(search_page)});
+        routes.push(quote! {#search_page_ex_path, get(search_page_ex)});
+        routes.push(quote! {#search_by_id_path, get(search_by_id)}); // 这个放在最后，避免覆盖前面的list/page/ex
     }
 
     let expanded = quote! {

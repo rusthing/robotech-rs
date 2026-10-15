@@ -85,6 +85,15 @@ pub(crate) fn ctrl_macro(args: CtrlArgs, input: ItemStruct) -> TokenStream {
     let list_ex_by_query_dto_path = format!("{crud_path}/list-ex");
     let page_by_query_dto_path = format!("{crud_path}/page");
     let page_ex_by_query_dto_path = format!("{crud_path}/page-ex");
+    let search_root_path = format!("{crud_path}/search");
+    let search_by_id_path = format!("{search_root_path}/{{id}}");
+    let search_by_condition_path = search_root_path.clone();
+    let search_list_path = format!("{search_root_path}/list");
+    let search_page_path = format!("{search_root_path}/page");
+    let search_ex_by_id_path = format!("{search_root_path}/ex/{{id}}");
+    let search_ex_by_condition_path = format!("{search_root_path}/ex");
+    let search_list_ex_path = format!("{search_root_path}/list-ex");
+    let search_page_ex_path = format!("{search_root_path}/page-ex");
     let dto_module = format_ident!("{module_name}_dto");
     let svc_name = format_ident!("{}Svc", entity_name);
     let vo_name = format_ident!("{}Vo", entity_name);
@@ -547,6 +556,260 @@ pub(crate) fn ctrl_macro(args: CtrlArgs, input: ItemStruct) -> TokenStream {
     });
     }
 
+    // ==================== Bean Searcher 兼容检索接口 ====================
+
+    // 生成search_by_id方法
+    if !skip.contains("search_by_id") {
+        generated_methods.push(quote! {
+        /// # 按 ID 检索单条记录
+        ///
+        /// 在 `id` 条件之上叠加查询串中的附加检索条件，返回单条记录
+        ///
+        /// ## 请求参数
+        /// * `id` - 记录的唯一标识符，类型为U64
+        /// * 其余查询串参数按「字段条件」规则解析（如 `name=Jack&age-op=gt&age=20`），全局参数用原生 `_` 前缀
+        ///
+        /// ## 返回值
+        /// * 成功时返回对应的记录信息，记录不存在时 `extra` 为 `None`
+        /// * 失败时返回相应的错误信息
+        #[utoipa::path(
+            get,
+            path = #search_by_id_path,
+            params(
+                ("id" = U64, Path, description = "记录的唯一标识符")
+            ),
+            responses((status = OK, body = Ro<#vo_name>))
+        )]
+        #[debug_handler]
+        #[log_call]
+        pub async fn search_by_id(
+            Path(id): Path<U64>,
+            Query(query): Query<HashMap<String, String>>,
+        ) -> Result<Json<Ro<#vo_name>>, CtrlError> {
+            let params = SearchParams::from_query(&query);
+            let ro = #svc_name::search_by_id::<DatabaseConnection>(id, params, None).await?;
+            Ok(Json(ro))
+        }
+    });
+    }
+
+    // 生成search_by_condition方法
+    if !skip.contains("search_by_condition") {
+        generated_methods.push(quote! {
+        /// # 按检索参数获取单条记录
+        ///
+        /// 根据查询串中的检索条件获取对应记录的详细信息
+        ///
+        /// ## 查询参数
+        /// 字段条件按 Bean Searcher 规则解析，例如 `name=Jack&age-op=gt&age=20`
+        ///
+        /// ## 返回值
+        /// * 成功时返回对应的记录信息，记录不存在时 `extra` 为 `None`
+        /// * 失败时返回相应的错误信息
+        #[utoipa::path(
+            get,
+            path = #search_by_condition_path,
+            responses((status = OK, body = Ro<#vo_name>))
+        )]
+        #[debug_handler]
+        #[log_call]
+        pub async fn search_by_condition(
+            Query(query): Query<HashMap<String, String>>,
+        ) -> Result<Json<Ro<#vo_name>>, CtrlError> {
+            let params = SearchParams::from_query(&query);
+            let ro = #svc_name::search_by_condition::<DatabaseConnection>(params, None).await?;
+            Ok(Json(ro))
+        }
+    });
+    }
+
+    // 生成search_list方法
+    if !skip.contains("search_list") {
+        generated_methods.push(quote! {
+        /// # 按检索参数查询记录列表
+        ///
+        /// 根据查询串中的检索条件查询记录列表，支持排序
+        ///
+        /// ## 查询参数
+        /// 字段条件按 Bean Searcher 规则解析，全局参数用 robotech 原生 `_` 前缀，
+        /// 例如 `age-op=ge&age=20&_orderBy=age:desc`
+        ///
+        /// ## 返回值
+        /// * 成功时返回对应的记录列表
+        /// * 失败时返回相应的错误信息
+        #[utoipa::path(
+            get,
+            path = #search_list_path,
+            responses((status = OK, body = Ro<Vec<#vo_name>>))
+        )]
+        #[debug_handler]
+        #[log_call]
+        pub async fn search_list(
+            Query(query): Query<HashMap<String, String>>,
+        ) -> Result<Json<Ro<Vec<#vo_name>>>, CtrlError> {
+            let params = SearchParams::from_query(&query);
+            let ro = #svc_name::search_list::<DatabaseConnection>(params, None).await?;
+            Ok(Json(ro))
+        }
+    });
+    }
+
+    // 生成search_page方法
+    if !skip.contains("search_page") {
+        generated_methods.push(quote! {
+        /// # 按检索参数分页查询记录列表
+        ///
+        /// 根据查询串中的检索条件分页查询记录列表，支持排序
+        ///
+        /// ## 查询参数
+        /// 字段条件按 Bean Searcher 规则解析，全局参数用 robotech 原生 `_` 前缀，
+        /// 例如 `age-op=ge&age=20&_orderBy=age:desc&_page=1&_size=10`
+        ///
+        /// ## 返回值
+        /// * 成功时返回分页结果（页码、总条数、记录列表）
+        /// * 失败时返回相应的错误信息
+        #[utoipa::path(
+            get,
+            path = #search_page_path,
+            responses((status = OK, body = Ro<PageRx<#vo_name>>))
+        )]
+        #[debug_handler]
+        #[log_call]
+        pub async fn search_page(
+            Query(query): Query<HashMap<String, String>>,
+        ) -> Result<Json<Ro<PageRx<#vo_name>>>, CtrlError> {
+            let params = SearchParams::from_query(&query);
+            let ro = #svc_name::search_page::<DatabaseConnection>(params, None).await?;
+            Ok(Json(ro))
+        }
+    });
+    }
+
+    // 生成search_ex_by_id方法
+    if !skip.contains("search_ex_by_id") {
+        generated_methods.push(quote! {
+        /// # 按 ID 检索单条记录(附带获取关联表的信息)
+        ///
+        /// 在 `id` 条件之上叠加查询串中的附加检索条件，返回单条记录及其关联数据
+        ///
+        /// ## 请求参数
+        /// * `id` - 记录的唯一标识符，类型为U64
+        /// * 其余查询串参数按「字段条件」规则解析，全局参数用原生 `_` 前缀
+        ///
+        /// ## 返回值
+        /// * 成功时返回对应的记录信息，记录不存在时 `extra` 为 `None`
+        /// * 失败时返回相应的错误信息
+        #[utoipa::path(
+            get,
+            path = #search_ex_by_id_path,
+            params(
+                ("id" = U64, Path, description = "记录的唯一标识符")
+            ),
+            responses((status = OK, body = Ro<#ex_vo_name>))
+        )]
+        #[debug_handler]
+        #[log_call]
+        pub async fn search_ex_by_id(
+            Path(id): Path<U64>,
+            Query(query): Query<HashMap<String, String>>,
+        ) -> Result<Json<Ro<#ex_vo_name>>, CtrlError> {
+            let params = SearchParams::from_query(&query);
+            let ro = #svc_name::search_ex_by_id::<DatabaseConnection>(id, params, None).await?;
+            Ok(Json(ro))
+        }
+    });
+    }
+
+    // 生成search_ex_by_condition方法
+    if !skip.contains("search_ex_by_condition") {
+        generated_methods.push(quote! {
+        /// # 按检索参数获取单条记录(附带获取关联表的信息)
+        ///
+        /// 根据查询串中的检索条件获取对应记录及其关联数据
+        ///
+        /// ## 查询参数
+        /// 字段条件按 Bean Searcher 规则解析，全局参数用 robotech 原生 `_` 前缀
+        ///
+        /// ## 返回值
+        /// * 成功时返回对应的记录信息，记录不存在时 `extra` 为 `None`
+        /// * 失败时返回相应的错误信息
+        #[utoipa::path(
+            get,
+            path = #search_ex_by_condition_path,
+            responses((status = OK, body = Ro<#ex_vo_name>))
+        )]
+        #[debug_handler]
+        #[log_call]
+        pub async fn search_ex_by_condition(
+            Query(query): Query<HashMap<String, String>>,
+        ) -> Result<Json<Ro<#ex_vo_name>>, CtrlError> {
+            let params = SearchParams::from_query(&query);
+            let ro = #svc_name::search_ex_by_condition::<DatabaseConnection>(params, None).await?;
+            Ok(Json(ro))
+        }
+    });
+    }
+
+    // 生成search_list_ex方法
+    if !skip.contains("search_list_ex") {
+        generated_methods.push(quote! {
+        /// # 按检索参数查询记录列表(附带获取关联表的信息)
+        ///
+        /// 根据查询串中的检索条件查询记录列表及其关联数据，支持排序
+        ///
+        /// ## 查询参数
+        /// 字段条件按 Bean Searcher 规则解析，全局参数用 robotech 原生 `_` 前缀
+        ///
+        /// ## 返回值
+        /// * 成功时返回对应的记录列表
+        /// * 失败时返回相应的错误信息
+        #[utoipa::path(
+            get,
+            path = #search_list_ex_path,
+            responses((status = OK, body = Ro<Vec<#ex_vo_name>>))
+        )]
+        #[debug_handler]
+        #[log_call]
+        pub async fn search_list_ex(
+            Query(query): Query<HashMap<String, String>>,
+        ) -> Result<Json<Ro<Vec<#ex_vo_name>>>, CtrlError> {
+            let params = SearchParams::from_query(&query);
+            let ro = #svc_name::search_list_ex::<DatabaseConnection>(params, None).await?;
+            Ok(Json(ro))
+        }
+    });
+    }
+
+    // 生成search_page_ex方法
+    if !skip.contains("search_page_ex") {
+        generated_methods.push(quote! {
+        /// # 按检索参数分页查询记录列表(附带获取关联表的信息)
+        ///
+        /// 根据查询串中的检索条件分页查询记录列表及其关联数据，支持排序
+        ///
+        /// ## 查询参数
+        /// 字段条件按 Bean Searcher 规则解析，全局参数用 robotech 原生 `_` 前缀
+        ///
+        /// ## 返回值
+        /// * 成功时返回分页结果（页码、总条数、记录列表）
+        /// * 失败时返回相应的错误信息
+        #[utoipa::path(
+            get,
+            path = #search_page_ex_path,
+            responses((status = OK, body = Ro<PageRx<#ex_vo_name>>))
+        )]
+        #[debug_handler]
+        #[log_call]
+        pub async fn search_page_ex(
+            Query(query): Query<HashMap<String, String>>,
+        ) -> Result<Json<Ro<PageRx<#ex_vo_name>>>, CtrlError> {
+            let params = SearchParams::from_query(&query);
+            let ro = #svc_name::search_page_ex::<DatabaseConnection>(params, None).await?;
+            Ok(Json(ro))
+        }
+    });
+    }
+
     let expanded = quote! {
         use axum::debug_handler;
         use axum::extract::{Path, Query};
@@ -556,9 +819,11 @@ pub(crate) fn ctrl_macro(args: CtrlArgs, input: ItemStruct) -> TokenStream {
         use robotech::api::Ro;
         use robotech::api::rx::PageRx;
         use robotech::api::U64;
+        use robotech::dao::SearchParams;
         use robotech::web::ctrl_utils::{get_current_ms, get_current_user_id};
         use robotech::web::CtrlError;
         use sea_orm::{DatabaseConnection, DatabaseTransaction};
+        use std::collections::HashMap;
         use validator::Validate;
 
         use crate::dto::#dto_module::*;
