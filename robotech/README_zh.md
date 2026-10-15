@@ -475,28 +475,40 @@ let app = Router::new()
 ### 9. 字典枚举（Dic）
 
 **规范**：所有字典枚举（`*/src/dic/*.rs`）的 HTTP 表示必须是**整数**（对应数据库的
-`INT2` 列），**不是**变体名字符串。统一使用 `#[dic]` 属性宏生成 serde 与 OpenAPI schema，
-禁止手写 `Serialize` / `Deserialize` / `ToSchema`。
+`INT2` 列），**不是**变体名字符串。用 `#[dic]` 属性宏一次性生成全部样板实现，
+**禁止**手写 `Serialize` / `Deserialize` / `ToSchema` / `Default` / `value()` / `from_i16()` /
+`From` 转换 / `TryGetable` / `ValueType`。
 
 ```rust
 use robotech::macros::dic;
 
+// 不需要 Default / From<i16>：不写 default 参数
 #[dic]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, AsRefStr, Display, EnumString)]
 #[strum(serialize_all = "kebab-case")]
-pub enum JobType {
-    /// 手动
-    Manual = 0,
-    /// Cron 表达式
-    Cron = 1,
-    /// 固定延迟
-    FixedDelay = 2,
-    /// 固定频率
-    FixedRate = 3,
+pub enum ConnectorType {
+    Mysql = 0,
+    Postgres = 1,
+    // ...
+}
+
+// 需要 Default / From<i16>：显式声明默认变体
+#[dic(default = Unassigned)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, AsRefStr, Display, EnumString)]
+#[strum(serialize_all = "kebab-case")]
+pub enum ConnectorStatus {
+    Running = 0,
+    // ...
+    Unassigned = 3,
+    // ...
 }
 ```
 
-**`#[dic]` 生成的内容**：
+**默认值必须显式声明** —— `#[dic]` **不会**默认把「第一个变体」当成默认值。
+因为「第一个变体」往往只是变体书写顺序的巧合（`ConnectorStatus` 的首位是 `Running`，
+业务默认值却是 `Unassigned`），默认值应当是显式、可评审的决定。
+
+**`#[dic]` 生成的内容** —— 总是生成：
 
 | 生成的实现 | 行为 |
 |-----------|------|
@@ -504,15 +516,53 @@ pub enum JobType {
 | `Deserialize` | 只接受 `i16`；非法值直接报错，**不回落默认变体** |
 | `PartialSchema` | OpenAPI 声明为 `integer`，描述自动生成 `0=Manual, 1=Cron, ...` |
 | `ToSchema` | schema 名 = 枚举名 |
+| `X::value()` | `const fn`，返回 `i16` 判别式 |
+| `X::from_i16(i16) -> Option<X>` | 越界返回 `None` |
+| `From<X> for i16` | 无损，枚举 → 整数 |
+| `From<X> for Option<i16>` | 无损，枚举 → `Some(整数)` |
+| `sea_orm::TryGetable` | 仅 `feature = "server"`；只实现 `try_get_by`，**非法值报错** |
+| `sea_orm::sea_query::ValueType` | 仅 `feature = "server"`；`TinyInt`/`SmallInt` 均接受，**非法值报错** |
+
+仅当写了 `#[dic(default = 变体名)]` 时**额外**生成（这一组是「有损转换」，
+都需要一个兜底变体，所以绑在一起）：
+
+| 生成的实现 | 行为 |
+|-----------|------|
+| `Default` | 取 `#[dic(default = 变体名)]` 指定的变体 |
+| `From<i16> for X` | 越界回落 `Default` |
+
+> **`From<Option<i16>> for X`（`None → Default`）是故意不生成的。**
+> 它正是「本来没值的变成有值」的入口：`#[vo]` 给可空列生成的转换是
+> `#[from(~.map(|v| v.into()))]`（VO 字段写 `Option<枚举>`），只用 `From<i16>`，
+> `None` 原样保留；而 VO 字段写非 `Option` 时是 `#[from(~.into())]`，源头是
+> `Option<i16>` 就缺 impl **直接编译不过**，逼作者把 VO 字段改成 `Option<枚举>`。
+> 宁可编译不过，也不要把数据库 NULL 静默解释成某个状态。
+> 参照 `dtw_locator.bind_target_type`（`Option<i16>` → VO 写 `Option<u16>`）。
+
+> **什么时候必须写 `default`？** `#[vo]` 对枚举字段生成的是 `#[from(~.into())]`
+> （`i16` → 枚举），而 `From` 是无损契约、无法返回错误，只能靠 `Default` 兜底；
+> 另外 client 模式下 `#[vo]` 还会要求字段类型实现 `Default`。
+> 所以**凡是被 VO 用作字段的字典枚举，都必须写 `default`**，否则编译不过。
+> 只用于 Kafka Connect API、不落库也不进 VO 的枚举（如 `ConnectorType`）就不用写。
+
+> **可空列怎么配？** 列可空 ⇒ **VO 字段必须写 `Option<枚举>`**：
+> `int2` 列 + `Option<X>` → `None` 保留为 `null`；`int2` 列 + `X` → 编译报错（故意的缺口）。
+> 注意这层保护**只管 NULL**，不管越界脏值 —— `From<i16>` 对枚举范围外的整数仍会回落
+> `Default`（`From` 契约无法返回错误）。要检测脏值请用无损的 `from_i16()`。
 
 **约束**：
 
-- 枚举必须**非泛型**，且所有变体都是**无字段**的（`Fields::Unit`）；
+- 枚举必须**非泛型**，至少有一个变体，且所有变体都是**无字段**的（`Fields::Unit`）；
 - 每个变体的判别式必须是 **i16 范围内的整数字面量**（省略时按「上一个 + 1」递增）；
-- 宏会从 `#[derive(...)]` 中自动摘除 `Serialize` / `Deserialize` / `ToSchema`，
+- `default` 指定的变体必须存在，否则编译报错；
+- 宏会从 `#[derive(...)]` 中自动摘除 `Serialize` / `Deserialize` / `ToSchema` / `Default`，
   其余派生（`Debug` / `Clone` / `AsRefStr` / `Display` / `EnumString` 等）原样保留；
+- 变体上的 `#[default]` 属性会被忽略（默认变体只能由 `#[dic(default = ...)]` 决定）；
 - `AsRefStr` / `Display` / `EnumString` 保留用于**非 HTTP 场景**（日志、`value()` 等），
-  它们的 kebab-case 表示与 HTTP 的整数表示互不影响。
+  它们的 kebab-case 表示与 HTTP 的整数表示互不影响；
+- 枚举自带的**业务语义方法**（如 `AlertStatus::is_ended()`）仍另开
+  `impl 枚举名 { ... }` 块手写，与宏生成的方法互不干扰；
+- 非法值一律**报错**而不是静默回落默认变体 —— 避免把库里的脏值伪装成正常值。
 
 **配套约定**：
 

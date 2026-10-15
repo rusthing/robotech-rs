@@ -376,28 +376,41 @@ let app = Router::new()
 
 **Convention**: every dictionary enum (`*/src/dic/*.rs`) MUST be represented over HTTP as an
 **integer** (matching the `INT2` database column), **never** as a variant-name string.
-Use the `#[dic]` attribute macro to generate serde and the OpenAPI schema; do not hand-write
-`Serialize` / `Deserialize` / `ToSchema`.
+Use the `#[dic]` attribute macro to generate *all* the boilerplate at once; do **not** hand-write
+`Serialize` / `Deserialize` / `ToSchema` / `Default` / `value()` / `from_i16()` / `From` impls /
+`TryGetable` / `ValueType`.
 
 ```rust
 use robotech::macros::dic;
 
+// No Default / From<i16> needed: omit the `default` parameter
 #[dic]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, AsRefStr, Display, EnumString)]
 #[strum(serialize_all = "kebab-case")]
-pub enum JobType {
-    /// Manual
-    Manual = 0,
-    /// Cron expression
-    Cron = 1,
-    /// Fixed delay
-    FixedDelay = 2,
-    /// Fixed rate
-    FixedRate = 3,
+pub enum ConnectorType {
+    Mysql = 0,
+    Postgres = 1,
+    // ...
+}
+
+// Default / From<i16> needed: declare the default variant explicitly
+#[dic(default = Unassigned)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, AsRefStr, Display, EnumString)]
+#[strum(serialize_all = "kebab-case")]
+pub enum ConnectorStatus {
+    Running = 0,
+    // ...
+    Unassigned = 3,
+    // ...
 }
 ```
 
-**What `#[dic]` generates**:
+**The default must be declared explicitly** — `#[dic]` does **not** treat the first variant as
+the default. The leading variant is usually just an accident of declaration order
+(`ConnectorStatus` leads with `Running`, yet its business default is `Unassigned`), and a default
+value deserves to be an explicit, reviewable decision.
+
+**What `#[dic]` generates** — always:
 
 | Generated impl | Behavior |
 |----------------|----------|
@@ -405,17 +418,61 @@ pub enum JobType {
 | `Deserialize` | Accepts `i16` only; invalid values fail loudly, **never fall back to a default variant** |
 | `PartialSchema` | Declares `integer` in OpenAPI, description auto-built as `0=Manual, 1=Cron, ...` |
 | `ToSchema` | Schema name = enum name |
+| `X::value()` | `const fn`, returns the `i16` discriminant |
+| `X::from_i16(i16) -> Option<X>` | Out-of-range returns `None` |
+| `From<X> for i16` | Lossless, enum → integer |
+| `From<X> for Option<i16>` | Lossless, enum → `Some(integer)` |
+| `sea_orm::TryGetable` | `feature = "server"` only; implements `try_get_by` only, **invalid values fail** |
+| `sea_orm::sea_query::ValueType` | `feature = "server"` only; accepts `TinyInt`/`SmallInt`, **invalid values fail** |
+
+Only when `#[dic(default = VariantName)]` is present, these are generated **in addition**
+(a set of lossy conversions that all need a fallback variant, hence tied together):
+
+| Generated impl | Behavior |
+|----------------|----------|
+| `Default` | The variant named by `#[dic(default = ...)]` |
+| `From<i16> for X` | Falls back to `Default` when out of range |
+
+> **`From<Option<i16>> for X` (`None` → `Default`) is deliberately NOT generated.**
+> It is the exact entry point where "a value that had no value becomes a value":
+> `#[vo]` emits `#[from(~.map(|v| v.into()))]` for nullable columns (VO field written as
+> `Option<Enum>`), which uses only `From<i16>` and keeps `None` as-is; while a non-`Option`
+> VO field gets `#[from(~.into())]`, which then lacks the impl **and fails to compile**,
+> forcing the author to write `Option<Enum>` in the VO.
+> A compile error beats silently explaining a database NULL as some state.
+> Compare `dtw_locator.bind_target_type` (`Option<i16>` → `Option<u16>` in the VO).
+
+> **When is `default` mandatory?** `#[vo]` emits `#[from(~.into())]` for enum fields
+> (`i16` → enum), and `From` is an infallible contract that cannot report an error — so it can
+> only fall back to `Default`. In client mode `#[vo]` additionally requires the field type to
+> implement `Default`. Therefore **every dictionary enum used as a VO field must declare
+> `default`**, or it will not compile. Enums that only serve the Kafka Connect API and neither
+> persist nor appear in a VO (e.g. `ConnectorType`) do not need it.
+
+> **Nullable columns?** Nullable column ⇒ **the VO field must be `Option<Enum>`**:
+> an `int2` column + `Option<X>` keeps `None` as `null`; an `int2` column + `X` fails to
+> compile (the deliberate gap). Note this guard covers NULL only — `From<i16>` still falls
+> back to `Default` for out-of-range dirty values, since `From` cannot fail. Use the lossless
+> `from_i16()` when you need to detect dirty data.
 
 **Constraints**:
 
-- The enum must be **non-generic** and all variants must be **fieldless** (`Fields::Unit`);
+- The enum must be **non-generic**, have at least one variant, and all variants must be
+  **fieldless** (`Fields::Unit`);
 - Each variant discriminant must be an **integer literal within `i16`** (when omitted, it is
   `previous + 1`);
-- The macro strips `Serialize` / `Deserialize` / `ToSchema` from `#[derive(...)]` automatically
-  and keeps every other derive (`Debug` / `Clone` / `AsRefStr` / `Display` / `EnumString`, ...)
-  untouched;
+- The variant named by `default` must exist, otherwise compilation fails;
+- The macro strips `Serialize` / `Deserialize` / `ToSchema` / `Default` from `#[derive(...)]`
+  automatically and keeps every other derive (`Debug` / `Clone` / `AsRefStr` / `Display` /
+  `EnumString`, ...) untouched;
+- A `#[default]` attribute on a variant is ignored (the default can only be set via
+  `#[dic(default = ...)]`);
 - `AsRefStr` / `Display` / `EnumString` remain for **non-HTTP use** (logging, `value()`, ...);
-  their kebab-case form is independent of the HTTP integer form.
+  their kebab-case form is independent of the HTTP integer form;
+- Domain-specific methods (e.g. `AlertStatus::is_ended()`) are still written by hand in a
+  separate `impl EnumName { ... }` block and coexist with the generated ones;
+- Invalid values **fail loudly** instead of silently falling back to the default variant —
+  this prevents dirty database values from masquerading as valid ones.
 
 **Related conventions**:
 

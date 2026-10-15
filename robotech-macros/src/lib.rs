@@ -377,24 +377,46 @@ pub fn feign(_args: TokenStream, input: TokenStream) -> TokenStream {
     feign_macro(input).into()
 }
 
-/// 属性宏：把「字典枚举」的 serde 表示统一成整数
+/// 属性宏：把「字典枚举」的全部样板实现一次性生成
 ///
 /// Rust 默认把 C 风格枚举序列化成**变体名字符串**（`FixedRate` → `"FixedRate"`），
 /// 这与字典枚举的语义不符 —— 枚举在库里是 `INT2`、注释写着 `0=手动分派, 1=cron...`，
 /// 只有 HTTP 层是字符串，等于同一条数据有两套表示，而且改个变体名就成了破坏性变更。
 ///
-/// `#[dic]` 会把序列化统一成**变体判别式（整数）**，并把 OpenAPI schema 也描述成整数。
+/// `#[dic]` 会把序列化统一成**变体判别式（整数）**，并把 OpenAPI schema 也描述成整数，
+/// 同时把每个字典枚举都要手写一遍的样板代码全部生成出来。
 ///
 /// 生成的实现：
 /// - `serde::Serialize`：输出 `i16` 判别式；
 /// - `serde::Deserialize`：只接受整数，非法值直接报错（不静默回落到默认变体）；
 /// - `utoipa::PartialSchema` + `utoipa::ToSchema`：schema 为 `integer`，
-///   description 带上 `值=变体名` 对照表，Swagger 上依然可读。
+///   description 带上 `值=变体名` 对照表，Swagger 上依然可读；
+/// - `X::value()` / `X::from_i16()`：整数与枚举互转（`from_i16` 越界返回 `None`）；
+/// - `From<X> for i16` / `From<X> for Option<i16>`：无损转换；
+/// - `sea_orm::TryGetable` / `sea_orm::sea_query::ValueType`（`feature = "server"` 下）：
+///   非法值一律报错，不静默回落。
+///
+/// **只有写了 `#[dic(default = 变体名)]` 才会额外生成**（这一组是有损转换，
+/// 都需要兜底变体）：
+/// - `Default`：取参数指定的变体；
+/// - `From<i16> for X`：越界回落 `Default`。
+///
+/// **故意不生成 `From<Option<i16>> for X`**（`None → Default`）—— 那是把数据库 NULL
+/// 静默解释成某个状态的入口（「本来没值的变成有值」）。`#[vo]` 给可空列生成的转换是
+/// `#[from(~.map(|v| v.into()))]`（VO 字段写 `Option<枚举>`），只用 `From<i16>`、
+/// `None` 原样保留；VO 字段写非 `Option` 时源头是 `Option<i16>` 就缺 impl 报编译错，
+/// 逼作者改成 `Option<枚举>`。**编译不过也比丢信息好。**
+/// 即：**列可空 ⇒ VO 字段必须写 `Option<枚举>`。**
+///
+/// 不写 `default` 参数就不生成 `Default` —— 避免把「变体书写顺序」当成默认值的隐式约定。
+/// 注意 `#[vo]` 对枚举字段生成的是 `#[from(~.into())]`（`i16` → 枚举），
+/// 所以**凡是被 VO 使用的字典枚举都必须写 `default`**。
 ///
 /// # 使用示例
 /// ```ignore
 /// use robotech::macros::dic;
 ///
+/// // 不需要 Default / From<i16>：不写 default 参数
 /// #[dic]
 /// #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, AsRefStr, Display, EnumString)]
 /// #[strum(serialize_all = "kebab-case")]
@@ -404,14 +426,24 @@ pub fn feign(_args: TokenStream, input: TokenStream) -> TokenStream {
 ///     /// cron 表达式
 ///     Cron = 1,
 /// }
+///
+/// // 需要 Default / From<i16>：显式指定默认变体
+/// #[dic(default = Unassigned)]
+/// #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, AsRefStr, Display, EnumString)]
+/// #[strum(serialize_all = "kebab-case")]
+/// pub enum ConnectorStatus {
+///     Running = 0,
+///     Unassigned = 3,
+/// }
 /// ```
 ///
-/// 派生列表里不需要（也建议不要）再写 `Serialize` / `Deserialize` / `ToSchema`，
+/// 派生列表里不需要（也建议不要）再写 `Serialize` / `Deserialize` / `ToSchema` / `Default`，
 /// 宏会自动摘掉它们避免实现冲突。
 ///
 /// 约束：只支持 C 风格枚举（单元变体）；判别式必须是整数字面量且在 `i16` 范围内。
 #[proc_macro_attribute]
-pub fn dic(_args: TokenStream, input: TokenStream) -> TokenStream {
+pub fn dic(args: TokenStream, input: TokenStream) -> TokenStream {
+    let args = parse_macro_input!(args as crate::dic::DicArgs);
     let input = parse_macro_input!(input as ItemEnum);
-    dic_macro(input).into()
+    dic_macro(args, input).into()
 }
