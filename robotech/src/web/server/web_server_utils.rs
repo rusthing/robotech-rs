@@ -422,10 +422,16 @@ async fn wait_for_web_server_ready(
     let client = if health_check_url.starts_with("https://") {
         reqwest::Client::builder()
             .danger_accept_invalid_certs(true) // 忽略未认证的证书
+            .timeout(retry_interval) // 单次请求超时，失败后继续重试
+            .connect_timeout(retry_interval) // 连接超时，快速失败
             .build()
             .map_err(|e| WebServerError::BuildReqwestClient(e.to_string()))?
     } else {
-        reqwest::Client::new()
+        reqwest::Client::builder()
+            .timeout(retry_interval) // 单次请求超时，失败后继续重试
+            .connect_timeout(retry_interval) // 连接超时，快速失败
+            .build()
+            .map_err(|e| WebServerError::BuildReqwestClient(e.to_string()))?
     };
     timeout(wait_timeout, async move {
         Ok(loop {
