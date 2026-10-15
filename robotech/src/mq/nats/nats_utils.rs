@@ -234,6 +234,11 @@ where
             let stream_name = stream_config.name.clone();
             let stream = get_or_create_stream(stream_config).await?;
 
+            // 若未设置 deliver_subject，自动生成唯一投递主题
+            if consumer_config.deliver_subject.is_empty() {
+                consumer_config.deliver_subject = get_nats_client()?.new_inbox();
+            }
+
             consumer_config.filter_subject = subject.to_string();
             if let Some(ref qg) = queue_group {
                 consumer_config.deliver_group = Some(qg.to_string());
