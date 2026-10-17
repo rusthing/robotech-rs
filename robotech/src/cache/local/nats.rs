@@ -169,6 +169,38 @@ pub fn default_consumer_config(consumer_name: &str) -> jetstream::consumer::push
     }
 }
 
+/// # 探测 Push Consumer 是否存活
+///
+/// 用于订阅守护：
+///
+/// - `Ok(true)`：stream 与 consumer 都还在，订阅正常
+/// - `Ok(false)`：二者之一已不存在（NATS 重启、断连超过 `inactive_threshold`、
+///   被人工删除），需要重建订阅
+/// - `Err`：无法判断（如 NATS 不可达），调用方应保持现状并稍后重试，
+///   避免网络抖动触发无谓的重建
+pub async fn consumer_alive(
+    stream_config: &jetstream::stream::Config,
+    consumer_name: &str,
+) -> anyhow::Result<bool> {
+    let stream = get_or_create_stream(stream_config.clone()).await?;
+
+    match stream.consumer_info(consumer_name).await {
+        Ok(_) => Ok(true),
+        Err(e)
+            if matches!(
+                e.kind(),
+                async_nats::jetstream::context::ConsumerInfoErrorKind::NotFound
+                    | async_nats::jetstream::context::ConsumerInfoErrorKind::StreamNotFound
+            ) =>
+        {
+            Ok(false)
+        }
+        Err(e) => Err(anyhow::anyhow!(
+            "探测 consumer {consumer_name} 失败: {e}"
+        )),
+    }
+}
+
 /// # 清理旧的 Push Consumer
 ///
 /// 启动时删除同名 consumer，确保不重放历史消息。
