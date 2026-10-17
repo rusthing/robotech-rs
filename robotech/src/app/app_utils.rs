@@ -316,3 +316,47 @@ where
 fn quit() {
     let _ = send_signal_by_instruction("quit", get_current_pid());
 }
+
+/// # 初始化应用的可选子系统
+///
+/// 由 `bootstrap!` 生成的 `main()` 在启动早期调用。**按 robotech 自身启用的 feature
+/// 决定实际初始化内容**：
+/// - 启用 `db` 时初始化数据访问层的唯一键 / 外键注册表
+///
+/// 未启用相应 feature 时为空操作。因此，**不需要数据库 / Web 的服务也可以使用
+/// `bootstrap!`，无需为其引入 `db` / `web` 相关依赖**。
+///
+/// ## 返回值
+/// 初始化成功返回 `Ok(())`；失败时返回 `Err(AppError)`
+pub fn init_app() -> Result<()> {
+    #[cfg(feature = "db")]
+    crate::dao::init_dao()?;
+    Ok(())
+}
+
+/// # 注册当前服务实例
+///
+/// 由 `bootstrap!` 生成的 `main()` 在 `setup` 执行完成后调用。
+/// 启用 `config-center` / `registry-center` 时把当前服务注册到注册中心；
+/// 未启用时为空操作。
+pub async fn register_app() {
+    #[cfg(any(feature = "config-center", feature = "registry-center"))]
+    crate::micro_svc::register_micro_svc().await;
+}
+
+/// # 优雅退出时清理应用的可选子系统
+///
+/// 由 `bootstrap!` 生成的 `main()` 在收到退出信号后调用。**按 robotech 自身启用的
+/// feature 决定实际清理内容**：
+/// - 启用 `config-center` / `registry-center` 时注销微服务实例
+/// - 启用 `web` 时停止 Web 服务
+///
+/// 未启用相应 feature 时为空操作。
+pub async fn shutdown_app() {
+    #[cfg(any(feature = "config-center", feature = "registry-center"))]
+    crate::micro_svc::drop_hub_client().await;
+    #[cfg(feature = "web")]
+    if let Err(e) = crate::web::stop_web_service().await {
+        error!("无法停止旧的Web服务: {e:?}");
+    }
+}

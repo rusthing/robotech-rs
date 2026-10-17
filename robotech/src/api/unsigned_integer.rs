@@ -1,6 +1,9 @@
+#[cfg(feature = "orm")]
 use sea_orm::sea_query::{ArrayType, Nullable, ValueType, ValueTypeErr};
+#[cfg(feature = "orm")]
 use sea_orm::{ColIdx, ColumnType, QueryResult, TryGetError, TryGetable, Value};
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
+#[cfg(feature = "openapi")]
 use utoipa::ToSchema;
 
 /// # 无符号 8 位整数包装类型
@@ -8,8 +11,8 @@ use utoipa::ToSchema;
 /// 用于表示数据库中的无符号小整数（如状态、标记等），
 /// 序列化时输出为裸数字而非嵌套对象；支持与 `u8` / `i8` 互转，
 /// 并实现 `Deref` 以便直接作为 `u8` 使用。
+#[cfg_attr(feature = "openapi", derive(ToSchema))]
 #[derive(
-    ToSchema,
     Clone,
     Copy,
     Debug,
@@ -70,6 +73,7 @@ impl std::ops::Deref for U8 {
 }
 
 // ========= SeaORM四件套 =========
+#[cfg(feature = "orm")]
 impl TryFrom<U8> for Value {
     type Error = std::num::TryFromIntError;
     fn try_from(id: U8) -> Result<Self, Self::Error> {
@@ -77,6 +81,7 @@ impl TryFrom<U8> for Value {
     }
 }
 
+#[cfg(feature = "orm")]
 impl TryGetable for U8 {
     fn try_get_by<I: ColIdx>(res: &QueryResult, idx: I) -> Result<Self, TryGetError> {
         {
@@ -86,6 +91,7 @@ impl TryGetable for U8 {
     }
 }
 
+#[cfg(feature = "orm")]
 impl ValueType for U8 {
     fn try_from(v: Value) -> Result<Self, ValueTypeErr> {
         match v {
@@ -107,6 +113,7 @@ impl ValueType for U8 {
     }
 }
 
+#[cfg(feature = "orm")]
 impl Nullable for U8 {
     fn null() -> Value {
         Value::TinyInt(None)
@@ -117,8 +124,8 @@ impl Nullable for U8 {
 ///
 /// 用于表示数据库中的无符号整数，序列化时输出为裸数字而非嵌套对象；
 /// 支持与 `u16` / `i16` 互转，并实现 `Deref` 以便直接作为 `u16` 使用。
+#[cfg_attr(feature = "openapi", derive(ToSchema))]
 #[derive(
-    ToSchema,
     Clone,
     Copy,
     Debug,
@@ -179,6 +186,7 @@ impl std::ops::Deref for U16 {
 }
 
 // ========= SeaORM四件套 =========
+#[cfg(feature = "orm")]
 impl TryFrom<U16> for Value {
     type Error = std::num::TryFromIntError;
     fn try_from(id: U16) -> Result<Self, Self::Error> {
@@ -186,6 +194,7 @@ impl TryFrom<U16> for Value {
     }
 }
 
+#[cfg(feature = "orm")]
 impl TryGetable for U16 {
     fn try_get_by<I: ColIdx>(res: &QueryResult, idx: I) -> Result<Self, TryGetError> {
         {
@@ -195,6 +204,7 @@ impl TryGetable for U16 {
     }
 }
 
+#[cfg(feature = "orm")]
 impl ValueType for U16 {
     fn try_from(v: Value) -> Result<Self, ValueTypeErr> {
         match v {
@@ -216,6 +226,7 @@ impl ValueType for U16 {
     }
 }
 
+#[cfg(feature = "orm")]
 impl Nullable for U16 {
     fn null() -> Value {
         Value::SmallInt(None)
@@ -227,8 +238,8 @@ impl Nullable for U16 {
 /// 用于表示数据库中的无符号整数（如计数、时长毫秒数），
 /// 序列化时输出为裸数字而非嵌套对象；
 /// 支持与 `u32` / `i32` 互转，并实现 `Deref` 以及 SeaORM 的取值/绑定能力。
+#[cfg_attr(feature = "openapi", derive(ToSchema))]
 #[derive(
-    ToSchema,
     Clone,
     Copy,
     Debug,
@@ -296,6 +307,7 @@ impl std::ops::Deref for U32 {
 }
 
 // ========= SeaORM四件套 =========
+#[cfg(feature = "orm")]
 impl TryFrom<U32> for Value {
     type Error = std::num::TryFromIntError;
     fn try_from(id: U32) -> Result<Self, Self::Error> {
@@ -303,6 +315,7 @@ impl TryFrom<U32> for Value {
     }
 }
 
+#[cfg(feature = "orm")]
 impl TryGetable for U32 {
     fn try_get_by<I: ColIdx>(res: &QueryResult, idx: I) -> Result<Self, TryGetError> {
         {
@@ -312,6 +325,7 @@ impl TryGetable for U32 {
     }
 }
 
+#[cfg(feature = "orm")]
 impl ValueType for U32 {
     fn try_from(v: Value) -> Result<Self, ValueTypeErr> {
         match v {
@@ -333,6 +347,7 @@ impl ValueType for U32 {
     }
 }
 
+#[cfg(feature = "orm")]
 impl Nullable for U32 {
     fn null() -> Value {
         Value::Int(None)
@@ -344,7 +359,8 @@ impl Nullable for U32 {
 /// 用于表示数据库中的无符号大整数（如主键 ID），
 /// 序列化时输出为字符串以避免 JavaScript 精度丢失；
 /// 支持与 `u64` / `i64` 互转，并实现 `Deref` 以及 SeaORM 的取值/绑定能力。
-#[derive(ToSchema, Clone, Copy, Debug, Default, PartialEq, Eq, Hash, PartialOrd, Ord)]
+#[cfg_attr(feature = "openapi", derive(ToSchema))]
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub struct U64(pub u64);
 
 impl U64 {
@@ -417,6 +433,7 @@ impl<'de> Deserialize<'de> for U64 {
 }
 
 // ========= SeaORM四件套 =========
+#[cfg(feature = "orm")]
 impl TryFrom<U64> for Value {
     type Error = std::num::TryFromIntError;
     fn try_from(id: U64) -> Result<Self, Self::Error> {
@@ -424,6 +441,7 @@ impl TryFrom<U64> for Value {
     }
 }
 
+#[cfg(feature = "orm")]
 impl TryGetable for U64 {
     fn try_get_by<I: ColIdx>(res: &QueryResult, idx: I) -> Result<Self, TryGetError> {
         {
@@ -433,6 +451,7 @@ impl TryGetable for U64 {
     }
 }
 
+#[cfg(feature = "orm")]
 impl ValueType for U64 {
     fn try_from(v: Value) -> Result<Self, ValueTypeErr> {
         match v {
@@ -454,6 +473,7 @@ impl ValueType for U64 {
     }
 }
 
+#[cfg(feature = "orm")]
 impl Nullable for U64 {
     fn null() -> Value {
         Value::BigInt(None)
@@ -479,7 +499,8 @@ impl std::ops::Deref for U64 {
 /// 用于表示数据库中的超大无符号整数，
 /// 序列化时输出为字符串以避免 JavaScript 精度丢失；
 /// 支持与 `u128` / `i128` 互转，并实现 `Deref` 以便直接作为 `u128` 使用。
-#[derive(ToSchema, Clone, Copy, Debug, Default, PartialEq, Eq, Hash, PartialOrd, Ord)]
+#[cfg_attr(feature = "openapi", derive(ToSchema))]
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub struct U128(pub u128);
 
 impl U128 {
@@ -558,6 +579,7 @@ impl std::ops::Deref for U128 {
 }
 
 // ========= SeaORM四件套 =========
+#[cfg(feature = "orm")]
 impl TryFrom<U128> for Value {
     type Error = std::num::TryFromIntError;
     fn try_from(id: U128) -> Result<Self, Self::Error> {
@@ -565,6 +587,7 @@ impl TryFrom<U128> for Value {
     }
 }
 
+#[cfg(feature = "orm")]
 impl TryGetable for U128 {
     fn try_get_by<I: ColIdx>(res: &QueryResult, idx: I) -> Result<Self, TryGetError> {
         {
@@ -574,6 +597,7 @@ impl TryGetable for U128 {
     }
 }
 
+#[cfg(feature = "orm")]
 impl ValueType for U128 {
     fn try_from(v: Value) -> Result<Self, ValueTypeErr> {
         match v {
@@ -595,6 +619,7 @@ impl ValueType for U128 {
     }
 }
 
+#[cfg(feature = "orm")]
 impl Nullable for U128 {
     fn null() -> Value {
         Value::BigInt(None)

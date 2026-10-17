@@ -12,20 +12,39 @@ repository = "https://github.com/rusthing/robotech-rs"
 readme = "README.md"
 
 [features]
-# 接口的U64类型需要sea-orm支持
-api-client = ["dep:reqwest", "dep:http", "dep:jsonwebtoken"]
+# ============ 基础能力 ============
+# 应用级配置与生命周期（AppWatcher / LogWatcher / SignalManager / SvcError / bootstrap! 依赖）
 app = ["dep:validator", "dep:idworker"]
-web = ["app", "dep:ipnet", "dep:axum", "dep:tower", "dep:tower-http", "dep:tokio-rustls", "dep:hyper", "dep:hyper-util", "dep:rustls-pemfile", "dep:socket2", "dep:reqwest"]
+# 过程宏（bootstrap! / log_call / dao / svc / ctrl / router / api_doc / crud_dto / vo / dic ...）
+macros = ["dep:robotech-macros"]
+
+# ============ 可选能力（相互正交，按需开启）============
+# OpenAPI schema：U8/U16/U32/U64/U128、Duration、Ro、RoResult、PageRx 的 ToSchema 实现，
+# 以及 `#[vo]` / `#[crud_dto]` / `#[dic]` 生成代码所需的类型支持。
+# `web` 与 `api-client` 会隐含开启。
+openapi = ["dep:utoipa"]
+# sea-orm 类型互操作：U64 / Duration 与 sea-orm `Value` / `TryGetable` / `ValueType` 的互转，
+# 以及检索参数翻译（`bean_searcher_utils` 的 `Condition` / `Expr` / `Value`）所需的 sea-orm 本体。
+# `db` 会隐含开启；不使用 `db` 但需要这些互操作或检索翻译的场景（如 `*-api` 的 `server` feature）
+# 可单独开启 `robotech/orm`。
+orm = ["dep:sea-orm"]
+
+# ============ 数据访问 ============
+db = ["app", "orm", "dep:sqlx", "dep:regex", "dep:once_cell", "dep:linkme"]
+
+# ============ Web / 微服务 ============
+web = ["app", "openapi", "dep:axum", "dep:utoipa-swagger-ui", "dep:linkme", "dep:ipnet", "dep:tower", "dep:tower-http", "dep:tokio-rustls", "dep:hyper", "dep:hyper-util", "dep:rustls-pemfile", "dep:socket2", "dep:reqwest"]
 config-center = ["dep:base64", "dep:etcd-client", "dep:nacos-sdk", "dep:toml"]
 registry-center = ["web", "dep:base64", "dep:etcd-client", "dep:nacos-sdk"]
 feign = ["api-client", "registry-center"]
-db = ["app", "dep:sqlx", "dep:regex", "dep:once_cell"]
+api-client = ["openapi", "dep:reqwest", "dep:http", "dep:jsonwebtoken"]
+
+# ============ 消息队列 / 缓存 / 时序库 ============
 mqtt = ["dep:rumqttc", "dep:bytes"]
 nats = ["dep:async-nats", "dep:futures", "dep:bytes"]
 rabbitmq = ["dep:lapin", "dep:futures", "dep:bytes"]
 redis = ["dep:redis"]
 influxdb = ["dep:influxdb", "dep:reqwest"]
-macros = ["dep:robotech-macros"]
 local-cache = ["nats"]
 distributed-cache = ["redis"]
 
@@ -50,10 +69,11 @@ serde_with = { workspace = true }
 tokio = { workspace = true, features = ["macros"] }
 nix = { workspace = true }
 notify = { workspace = true }
-utoipa = { workspace = true }
-utoipa-swagger-ui = { workspace = true, features = ["axum", "vendored"] }
-linkme = { workspace = true }
-sea-orm = { workspace = true }  # api接口的U64类型需要sea-orm支持
+# 以下三个按 feature 开启：utoipa（openapi）/ utoipa-swagger-ui（web）/ sea-orm（orm，db 隐含）
+utoipa = { workspace = true, optional = true }
+utoipa-swagger-ui = { workspace = true, features = ["axum", "vendored"], optional = true }
+linkme = { workspace = true, optional = true }
+sea-orm = { workspace = true, optional = true }
 regex = { workspace = true, optional = true }
 ipnet = { workspace = true, optional = true }
 axum = { workspace = true, optional = true, features = ["multipart", "macros"] }                  # Web框架

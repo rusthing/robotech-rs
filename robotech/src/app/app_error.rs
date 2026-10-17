@@ -35,4 +35,8 @@ pub enum AppError {
     #[cfg(feature = "registry-center")]
     #[error("Registry center error: {0}")]
     Registry(#[from] RegistryCenterError),
+    /// 初始化数据访问层失败（feature = "db"）
+    #[cfg(feature = "db")]
+    #[error("Init DAO error: {0}")]
+    InitDao(#[from] crate::dao::DaoError),
 }

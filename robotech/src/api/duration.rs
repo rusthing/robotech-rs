@@ -79,6 +79,7 @@ impl<'de> Deserialize<'de> for Duration {
 }
 
 /// OpenAPI schema 映射为 String 类型
+#[cfg(feature = "openapi")]
 impl utoipa::PartialSchema for Duration {
     fn schema() -> utoipa::openapi::RefOr<utoipa::openapi::schema::Schema> {
         utoipa::openapi::schema::Object::with_type(utoipa::openapi::schema::SchemaType::new(
@@ -88,6 +89,7 @@ impl utoipa::PartialSchema for Duration {
     }
 }
 
+#[cfg(feature = "openapi")]
 impl utoipa::ToSchema for Duration {
     fn name() -> std::borrow::Cow<'static, str> {
         std::borrow::Cow::Borrowed("Duration")
@@ -95,7 +97,7 @@ impl utoipa::ToSchema for Duration {
 }
 
 /// 从数据库 `String` 列读取并通过 `humantime` 解析为 `Duration`
-#[cfg(feature = "db")]
+#[cfg(feature = "orm")]
 impl sea_orm::TryGetable for Duration {
     fn try_get_by<I: sea_orm::ColIdx>(
         res: &sea_orm::QueryResult,

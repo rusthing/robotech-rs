@@ -10,6 +10,7 @@ use serde::{Deserialize, Serialize};
 use serde_with::skip_serializing_none;
 use std::fmt::Debug;
 use typed_builder::TypedBuilder;
+#[cfg(feature = "openapi")]
 use utoipa::ToSchema;
 use wheel_rs::serde::u64_serde;
 
@@ -21,7 +22,8 @@ use wheel_rs::serde::u64_serde;
 /// ## 泛型参数
 /// * `E` - 额外数据的类型，用于携带具体的业务数据
 #[skip_serializing_none]
-#[derive(ToSchema, Debug, Serialize, Deserialize, Setters, TypedBuilder)]
+#[cfg_attr(feature = "openapi", derive(ToSchema))]
+#[derive(Debug, Serialize, Deserialize, Setters, TypedBuilder)]
 #[builder]
 pub struct Ro<E> {
     /// 响应结果枚举值，表示请求处理的结果状态

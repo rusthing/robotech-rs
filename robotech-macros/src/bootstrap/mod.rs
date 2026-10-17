@@ -46,13 +46,10 @@ pub fn bootstrap_macro(args: BootstrapArgs) -> TokenStream {
 
     let expanded = quote! {
         use clap::Parser;
-        use robotech::app::{wait_app_exit, AppWatcher};
-        use robotech::dao::init_dao;
+        use robotech::app::{AppWatcher, init_app, register_app, shutdown_app, wait_app_exit};
         use robotech::env::init_env;
         use robotech::log::LogWatcher;
-        use robotech::micro_svc::{drop_hub_client, register_micro_svc};
         use robotech::signal::SignalManager;
-        use robotech::web::stop_web_service;
         use tracing::info;
 
         #[derive(Parser, Debug, Clone)]
@@ -95,7 +92,7 @@ pub fn bootstrap_macro(args: BootstrapArgs) -> TokenStream {
 
             init_env()?;
             let log_watcher = LogWatcher::new().await?;
-            init_dao()?;
+            init_app()?;
 
             let (mut signal_manager, old_pid) = SignalManager::new(signal)?;
 
@@ -114,12 +111,11 @@ pub fn bootstrap_macro(args: BootstrapArgs) -> TokenStream {
             let changed = None;
             setup(&app_watcher.app_config, &changed, port, old_pid).await?;
 
-            register_micro_svc().await;
+            register_app().await;
 
             let signal_receiver = signal_manager.watch_signal()?;
             Ok(wait_app_exit(signal_receiver, || async move {
-                drop_hub_client().await;
-                stop_web_service().await.expect("无法停止旧的Web服务");
+                shutdown_app().await;
                 Ok(())
             })
             .await?)

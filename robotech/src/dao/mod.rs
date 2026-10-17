@@ -7,9 +7,11 @@
 //!
 //! ## feature 说明
 //!
-//! [`bean_searcher_utils`] 只做「请求参数 → 查询条件」的翻译，不依赖数据库连接，
+//! [`bean_searcher_utils`] 分两层：参数层（解析 + 序列化）始终编译，
 //! 因此在仅启用 `api-client`（feign 客户端）时也会编译，
-//! 使客户端能够以 [`SearchParams`] 作为 `search_*` 方法的查询参数。
+//! 使客户端能够以 [`SearchParams`] 作为 `search_*` 方法的查询参数；
+//! 翻译层（`to_condition` / `apply_order_by`）需要 sea-orm，由 feature `orm` 门控
+//! （`db` 隐含开启 `orm`）。
 //! 其余子模块均依赖 `db` feature。
 
 // 检索参数工具：不依赖数据库连接，`api-client` 下同样可用

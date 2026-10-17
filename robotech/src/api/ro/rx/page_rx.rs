@@ -3,6 +3,7 @@ use derive_setters::Setters;
 use serde::{Deserialize, Serialize};
 use serde_with::skip_serializing_none;
 use typed_builder::TypedBuilder;
+#[cfg(feature = "openapi")]
 use utoipa::ToSchema;
 
 /// # 分页响应结构体
@@ -11,19 +12,17 @@ use utoipa::ToSchema;
 /// JSON 序列化时字段名使用 camelCase 风格。
 ///
 /// ## 泛型参数
-/// * `T` - 列表元素的类型，需实现 `ToSchema` 与 `Serialize`
+/// * `T` - 列表元素的类型，需实现 `Serialize`（启用 `openapi` feature 时另需 `ToSchema`）
 #[skip_serializing_none]
-#[derive(ToSchema, Debug, Serialize, Deserialize, Clone, Setters, TypedBuilder)]
+#[cfg_attr(feature = "openapi", derive(ToSchema))]
+#[derive(Debug, Serialize, Deserialize, Clone, Setters, TypedBuilder)]
 #[builder]
 #[serde(rename_all = "camelCase")]
 #[serde(bound(
-    serialize = "T: utoipa::ToSchema + serde::Serialize",
+    serialize = "T: serde::Serialize",
     deserialize = "T: serde::de::DeserializeOwned"
 ))]
-pub struct PageRx<T>
-where
-    T: utoipa::ToSchema + serde::Serialize,
-{
+pub struct PageRx<T> {
     /// 当前页码
     pub page_num: U64,
     /// 记录总数

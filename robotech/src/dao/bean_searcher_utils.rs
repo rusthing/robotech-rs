@@ -4,9 +4,15 @@
 //! 供 DAO 层的 `search_*` 系列方法使用。所有与检索参数解析相关的特殊处理都收敛在本模块，
 //! DAO / Svc / Ctrl 各层只负责调用，不重复实现。
 //!
-//! 本模块不依赖数据库连接，因此在仅启用 `api-client`（feign 客户端）时同样会编译：
-//! [`SearchParams`] 实现了 [`serde::Serialize`]，会以扁平查询参数的形式序列化，
-//! 可直接作为 feign 客户端 `search_*` 方法的查询参数。
+//! 本模块分为两层：
+//!
+//! - **参数层**（始终编译）：[`SearchParams`] / [`FieldCond`] / [`FieldOp`] 等，
+//!   只做「扁平请求参数 → 结构化检索参数」的解析，并把 [`SearchParams`] 以扁平查询参数
+//!   的形式序列化（见 [`SearchParams::to_pairs`] / [`SearchParams::to_query_map`]），
+//!   可直接作为 feign 客户端 `search_*` 方法的查询参数。
+//! - **翻译层**（需 feature `orm`）：把结构化检索参数翻译为 sea-orm 的 `Condition` 与排序条件，
+//!   即 `to_condition` / `apply_order_by`。`db` 隐含开启 `orm`，因此服务端无需额外配置；
+//!   纯 feign 客户端（只启用 `api-client`）不会引入 sea-orm。
 //!
 //! ## 字段参数规则
 //!
@@ -57,8 +63,11 @@
 //! ```
 
 use crate::api::U64;
+#[cfg(feature = "orm")]
 use sea_orm::prelude::Decimal;
+#[cfg(feature = "orm")]
 use sea_orm::sea_query::{Expr, Func, Value};
+#[cfg(feature = "orm")]
 use sea_orm::{ColumnTrait, ColumnType, Condition, ExprTrait, QueryOrder};
 use std::collections::{BTreeMap, BTreeSet, HashMap};
 
@@ -322,6 +331,7 @@ impl FieldCond {
     ///
     /// ## 返回值
     /// 返回对应的 `Condition`；当参数值为空且该运算符忽略空值时返回 `None`
+    #[cfg(feature = "orm")]
     pub fn to_condition<C>(&self, col: C) -> Option<Condition>
     where
         C: ColumnTrait,
@@ -429,6 +439,7 @@ impl FieldCond {
 }
 
 /// # LIKE 匹配方式
+#[cfg(feature = "orm")]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum LikeKind {
     /// 包含：`%value%`
@@ -448,6 +459,7 @@ enum LikeKind {
 ///
 /// ## 返回值
 /// 返回带通配符的匹配模式串
+#[cfg(feature = "orm")]
 fn like_pattern(raw: &str, kind: LikeKind, ignore_case: bool) -> String {
     let value = if ignore_case {
         raw.to_lowercase()
@@ -473,6 +485,7 @@ fn like_pattern(raw: &str, kind: LikeKind, ignore_case: bool) -> String {
 ///
 /// ## 返回值
 /// 返回转换后的 `Value`
+#[cfg(feature = "orm")]
 fn to_value(col_type: &ColumnType, raw: &str) -> Value {
     match col_type {
         ColumnType::TinyInteger => Value::TinyInt(raw.parse().ok()),
@@ -945,6 +958,7 @@ impl SearchParams {
     ///
     /// ## 返回值
     /// 返回由各字段条件以 AND 连接组成的 `Condition`
+    #[cfg(feature = "orm")]
     pub fn to_condition<C>(&self) -> Condition
     where
         C: ColumnTrait,
@@ -974,6 +988,7 @@ impl SearchParams {
     ///
     /// ## 返回值
     /// 返回追加排序条件后的查询对象
+    #[cfg(feature = "orm")]
     pub fn apply_order_by<C, Q>(&self, mut query: Q) -> Q
     where
         C: ColumnTrait,

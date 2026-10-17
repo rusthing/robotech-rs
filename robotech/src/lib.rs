@@ -23,6 +23,30 @@
 //! - `tsdb`：时序数据库
 //! - `web`：Web 服务（需启用 feature `web`）
 //!
+//! ## feature 矩阵
+//!
+//! 基础能力与可选能力相互正交，按需开启即可，**不会引入用不到的依赖**：
+//!
+//! | 场景 | features | 引入的关键依赖 |
+//! |------|----------|----------------|
+//! | 纯后台服务（无 Web / 无 DB，如 MQ 消费者、采集网关） | `app,macros` | 无 axum / sea-orm / utoipa |
+//! | 仅需 OpenAPI schema | `app,macros,openapi` | utoipa |
+//! | 仅需 sea-orm 类型互操作（`U64` / `Duration`） | `app,macros,orm` | sea-orm |
+//! | 数据访问服务 | `app,macros,db` | sea-orm + sqlx |
+//! | Web 服务 | `app,macros,web` | axum + utoipa + Swagger UI |
+//! | Feign 客户端（`*-api-client`） | `app,macros,api-client`（`feign` 会再带上注册中心） | reqwest + utoipa，**无 sea-orm / sqlx** |
+//! | 完整微服务 | `app,macros,db,web,config-center,registry-center` | 全量 |
+//!
+//! 说明：
+//! - `openapi`：`U8`/`U16`/`U32`/`U64`/`U128`、`Duration`、`Ro`、`RoResult`、
+//!   `PageRx` 的 `ToSchema` 实现；`#[vo]` / `#[crud_dto]` / `#[dic]` 生成代码依赖它。
+//!   `web` 与 `api-client` 会隐含开启。
+//! - `orm`：`U64` / `Duration` 与 sea-orm `Value` / `TryGetable` / `ValueType` 的互转，
+//!   以及检索参数翻译（`bean_searcher_utils` 的 `to_condition` / `apply_order_by`）
+//!   所需的 sea-orm 本体。`db` 会隐含开启；不使用 `db` 但需要该能力的
+//!   `*-api` crate（`server` feature）可单独开启 `robotech/orm`。
+//!   `api-client` **不**开启 `orm`，因此 feign 客户端只解析/序列化检索参数，不引入 sea-orm。
+//!
 //! 同时通过 `pub use ro::rx` 重新导出 `rx` 模块（分页响应等）。
 
 pub mod api;

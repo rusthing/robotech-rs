@@ -5,6 +5,7 @@
 
 use serde::{Deserialize, Serialize};
 use std::fmt;
+#[cfg(feature = "openapi")]
 use utoipa::ToSchema;
 
 /// # API 响应结果枚举
@@ -14,7 +15,8 @@ use utoipa::ToSchema;
 /// - `IllegalArgument`: 参数错误
 /// - `Warn`: 警告状态
 /// - `Fail`: 操作失败
-#[derive(ToSchema, Debug, Copy, Clone, PartialEq)]
+#[cfg_attr(feature = "openapi", derive(ToSchema))]
+#[derive(Debug, Copy, Clone, PartialEq)]
 pub enum RoResult {
     Success,
     IllegalArgument,
