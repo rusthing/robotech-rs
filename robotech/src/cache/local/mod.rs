@@ -26,12 +26,17 @@ where
     F: Fn() -> Fut + Send + Sync + 'static,
     Fut: std::future::Future<Output = anyhow::Result<C>> + Send + 'static,
 {
-    let stream_name = subject.replace('.', "_");
-    let consumer_name = format!("{stream_name}_consumer");
+    let stream_config = nats::default_stream_config(subject);
+    let stream_name = stream_config.name.clone();
+
+    // Push Consumer 按节点隔离：consumer 名固定会让多副本共用同一个 consumer，
+    // 各节点启动时清理「自己的」consumer 就会把其它节点正在使用的 consumer 删掉。
+    // 节点标识直接用全局实例 ID（ULID 或 `{app_name}-{ip}-{port}`，均为合法字符）。
+    let consumer_name = format!("{stream_name}_consumer_{}", crate::env::get_app_instance_id());
 
     nats::setup_nats_cache(
         subject,
-        nats::default_stream_config(&stream_name),
+        stream_config,
         nats::default_consumer_config(&consumer_name),
         storage,
         rebuild_fn,

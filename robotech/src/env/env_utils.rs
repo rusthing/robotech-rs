@@ -38,9 +38,27 @@ static APP_INSTANCE_ID: ArcSwapOption<String> = ArcSwapOption::const_empty();
 /// 获取当前应用实例 ID。
 ///
 /// 初始值为 ULID；若 Web 服务器已启动且调用了 [`set_app_instance_id`]，
-/// 则返回更新后的 `{app_name}-{ip}-{port}` 值。
+/// 则返回更新后的 `{app_name}-{ip}-{port}` 值（IP 中的 `.` 已替换为 `-`）。
+///
+/// 未经 [`init_env`] 初始化的场景（如单元测试、不经过 `bootstrap!` 的入口）
+/// 会懒生成一次 ULID 并写入，保证返回值**永不为空**且进程内唯一，
+/// 调用方无需再自行兜底——需要「每节点唯一标识」时直接用本函数即可。
 pub fn get_app_instance_id() -> String {
-    APP_INSTANCE_ID.load_full().as_deref().cloned().unwrap_or_default()
+    if let Some(id) = APP_INSTANCE_ID.load_full() {
+        return (*id).clone();
+    }
+
+    // 两个线程同时进入时只有一个 CAS 成功，另一个取回同一个值
+    let generated = Ulid::new().to_string();
+    let _ = APP_INSTANCE_ID.compare_and_swap(
+        &None::<Arc<String>>,
+        Some(Arc::new(generated.clone())),
+    );
+
+    APP_INSTANCE_ID
+        .load_full()
+        .map(|id| (*id).clone())
+        .unwrap_or(generated)
 }
 
 /// 设置应用实例 ID（通常在 Web 服务器启动、获取端口后调用）。

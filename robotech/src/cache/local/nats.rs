@@ -7,7 +7,8 @@
 //! 1. **存储**：`ArcSwapOption<C>` 无锁并发读
 //! 2. **同步**：任何节点的写操作通过 JetStream 发布刷新信号，所有节点收到后执行全量重建
 //! 3. **启动**：应用启动时直接查询 DB 全量加载，不从 JetStream 重放历史
-//! 4. **断网恢复**：durable consumer 在 NATS 服务端保留进度，重连后自动接续
+//! 4. **断连恢复**：consumer 为具名 ephemeral，断连未超 `inactive_threshold`
+//!    时服务端保留未确认消息，重连后继续投递；进程退出后由服务端自动回收
 //!
 //! ## 与旧版差异
 //!
@@ -29,8 +30,8 @@
 //! // 启动 JetStream 消费者
 //! nats::setup_nats_cache(
 //!     "dtw.cache.refresh",
-//!     nats::default_stream_config("dtw-cache"),
-//!     nats::default_consumer_config("dtw-cache-consumer"),
+//!     nats::default_stream_config("dtw.cache.refresh"),
+//!     nats::default_consumer_config("dtw_cache_refresh_consumer"),
 //!     &CACHE,
 //!     || async { build_cache_from_db().await },
 //! ).await?;
@@ -136,13 +137,14 @@ pub async fn publish_cache_refresh_signal(subject: &str) -> anyhow::Result<()> {
 
 /// # 默认 Stream 配置
 ///
-/// - `subjects` 包含指定的 subject（`>` 通配符版本以便扩展）
+/// - `subject`：刷新信号主题，Stream 名由主题派生（`.` 替换为 `_`）
+/// - `subjects` 精确匹配该主题，保证与发布主题一致
 /// - 文件持久化，无消息数/大小限制（由后续 TTL 控制）
 /// - 每节点独立 consumer，不做负载均衡
-pub fn default_stream_config(stream_name: &str) -> jetstream::stream::Config {
+pub fn default_stream_config(subject: &str) -> jetstream::stream::Config {
     jetstream::stream::Config {
-        name: stream_name.to_string(),
-        subjects: vec![format!("{stream_name}.>")],
+        name: subject.replace('.', "_"),
+        subjects: vec![subject.to_string()],
         storage: jetstream::stream::StorageType::File,
         max_messages: -1,
         max_bytes: -1,
@@ -155,7 +157,9 @@ pub fn default_stream_config(stream_name: &str) -> jetstream::stream::Config {
 ///
 /// - `DeliverPolicy::New`：新建消费者不重放历史消息
 /// - `AckPolicy::Explicit`：处理完成后 ACK
-/// - `name` 设置为 consumer_name，确保 durable（断网重连保障）
+/// - `name`：consumer 名，含节点实例 ID，保证多副本各自独立、互不抢消息
+/// - 不设置 `durable_name`：consumer 为具名 ephemeral，进程退出后由服务端
+///   按 `inactive_threshold` 回收，不会随重启累积元数据
 pub fn default_consumer_config(consumer_name: &str) -> jetstream::consumer::push::Config {
     jetstream::consumer::push::Config {
         name: Some(consumer_name.to_string()),
