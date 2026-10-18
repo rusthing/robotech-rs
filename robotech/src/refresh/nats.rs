@@ -181,7 +181,13 @@ where
 
 /// # 订阅守护任务
 ///
-/// 周期性探活，consumer 丢失则重建订阅并立即执行一次 `handler`。
+/// 每轮做两件事：
+/// 1. 检查客户端订阅任务是否已退出（`handle.is_finished()`）；
+/// 2. 探活服务端 consumer 是否还在。
+///
+/// 任一不成立就重建订阅并立即执行一次 `handler`。两个检查缺一不可：
+/// consumer 还在但消费任务已退出时，只看服务端会误判为「一切正常」，
+/// 而实际上已经没有人在收消息了。
 fn spawn_watchdog<H, Fut>(
     subject: RefreshSubject,
     stream_config: jetstream::stream::Config,
@@ -203,14 +209,18 @@ where
             let probe_interval = get_refresh_config().effective_probe_interval();
             tokio::time::sleep(probe_interval).await;
 
-            match consumer_alive(&stream_config, &consumer_name).await {
-                Ok(true) => continue,
-                Ok(false) => {
-                    warn!("刷新消费者 {consumer_name} 已丢失，重建订阅");
-                }
-                Err(e) => {
-                    warn!("刷新消费者探活失败，稍后重试: {e}");
-                    continue;
+            if handle.is_finished() {
+                warn!("刷新订阅任务已退出，重建订阅 (consumer={consumer_name})");
+            } else {
+                match consumer_alive(&stream_config, &consumer_name).await {
+                    Ok(true) => continue,
+                    Ok(false) => {
+                        warn!("刷新消费者 {consumer_name} 已丢失，重建订阅");
+                    }
+                    Err(e) => {
+                        warn!("刷新消费者探活失败，稍后重试: {e}");
+                        continue;
+                    }
                 }
             }
 
