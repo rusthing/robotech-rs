@@ -376,8 +376,13 @@ where
                                         error!(
                                             "消息已达重投上限 {max_deliver}，转入死信 [{msg_subject}]: {e}"
                                         );
-                                        publish_dead_letter(&msg_subject, payload, &e.to_string())
-                                            .await;
+                                        publish_dead_letter(
+                                            &msg_subject,
+                                            payload,
+                                            &e.to_string(),
+                                            delivered,
+                                        )
+                                        .await;
                                         if let Err(e) = acker.ack().await {
                                             error!("JetStream ACK 失败: {e}");
                                         }
@@ -518,24 +523,55 @@ fn consumer_config_diffs(
     (updatable, rebuild)
 }
 
+/// # 死信主题前缀
+///
+/// 死信主题为 `dlq.{原subject}`。统一前缀是为了让消费方用一个 stream
+/// （`dlq.>`）把所有死信收口——`{subject}.dlq` 这种后缀形式无法用单个通配符匹配
+/// （`*` 只匹配一个 token，`>` 只能放末尾）。
+pub const DLQ_SUBJECT_PREFIX: &str = "dlq.";
+
 /// # 写入死信
 ///
-/// 消息重投达到上限后，把原始负载转发到 `{subject}.dlq`，避免静默消失。
-/// 死信本身不保证被消费，需要另外订阅 `*.dlq` 才能处理。
+/// 消息重投达到上限后，把原始负载转发到 `dlq.{subject}`，并把原主题、原因、
+/// 投递次数放进 header，避免静默消失。
+///
+/// 消费方需要订阅 `dlq.>`（见 msg-svr 的 `sub::dead_letter`），否则 core NATS
+/// 没有订阅者会直接丢弃。
 ///
 /// ## 参数
 ///
-/// - `subject`: 原消息主题，死信主题在其后加 `.dlq`。
+/// - `subject`: 原消息主题。
 /// - `payload`: 原始消息负载。
-/// - `reason`: 转入死信的原因，仅用于日志。
-async fn publish_dead_letter(subject: &str, payload: Bytes, reason: &str) {
-    let dlq_subject = format!("{subject}.dlq");
+/// - `reason`: 转入死信的原因。
+/// - `delivered`: 已经投递的次数。
+async fn publish_dead_letter(subject: &str, payload: Bytes, reason: &str, delivered: i64) {
+    // 死信本身处理失败时不再转发，否则会 dlq.dlq.* 无限套娃
+    if subject.starts_with(DLQ_SUBJECT_PREFIX) {
+        error!("死信消息处理失败，不再转发 [{subject}]: {reason}");
+        return;
+    }
 
-    match get_nats_client() {
-        Ok(client) => match client.publish(dlq_subject.clone(), payload).await {
-            Ok(()) => info!("消息已写入死信 {dlq_subject}（原因: {reason}）"),
-            Err(e) => error!("写入死信 {dlq_subject} 失败: {e}"),
-        },
-        Err(e) => error!("写入死信失败，NATS 客户端不可用: {e}"),
+    let client = match get_nats_client() {
+        Ok(client) => client,
+        Err(e) => {
+            error!("写入死信失败，NATS 客户端不可用: {e}");
+            return;
+        }
+    };
+
+    let dlq_subject = format!("{DLQ_SUBJECT_PREFIX}{subject}");
+    let delivered_text = delivered.to_string();
+
+    let mut headers = async_nats::HeaderMap::new();
+    headers.insert("Nats-Dlq-Subject", subject);
+    headers.insert("Nats-Dlq-Reason", reason);
+    headers.insert("Nats-Dlq-Delivered", delivered_text.as_str());
+
+    match client
+        .publish_with_headers(dlq_subject.clone(), headers, payload)
+        .await
+    {
+        Ok(()) => info!("消息已写入死信 {dlq_subject}（原因: {reason}）"),
+        Err(e) => error!("写入死信 {dlq_subject} 失败: {e}"),
     }
 }
