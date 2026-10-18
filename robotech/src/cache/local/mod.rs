@@ -47,11 +47,11 @@ pub use nats::publish_cache_refresh_signal;
 ///
 /// ## 参数
 ///
-/// - `subject`：刷新信号主题
+/// - `subject`：刷新信号主题（由 [`crate::refresh::RefreshSubject`] 约束命名）
 /// - `storage`：缓存快照的全局存储
 /// - `rebuild_fn`：全量重建函数
 pub async fn setup_local_cache<C, F, Fut>(
-    subject: &str,
+    subject: &crate::refresh::RefreshSubject,
     storage: &'static arc_swap::ArcSwapOption<C>,
     rebuild_fn: F,
 ) -> anyhow::Result<Arc<tokio::task::JoinHandle<()>>>

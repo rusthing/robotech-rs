@@ -69,7 +69,8 @@ pub mod log;
 pub mod macros;
 pub mod micro_svc;
 pub mod mq;
-#[cfg(feature = "refresh")]
+// 刷新主题类型（`RefreshSubject`）不依赖 NATS，命名常量在 api crate 里也要用，
+// 因此模块常驻；`subscribe` / `publish` 等实现按 `nats` feature 门控。
 pub mod refresh;
 #[cfg(feature = "redis")]
 pub mod redis;

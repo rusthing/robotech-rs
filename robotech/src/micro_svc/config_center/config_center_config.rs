@@ -10,6 +10,7 @@ use wheel_rs::serde::{path_buf_serde, vec_serde};
 #[serde(rename_all = "kebab-case")]
 pub struct ConfigCenterConfig {
     /// 配置文件格式
+    #[serde(default = "file_format_default")]
     pub file_format: String,
     /// 公共配置
     #[serde(with = "vec_serde", default)]
@@ -17,6 +18,10 @@ pub struct ConfigCenterConfig {
     /// 本地快照目录
     #[serde(with = "path_buf_serde", default = "snapshot_dir_default")]
     pub snapshot_dir: PathBuf,
+}
+
+fn file_format_default() -> String {
+    "toml".to_string()
 }
 
 fn snapshot_dir_default() -> PathBuf {

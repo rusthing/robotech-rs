@@ -10,13 +10,16 @@
 //! ```ignore
 //! use arc_swap::ArcSwapOption;
 //! use robotech::cache::local::nats;
+//! use robotech::refresh::RefreshSubject;
 //!
 //! static CACHE: ArcSwapOption<DtwCache> = ArcSwapOption::const_empty();
 //!
+//! const SUBJECT: RefreshSubject = robotech::refresh_subject!("demo", "sample");
+//!
 //! nats::setup_nats_cache(
-//!     "dtw.cache.refresh",
-//!     nats::default_stream_config("dtw.cache.refresh"),
-//!     nats::default_consumer_config("dtw_cache_refresh_consumer"),
+//!     &SUBJECT,
+//!     nats::default_stream_config(&SUBJECT),
+//!     nats::default_consumer_config("refresh_demo_sample_consumer"),
 //!     &CACHE,
 //!     || async { build_cache_from_db().await },
 //! ).await?;
@@ -45,13 +48,13 @@ pub use crate::refresh::nats::{
 ///
 /// ## 参数
 ///
-/// - `subject`：JetStream Subject
+/// - `subject`：刷新信号主题（由 [`RefreshSubject`](crate::refresh::RefreshSubject) 约束）
 /// - `stream_config`：Stream 配置（[`default_stream_config`] 提供合理默认值）
 /// - `consumer_config`：Push Consumer 配置（[`default_consumer_config`] 提供合理默认值）
 /// - `storage`：`ArcSwapOption<C>` 静态引用，读端通过 `load_full()` 获取快照
 /// - `rebuild_fn`：异步重建函数，返回新的缓存数据
 pub async fn setup_nats_cache<C, F, Fut>(
-    subject: &str,
+    subject: &crate::refresh::RefreshSubject,
     stream_config: jetstream::stream::Config,
     consumer_config: jetstream::consumer::push::Config,
     storage: &'static ArcSwapOption<C>,
@@ -90,6 +93,8 @@ where
 /// 通过 JetStream 持久化发布，所有订阅该 subject 的节点收到后执行全量重建。
 ///
 /// 用于 SVC `after_*` 回调：任何写操作成功后调用此函数通知其他节点。
-pub async fn publish_cache_refresh_signal(subject: &str) -> anyhow::Result<()> {
+pub async fn publish_cache_refresh_signal(
+    subject: &crate::refresh::RefreshSubject,
+) -> anyhow::Result<()> {
     crate::refresh::publish(subject).await
 }

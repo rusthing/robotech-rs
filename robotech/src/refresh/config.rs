@@ -94,6 +94,9 @@ pub fn get_refresh_config() -> Arc<RefreshConfig> {
 /// - 解析成功：写入全局，下一轮探活生效。
 ///
 /// `[refresh]` 优先，未配置时回退到历史段名 `[local-cache]`。
+// `refresh` 模块常驻（`RefreshSubject` 要给 api crate 用），但只有同时启用
+// `app` 与 `refresh` 时才会被 `build_app_cfg` 调用。
+#[cfg_attr(not(all(feature = "app", feature = "refresh")), allow(dead_code))]
 pub(crate) fn load_config(config: &::config::Config) {
     for key in [REFRESH_CONFIG_KEY, LEGACY_LOCAL_CACHE_CONFIG_KEY] {
         if config.get_table(key).is_err() {

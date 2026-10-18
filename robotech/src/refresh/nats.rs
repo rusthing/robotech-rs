@@ -22,12 +22,13 @@ use tracing::{error, info, warn};
 use crate::mq::nats::{get_or_create_stream, publish as nats_publish, subscribe as nats_subscribe};
 
 use super::config::get_refresh_config;
+use super::subject::RefreshSubject;
 
 /// 已注册的订阅：subject → 守护任务句柄
 ///
 /// 用于保证同一主题只注册一次——配置热更新会重新执行 `setup()`，
 /// 业务代码重复调用 [`subscribe`] 时不能叠加订阅和守护任务。
-static REGISTERED: LazyLock<Mutex<HashMap<String, Arc<JoinHandle<()>>>>> =
+static REGISTERED: LazyLock<Mutex<HashMap<RefreshSubject, Arc<JoinHandle<()>>>>> =
     LazyLock::new(|| Mutex::new(HashMap::new()));
 
 /// # 刷新信号负载
@@ -62,13 +63,16 @@ impl Default for RefreshSignal {
 ///
 /// ## 参数
 ///
-/// - `subject`：刷新信号主题
+/// - `subject`：刷新信号主题（只能由 [`RefreshSubject`] 构造，保证命名合规）
 /// - `handler`：收到信号后执行的异步动作，内部应做「全量重建」而不是增量更新
 ///
 /// ## 返回值
 ///
 /// 返回守护任务句柄；`abort()` 会同时停掉订阅与探活。
-pub async fn subscribe<H, Fut>(subject: &str, handler: H) -> anyhow::Result<Arc<JoinHandle<()>>>
+pub async fn subscribe<H, Fut>(
+    subject: &RefreshSubject,
+    handler: H,
+) -> anyhow::Result<Arc<JoinHandle<()>>>
 where
     H: Fn() -> Fut + Send + Sync + 'static,
     Fut: Future<Output = anyhow::Result<()>> + Send + 'static,
@@ -89,7 +93,7 @@ where
     let consumer_config = default_consumer_config(&consumer_name);
 
     let watchdog = install(subject, stream_config, consumer_config, handler).await?;
-    registered.insert(subject.to_string(), Arc::clone(&watchdog));
+    registered.insert(*subject, Arc::clone(&watchdog));
 
     Ok(watchdog)
 }
@@ -99,8 +103,8 @@ where
 /// 通过 JetStream 持久化发布，所有订阅该主题的节点收到后各自执行刷新动作。
 ///
 /// 用于 SVC 写操作成功后的 `after_write` 回调。
-pub async fn publish(subject: &str) -> anyhow::Result<()> {
-    nats_publish(subject, &RefreshSignal::new(), true).await?;
+pub async fn publish(subject: &RefreshSubject) -> anyhow::Result<()> {
+    nats_publish(subject.as_str(), &RefreshSignal::new(), true).await?;
     Ok(())
 }
 
@@ -108,7 +112,7 @@ pub async fn publish(subject: &str) -> anyhow::Result<()> {
 ///
 /// 供 [`subscribe`] 与缓存层的兼容入口使用。
 pub(crate) async fn install<H, Fut>(
-    subject: &str,
+    subject: &RefreshSubject,
     stream_config: jetstream::stream::Config,
     consumer_config: jetstream::consumer::push::Config,
     handler: H,
@@ -127,7 +131,7 @@ where
     .await?;
 
     Ok(Arc::new(spawn_watchdog(
-        subject.to_string(),
+        *subject,
         stream_config,
         consumer_config,
         handler,
@@ -139,7 +143,7 @@ where
 ///
 /// 先清理同名 consumer，保证新建的 consumer 不重放历史信号（启动与重连都走这里）。
 async fn open_subscription<H, Fut>(
-    subject: &str,
+    subject: &RefreshSubject,
     stream_config: jetstream::stream::Config,
     consumer_config: jetstream::consumer::push::Config,
     handler: Arc<H>,
@@ -153,7 +157,7 @@ where
     }
 
     let handle = nats_subscribe(
-        subject,
+        subject.as_str(),
         None,
         Some(stream_config),
         Some(consumer_config),
@@ -179,7 +183,7 @@ where
 ///
 /// 周期性探活，consumer 丢失则重建订阅并立即执行一次 `handler`。
 fn spawn_watchdog<H, Fut>(
-    subject: String,
+    subject: RefreshSubject,
     stream_config: jetstream::stream::Config,
     consumer_config: jetstream::consumer::push::Config,
     handler: Arc<H>,
@@ -240,10 +244,10 @@ where
 /// - `subject`：刷新信号主题，Stream 名由主题派生（`.` 替换为 `_`）
 /// - `subjects` 精确匹配该主题，保证与发布主题一致
 /// - 文件持久化，7 天 TTL
-pub fn default_stream_config(subject: &str) -> jetstream::stream::Config {
+pub fn default_stream_config(subject: &RefreshSubject) -> jetstream::stream::Config {
     jetstream::stream::Config {
-        name: subject.replace('.', "_"),
-        subjects: vec![subject.to_string()],
+        name: subject.stream_name(),
+        subjects: vec![subject.as_str().to_string()],
         storage: jetstream::stream::StorageType::File,
         max_messages: -1,
         max_bytes: -1,
