@@ -14,6 +14,7 @@ use config::FileFormat;
 use ipnet::IpNet;
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex, OnceLock};
 use std::time::Duration;
 use tokio::sync::watch;
@@ -233,6 +234,17 @@ pub struct HubClient {
     retry_interval: Duration,
     refresh_interval: Duration,
     join_handles: Mutex<Vec<JoinHandle<()>>>,
+    /// 是否已经注册过配置变更 watch
+    ///
+    /// 配置 reload 完成后会重新注册 watch。HubClient 未重建时旧 watch 仍然活着，
+    /// 若不加这道判断，每热更新一次就会多注册一套 watch。重建后的新客户端
+    /// 该标志初始为 false，会正常注册。
+    config_watch_registered: AtomicBool,
+    /// 创建本客户端时使用的微服务配置指纹（序列化结果）
+    ///
+    /// 配置热更新会重新走一遍配置构建，如果 `micro-svc` 段没有变化就不应该重建
+    /// 客户端——重建意味着先注销再注册服务实例，并把所有配置 watch 任务中断。
+    config_fingerprint: String,
 }
 
 impl Drop for HubClient {
@@ -250,6 +262,8 @@ impl HubClient {
     /// 按配置中存在的后端（consul / etcd / nacos）构建客户端，构建失败时记录告警
     /// 并继续（后续可回退到本地快照）；三个后端都未配置时返回 `CfgError::NotInit`。
     pub async fn new(micro_svc_config: MicroSvcConfig) -> Result<Self, CfgError> {
+        let config_fingerprint = serde_json::to_string(&micro_svc_config).unwrap_or_default();
+
         let (
             config_center_client,
             registry_center_client,
@@ -327,7 +341,19 @@ impl HubClient {
             retry_interval,
             refresh_interval,
             join_handles: Mutex::new(Vec::new()),
+            config_watch_registered: AtomicBool::new(false),
+            config_fingerprint,
         })
+    }
+
+    /// # 判断微服务配置是否与当前客户端一致
+    ///
+    /// 配置热更新时用于决定是否需要重建客户端：一致时应直接复用，
+    /// 避免无谓的「注销 + 重新注册服务实例」以及 watch 任务中断。
+    pub fn matches_micro_svc_config(&self, micro_svc_config: &MicroSvcConfig) -> bool {
+        serde_json::to_string(micro_svc_config)
+            .map(|fingerprint| fingerprint == self.config_fingerprint)
+            .unwrap_or(false)
     }
 
     pub fn is_refresh_scope_key(&self, data_id: &str) -> bool {
@@ -485,19 +511,32 @@ impl HubClient {
             "config center not configured".to_string(),
         ))?;
 
-        let (config_changed_tx, mut config_changed_rx) = watch::channel(());
-        let mut join_handles = Vec::new();
-        for config_key in self
+        let config_keys = self
             .config_keys
             .as_ref()
-            .ok_or(CfgError::NotInit("no config keys available".to_string()))?
-        {
-            if let Some(join_handle) = config_center_client
-                .watch(&config_key, config_changed_tx.clone())
+            .ok_or(CfgError::NotInit("no config keys available".to_string()))?;
+
+        // 同一客户端只注册一次：配置 reload 完成后会再次调用这里，
+        // 若客户端没有重建，旧 watch 仍在运行，重复注册会让 watch 数量翻倍。
+        if self.config_watch_registered.swap(true, Ordering::SeqCst) {
+            info!("配置变更 watch 已注册，跳过重复注册");
+            return Ok(());
+        }
+
+        let (config_changed_tx, mut config_changed_rx) = watch::channel(());
+        let mut join_handles = Vec::new();
+        for config_key in config_keys {
+            match config_center_client
+                .watch(config_key, config_changed_tx.clone())
                 .await
-                .map_err(|e| CfgError::Init(e.to_string()))?
             {
-                join_handles.push(join_handle);
+                Ok(Some(join_handle)) => join_handles.push(join_handle),
+                Ok(None) => {}
+                Err(e) => {
+                    // 注册失败要复位，否则这个客户端之后不会再尝试挂 watch
+                    self.config_watch_registered.store(false, Ordering::SeqCst);
+                    return Err(CfgError::Init(e.to_string()));
+                }
             }
         }
 

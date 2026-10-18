@@ -1,9 +1,9 @@
 use crate::cfg::base_config::BaseConfig;
 use crate::cfg::cfg_error::CfgError;
 #[cfg(feature = "config-center")]
-use crate::micro_svc::{get_configs, get_hub_client};
+use crate::micro_svc::get_configs;
 #[cfg(any(feature = "config-center", feature = "registry-center"))]
-use crate::micro_svc::{setup_hub_client, MicroSvcConfig, MICRO_SVC_CONFIG_KEY};
+use crate::micro_svc::{get_hub_client, setup_hub_client, MicroSvcConfig, MICRO_SVC_CONFIG_KEY};
 use config::builder::DefaultState;
 use config::{Config, ConfigBuilder};
 use std::path::Path;
@@ -177,6 +177,18 @@ async fn init_hub_client(
     if micro_svc_config.profile.is_none() {
         micro_svc_config.profile = profile.clone();
     }
+
+    // micro-svc 段没有变化时复用现有客户端。
+    //
+    // 配置热更新本身会走一遍 build_cfg，如果这里无条件 setup_hub_client，
+    // 每次改任何一个配置项都会：注销服务实例 → 重新注册 → 中断所有配置 watch。
+    // 服务发现会出现短暂空洞，watch 也要等 reload 完成后才重新挂上。
+    if let Ok(hub_client) = get_hub_client() {
+        if hub_client.matches_micro_svc_config(&micro_svc_config) {
+            return Ok(());
+        }
+    }
+
     setup_hub_client(micro_svc_config).await;
     Ok(())
 }

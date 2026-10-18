@@ -14,9 +14,10 @@ use crate::micro_svc::{
 use async_trait::async_trait;
 use etcd_client::{GetOptions, PutOptions};
 use std::sync::Mutex;
+use std::time::Duration;
 use tokio::sync::watch;
 use tokio::task::JoinHandle;
-use tracing::{error, warn};
+use tracing::{debug, error, warn};
 
 /// Etcd 后端客户端：同时实现配置中心（KV + watch）与注册中心（租约注册）能力。
 pub struct EtcdClient {
@@ -108,33 +109,90 @@ impl ConfigCenterClient for EtcdClient {
     ) -> Result<Option<JoinHandle<()>>, ConfigCenterError> {
         let etcd_config_key = format!("/config/{config_key}");
 
+        // 首次订阅在调用方上下文完成，连接失败能直接反馈给上层；
+        // 之后的断线重建在任务内部进行。
         let watch_stream = {
             let mut etcd_client = self.etcd_client.clone();
             etcd_client
-                .watch(etcd_config_key, None)
+                .watch(etcd_config_key.clone(), None)
                 .await
                 .map_err(|e| ConfigCenterError::Connection(e.to_string()))?
         };
 
         let sender = config_changed_sender.clone();
+        let client = self.etcd_client.clone();
         let join_handle = tokio::spawn(async move {
-            let mut stream = watch_stream;
+            let mut stream = Some(watch_stream);
+            // 首轮是初始订阅，不需要补通知；之后每轮都是重建，需要补一次
+            let mut has_subscribed = false;
+            let mut failures: u32 = 0;
+            let mut backoff_secs: u64 = 1;
 
-            while let Ok(Some(resp)) = stream.message().await {
-                if resp.canceled() {
-                    warn!(
-                        watch_id = resp.watch_id(),
-                        reason = %resp.cancel_reason(),
-                        "etcd watch canceled"
-                    );
-                    break;
+            loop {
+                let mut current = match stream.take() {
+                    Some(stream) => stream,
+                    None => {
+                        let mut client = client.clone();
+                        match client.watch(etcd_config_key.clone(), None).await {
+                            Ok(stream) => stream,
+                            Err(e) => {
+                                failures += 1;
+                                if failures == 1 {
+                                    warn!(
+                                        "etcd watch 重建失败({etcd_config_key}): {e:?}，将持续重试"
+                                    );
+                                } else {
+                                    debug!(
+                                        "etcd watch 重建失败({etcd_config_key}): {e:?}，第 {failures} 次"
+                                    );
+                                }
+                                tokio::time::sleep(Duration::from_secs(backoff_secs)).await;
+                                backoff_secs = (backoff_secs * 2).min(30);
+                                continue;
+                            }
+                        }
+                    }
+                };
+
+                // 订阅重建后先补一次通知：断线期间的事件已经丢失，
+                // 只能靠上层做一次全量 reload 把状态对齐。
+                if has_subscribed && sender.send(()).is_err() {
+                    return;
                 }
+                has_subscribed = true;
 
-                if !resp.events().is_empty() {
-                    if sender.send(()).is_err() {
-                        return;
+                // 本次订阅的生命周期：任一异常都结束内层循环，回到外层重建
+                loop {
+                    match current.message().await {
+                        Ok(Some(resp)) => {
+                            failures = 0;
+                            backoff_secs = 1;
+
+                            if resp.canceled() {
+                                warn!(
+                                    watch_id = resp.watch_id(),
+                                    reason = %resp.cancel_reason(),
+                                    "etcd watch canceled，将重建订阅"
+                                );
+                                break;
+                            }
+
+                            if !resp.events().is_empty() && sender.send(()).is_err() {
+                                return;
+                            }
+                        }
+                        Ok(None) => {
+                            warn!("etcd watch 流已结束({etcd_config_key})，将重建订阅");
+                            break;
+                        }
+                        Err(e) => {
+                            warn!("etcd watch 中断({etcd_config_key}): {e:?}，将重建订阅");
+                            break;
+                        }
                     }
                 }
+
+                tokio::time::sleep(Duration::from_secs(backoff_secs)).await;
             }
         });
 

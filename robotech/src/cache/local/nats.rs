@@ -1,33 +1,18 @@
-//! # NATS 本地缓存
+//! # NATS 本地缓存同步
 //!
-//! 基于 `ArcSwapOption` 的无锁本地内存缓存 + JetStream 持久化刷新信号。
+//! 这里是 [`crate::refresh`] 在缓存场景下的一层薄封装：
 //!
-//! ## 工作原理
-//!
-//! 1. **存储**：`ArcSwapOption<C>` 无锁并发读
-//! 2. **同步**：任何节点的写操作通过 JetStream 发布刷新信号，所有节点收到后执行全量重建
-//! 3. **启动**：应用启动时直接查询 DB 全量加载，不从 JetStream 重放历史
-//! 4. **断连恢复**：consumer 为具名 ephemeral，断连未超 `inactive_threshold`
-//!    时服务端保留未确认消息，重连后继续投递；进程退出后由服务端自动回收
-//!
-//! ## 与旧版差异
-//!
-//! - ❌ 不再细分 Add/Modify/Del 事件，统一为刷新信号
-//! - ❌ 不再使用 `RwLock<HashMap<TypeId, ...>>`，改用业务侧持有的独立 `ArcSwapOption`
-//! - ❌ 不再使用 Core NATS，改用 JetStream（`publish(persistent=true)` + Push Consumer）
-//! - ✅ 消除精确增量更新的复杂 trait 和全量克隆开销
-//! - ✅ 真正无锁读（`ArcSwap::load_full()`）
+//! - 刷新信号、订阅自愈、探活逻辑都在 `refresh::nats` 中实现
+//! - 本模块只负责把「收到信号」映射成「重建缓存 + 原子替换」
 //!
 //! ## 使用示例
 //!
 //! ```ignore
 //! use arc_swap::ArcSwapOption;
 //! use robotech::cache::local::nats;
-//! use std::sync::Arc;
 //!
 //! static CACHE: ArcSwapOption<DtwCache> = ArcSwapOption::const_empty();
 //!
-//! // 启动 JetStream 消费者
 //! nats::setup_nats_cache(
 //!     "dtw.cache.refresh",
 //!     nats::default_stream_config("dtw.cache.refresh"),
@@ -35,16 +20,9 @@
 //!     &CACHE,
 //!     || async { build_cache_from_db().await },
 //! ).await?;
-//!
-//! // 启动时全量加载
-//! CACHE.store(Arc::new(build_cache_from_db().await));
-//!
-//! // 读：零锁开销
-//! let snapshot = CACHE.load_full();
-//!
-//! // 发布刷新信号
-//! nats::publish_cache_refresh_signal("dtw.cache.refresh").await?;
 //! ```
+//!
+//! 推荐直接使用 [`crate::refresh::subscribe`]，它还会做幂等注册与自愈。
 
 use arc_swap::ArcSwapOption;
 use async_nats::jetstream;
@@ -53,10 +31,8 @@ use std::sync::Arc;
 use tokio::task::JoinHandle;
 use tracing::{error, info};
 
-use super::CacheRefreshSignal;
-use crate::mq::nats::{
-    get_or_create_stream, publish as nats_publish,
-    subscribe as nats_subscribe,
+pub use crate::refresh::nats::{
+    consumer_alive, default_consumer_config, default_stream_config,
 };
 
 /// # 启动 NATS 缓存消费者
@@ -64,18 +40,16 @@ use crate::mq::nats::{
 /// 创建 JetStream Push Consumer，收到刷新信号后调用 `rebuild_fn` 重建缓存
 /// 并通过 `storage` 原子替换。
 ///
+/// > 新代码建议直接用 [`crate::refresh::subscribe`]，自行组合「重建 + 存储」；
+/// > 本函数保留是为了兼容既有调用方。
+///
 /// ## 参数
 ///
 /// - `subject`：JetStream Subject
 /// - `stream_config`：Stream 配置（[`default_stream_config`] 提供合理默认值）
-/// - `consumer_config`：Push Consumer 配置（[`default_consumer_config`] 提供合理默认值，
-///   内部会设置 `DeliverPolicy::New` 确保新建消费者不重放历史）
+/// - `consumer_config`：Push Consumer 配置（[`default_consumer_config`] 提供合理默认值）
 /// - `storage`：`ArcSwapOption<C>` 静态引用，读端通过 `load_full()` 获取快照
 /// - `rebuild_fn`：异步重建函数，返回新的缓存数据
-///
-/// ## 返回值
-///
-/// 成功返回订阅句柄，可调用 `.abort()` 停止消费。
 pub async fn setup_nats_cache<C, F, Fut>(
     subject: &str,
     stream_config: jetstream::stream::Config,
@@ -90,38 +64,25 @@ where
 {
     let rebuild_fn = Arc::new(rebuild_fn);
 
-    // 启动时删除旧 consumer，避免重放历史消息。
-    // 全量刷新由 main.rs 在 subscribe 之后显式调用。
-    if let Some(ref consumer_name) = consumer_config.name {
-        cleanup_stale_consumer(&stream_config, consumer_name).await;
-    }
-
-    let handle = nats_subscribe(
+    crate::refresh::nats::install(
         subject,
-        None,
-        Some(stream_config),
-        Some(consumer_config),
-        move |_msg| {
+        stream_config,
+        consumer_config,
+        move || {
             let rebuild_fn = Arc::clone(&rebuild_fn);
             async move {
                 match rebuild_fn().await {
                     Ok(new_cache) => {
                         storage.store(Some(Arc::new(new_cache)));
                         info!("缓存刷新完成");
-                        Ok(())
                     }
-                    Err(e) => {
-                        error!("缓存全量重建失败: {e}");
-                        Ok(())
-                    }
+                    Err(e) => error!("缓存全量重建失败: {e}"),
                 }
+                Ok(())
             }
         },
     )
-    .await?;
-
-    info!("NATS 缓存消费者启动完成 (subject={subject})");
-    Ok(handle)
+    .await
 }
 
 /// # 发布缓存刷新信号
@@ -130,99 +91,5 @@ where
 ///
 /// 用于 SVC `after_*` 回调：任何写操作成功后调用此函数通知其他节点。
 pub async fn publish_cache_refresh_signal(subject: &str) -> anyhow::Result<()> {
-    let signal = CacheRefreshSignal::new();
-    nats_publish(subject, &signal, true).await?;
-    Ok(())
-}
-
-/// # 默认 Stream 配置
-///
-/// - `subject`：刷新信号主题，Stream 名由主题派生（`.` 替换为 `_`）
-/// - `subjects` 精确匹配该主题，保证与发布主题一致
-/// - 文件持久化，无消息数/大小限制（由后续 TTL 控制）
-/// - 每节点独立 consumer，不做负载均衡
-pub fn default_stream_config(subject: &str) -> jetstream::stream::Config {
-    jetstream::stream::Config {
-        name: subject.replace('.', "_"),
-        subjects: vec![subject.to_string()],
-        storage: jetstream::stream::StorageType::File,
-        max_messages: -1,
-        max_bytes: -1,
-        max_age: std::time::Duration::from_secs(604800), // 7 天 TTL
-        ..Default::default()
-    }
-}
-
-/// # 默认 Push Consumer 配置
-///
-/// - `DeliverPolicy::New`：新建消费者不重放历史消息
-/// - `AckPolicy::Explicit`：处理完成后 ACK
-/// - `name`：consumer 名，含节点实例 ID，保证多副本各自独立、互不抢消息
-/// - 不设置 `durable_name`：consumer 为具名 ephemeral，进程退出后由服务端
-///   按 `inactive_threshold` 回收，不会随重启累积元数据
-pub fn default_consumer_config(consumer_name: &str) -> jetstream::consumer::push::Config {
-    jetstream::consumer::push::Config {
-        name: Some(consumer_name.to_string()),
-        deliver_policy: jetstream::consumer::DeliverPolicy::New,
-        ack_policy: jetstream::consumer::AckPolicy::Explicit,
-        ..Default::default()
-    }
-}
-
-/// # 探测 Push Consumer 是否存活
-///
-/// 用于订阅守护：
-///
-/// - `Ok(true)`：stream 与 consumer 都还在，订阅正常
-/// - `Ok(false)`：二者之一已不存在（NATS 重启、断连超过 `inactive_threshold`、
-///   被人工删除），需要重建订阅
-/// - `Err`：无法判断（如 NATS 不可达），调用方应保持现状并稍后重试，
-///   避免网络抖动触发无谓的重建
-pub async fn consumer_alive(
-    stream_config: &jetstream::stream::Config,
-    consumer_name: &str,
-) -> anyhow::Result<bool> {
-    let stream = get_or_create_stream(stream_config.clone()).await?;
-
-    match stream.consumer_info(consumer_name).await {
-        Ok(_) => Ok(true),
-        Err(e)
-            if matches!(
-                e.kind(),
-                async_nats::jetstream::context::ConsumerInfoErrorKind::NotFound
-                    | async_nats::jetstream::context::ConsumerInfoErrorKind::StreamNotFound
-            ) =>
-        {
-            Ok(false)
-        }
-        Err(e) => Err(anyhow::anyhow!(
-            "探测 consumer {consumer_name} 失败: {e}"
-        )),
-    }
-}
-
-/// # 清理旧的 Push Consumer
-///
-/// 启动时删除同名 consumer，确保不重放历史消息。
-/// 删除失败不影响后续流程（consumer 可能不存在或权限不足）。
-async fn cleanup_stale_consumer(
-    stream_config: &jetstream::stream::Config,
-    consumer_name: &str,
-) {
-    match get_or_create_stream(stream_config.clone()).await {
-        Ok(stream) => {
-            if let Err(e) = stream.delete_consumer(consumer_name).await {
-                if e.to_string().contains("not found") {
-                    info!("旧 consumer 不存在，无需清理: {consumer_name}");
-                } else {
-                    error!("删除旧 consumer 失败: {e}");
-                }
-            } else {
-                info!("已清理旧 consumer: {consumer_name}");
-            }
-        }
-        Err(e) => {
-            error!("获取 Stream 失败，跳过 consumer 清理: {e}");
-        }
-    }
+    crate::refresh::publish(subject).await
 }

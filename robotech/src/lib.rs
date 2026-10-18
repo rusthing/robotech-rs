@@ -17,6 +17,7 @@
 //! - `macros`：过程宏导出（需启用 feature `macros`）
 //! - `micro_svc`：微服务能力（注册中心、配置中心、Feign 客户端等）
 //! - `mq`：消息队列（MQTT、NATS、RabbitMQ）
+//! - `refresh`：刷新信号（基于 JetStream 的变更广播 + 订阅自愈，需启用 feature `refresh`）
 //! - `ro`：统一响应对象
 //! - `signal`：进程信号与 PID 文件管理（需启用 feature `app`）
 //! - `svc`：服务层基础设施（需启用 feature `app`）
@@ -68,6 +69,8 @@ pub mod log;
 pub mod macros;
 pub mod micro_svc;
 pub mod mq;
+#[cfg(feature = "refresh")]
+pub mod refresh;
 #[cfg(feature = "redis")]
 pub mod redis;
 #[cfg(feature = "app")]

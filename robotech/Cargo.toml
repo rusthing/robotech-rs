@@ -45,7 +45,9 @@ nats = ["dep:async-nats", "dep:futures", "dep:bytes"]
 rabbitmq = ["dep:lapin", "dep:futures", "dep:bytes"]
 redis = ["dep:redis"]
 influxdb = ["dep:influxdb", "dep:reqwest"]
-local-cache = ["nats"]
+# 刷新信号：基于 JetStream 的变更广播 + 订阅自愈（不依赖缓存，可单独使用）
+refresh = ["nats"]
+local-cache = ["refresh"]
 distributed-cache = ["redis"]
 
 [dependencies]

@@ -19,6 +19,7 @@ use std::collections::HashMap;
 use std::time::Duration;
 use tokio::sync::watch;
 use tokio::task::JoinHandle;
+use tracing::warn;
 
 /// Consul 后端客户端：同时实现配置中心（KV）与注册中心（Agent / Health）能力。
 ///
@@ -169,7 +170,14 @@ impl ConfigCenterClient for ConsulClient {
         let blocking_query_timeout = self.blocking_query_timeout;
 
         let join_handle = tokio::spawn(async move {
+            // 上一次拿到的 ModifyIndex；为 None 表示 key 当前不存在
             let mut last_index: Option<String> = None;
+            // key 当前是否处于「不存在」状态
+            let mut missing = false;
+            // 是否已经建立过基线：首次成功读取只记录 index，不触发 reload
+            let mut initialized = false;
+            let mut error_logged = false;
+
             loop {
                 match Self::fetch_kv_raw(
                     &reqwest_client,
@@ -181,28 +189,49 @@ impl ConfigCenterClient for ConsulClient {
                 .await
                 {
                     Ok(Some(entry)) => {
+                        error_logged = false;
+
                         let new_index = entry.modify_index.to_string();
-                        let is_first_fetch = last_index.is_none();
-                        if let Some(ref last_idx) = last_index {
-                            if new_index == *last_idx {
-                                continue;
-                            }
-                        }
+                        let changed_by_index = last_index
+                            .as_ref()
+                            .map(|last| *last != new_index)
+                            .unwrap_or(false);
+                        // 从「不存在」变为「存在」也是一次真实变更
+                        let appeared = missing;
+
+                        missing = false;
                         last_index = Some(new_index);
-                        // 首次 fetch 仅记录初始 index，不触发变更通知
-                        if !is_first_fetch {
-                            if config_changed_sender.send(()).is_err() {
-                                return;
-                            }
+
+                        let should_notify = initialized && (changed_by_index || appeared);
+                        initialized = true;
+
+                        if should_notify && config_changed_sender.send(()).is_err() {
+                            return;
                         }
                     }
                     Ok(None) => {
-                        if config_changed_sender.send(()).is_err() {
-                            return;
+                        error_logged = false;
+
+                        // key 不存在：可能是从未创建，也可能是被删除。
+                        // 只有「从存在变为删除」才需要通知一次（上层会回退到文件配置）；
+                        // 一直不存在时不能反复触发，否则会变成每 3 秒一次全量 reload。
+                        if last_index.is_some() && !missing {
+                            last_index = None;
+                            missing = true;
+                            if config_changed_sender.send(()).is_err() {
+                                return;
+                            }
+                        } else {
+                            missing = true;
                         }
+
                         tokio::time::sleep(Duration::from_secs(3)).await;
                     }
-                    Err(_) => {
+                    Err(e) => {
+                        if !error_logged {
+                            warn!("consul watch 请求失败({config_key}): {e:?}，将持续重试");
+                            error_logged = true;
+                        }
                         tokio::time::sleep(Duration::from_secs(3)).await;
                     }
                 }

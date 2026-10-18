@@ -193,7 +193,10 @@ where
             watch_app_file(&app_file_path.clone(), base_config.watch_debounce_delay)?;
 
         #[cfg(feature = "config-center")]
-        register_config_center_watch(Arc::clone(&reload_config_fn)).await;
+        {
+            register_config_center_watch(Arc::clone(&reload_config_fn)).await;
+            spawn_config_fallback(Arc::clone(&reload_config_fn));
+        }
 
         Ok(Self {
             app_config: Arc::new(app_config.clone()),
@@ -212,14 +215,21 @@ async fn build_app_cfg(
     app_dir: &PathBuf,
     app_file_name_without_ext: &str,
 ) -> crate::cfg::Result<(Config, Vec<String>)> {
-    build_cfg(
+    let (config, files) = build_cfg(
         app_dir,
         "APP",
         Some(app_file_name_without_ext),
         app_file_name_without_ext,
         config_file_path,
     )
-    .await
+    .await?;
+
+    // 刷新信号配置随应用配置一并加载：首次启动与热更新都经过这里，
+    // 因此 `[refresh] probe-interval` 的修改无需重启即可在下一轮探活生效
+    #[cfg(feature = "refresh")]
+    crate::refresh::load_config(&config);
+
+    Ok((config, files))
 }
 
 /// 注册配置中心变更监听。HubClient 重建后需要重新调用此函数。
@@ -246,6 +256,28 @@ fn register_config_center_watch(
             warn!("watch config center failed: {:?}", e);
         }
     })
+}
+
+/// 配置兜底刷新间隔
+///
+/// watch 链路本身已有自愈（etcd 断线重建、consul 长轮询重试），但仍有极小
+/// 窗口可能漏事件：reload 读取配置之后、新 watch 挂上之前发生的变更。
+/// 这里定期做一次全量拉取 + diff——没有变化时 `reload` 内部不会触发 `setup()`，
+/// 代价只是一次配置中心读取。
+#[cfg(feature = "config-center")]
+const CONFIG_FALLBACK_INTERVAL: Duration = Duration::from_secs(600);
+
+/// 启动配置兜底刷新任务。
+#[cfg(feature = "config-center")]
+fn spawn_config_fallback(
+    reload: Arc<dyn Fn() -> Pin<Box<dyn Future<Output = ()> + Send>> + Send + Sync>,
+) {
+    tokio::spawn(async move {
+        loop {
+            tokio::time::sleep(CONFIG_FALLBACK_INTERVAL).await;
+            reload().await;
+        }
+    });
 }
 
 /// # 监听应用程序文件变化并触发优雅退出
