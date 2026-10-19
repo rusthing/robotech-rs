@@ -14,7 +14,8 @@ readme = "README.md"
 [features]
 # ============ 基础能力 ============
 # 应用级配置与生命周期（AppWatcher / LogWatcher / SignalManager / SvcError / bootstrap! 依赖）
-app = ["dep:validator", "dep:idworker"]
+# `idworker/utils`：框架统一初始化 ID 生成器（worker node 分配），需要 `setup_id_worker`
+app = ["dep:validator", "dep:idworker", "idworker/utils"]
 # 过程宏（bootstrap! / log_call / dao / svc / ctrl / router / api_doc / crud_dto / vo / dic ...）
 macros = ["dep:robotech-macros"]
 

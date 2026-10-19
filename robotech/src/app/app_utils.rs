@@ -374,6 +374,9 @@ pub fn init_app() -> Result<()> {
 pub async fn register_app() {
     #[cfg(any(feature = "config-center", feature = "registry-center"))]
     crate::micro_svc::register_micro_svc().await;
+    // 自动分配的 worker node 可能存在"同时启动选中同一个号"的窗口，
+    // 首次注册后做一次冲突检查（未启用自动分配时为空操作）
+    crate::app::spawn_id_node_conflict_check();
 }
 
 /// # 优雅退出时清理应用的可选子系统

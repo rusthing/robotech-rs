@@ -679,6 +679,18 @@ impl HubClient {
             .await
     }
 
+    /// 注册中心里使用的服务名；未配置注册中心时为 `None`。
+    ///
+    /// 供框架内部（如 ID 生成器的 worker node 分配）发现同服务的其它实例。
+    pub fn registry_svc_name(&self) -> Option<String> {
+        self.registry_key.as_ref().map(|key| key.svc_name.clone())
+    }
+
+    /// 是否已接入注册中心。
+    pub fn has_registry(&self) -> bool {
+        self.registry.is_some() && self.registry_key.is_some()
+    }
+
     fn add_join_handles(&self, handles: Vec<JoinHandle<()>>) {
         self.join_handles.lock().unwrap().extend(handles);
     }
@@ -710,8 +722,24 @@ fn build_service_instance(
         ip,
         port,
         health_check_url,
-        metadata: Default::default(),
+        metadata: build_metadata(),
     })
+}
+
+/// 构建注册实例的 metadata。
+///
+/// 目前只上报 ID 生成器的 worker node，供同服务的其它实例在启动时避让
+/// （见 `crate::app::setup_id_worker`）。
+fn build_metadata() -> std::collections::HashMap<String, String> {
+    let mut metadata = std::collections::HashMap::new();
+    #[cfg(feature = "app")]
+    if let Some(node) = crate::app::assigned_id_node() {
+        metadata.insert(
+            crate::app::ID_NODE_METADATA_KEY.to_string(),
+            node.to_string(),
+        );
+    }
+    metadata
 }
 
 fn parse_file_format(s: &str) -> Option<FileFormat> {

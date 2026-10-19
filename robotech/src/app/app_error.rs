@@ -39,4 +39,10 @@ pub enum AppError {
     #[cfg(feature = "db")]
     #[error("Init DAO error: {0}")]
     InitDao(#[from] crate::dao::DaoError),
+    /// ID 生成器创建失败
+    #[error("ID worker error: {0}")]
+    IdWorker(#[from] idworker::IdWorkerError),
+    /// ID 生成器的 worker node 无法确定
+    #[error("ID worker node error: {0}")]
+    IdWorkerNode(String),
 }
