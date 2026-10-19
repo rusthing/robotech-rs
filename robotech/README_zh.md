@@ -537,7 +537,7 @@ pub enum ConnectorStatus {
 > `None` 原样保留；而 VO 字段写非 `Option` 时是 `#[from(~.into())]`，源头是
 > `Option<i16>` 就缺 impl **直接编译不过**，逼作者把 VO 字段改成 `Option<枚举>`。
 > 宁可编译不过，也不要把数据库 NULL 静默解释成某个状态。
-> 参照 `dtw_locator.bind_target_type`（`Option<i16>` → VO 写 `Option<u16>`）。
+> 参照 `dtw_locator_bind.bind_target_type`（`Option<i16>` → VO 写 `Option<u16>`）。
 
 > **什么时候必须写 `default`？** `#[vo]` 对枚举字段生成的是 `#[from(~.into())]`
 > （`i16` → 枚举），而 `From` 是无损契约、无法返回错误，只能靠 `Default` 兜底；

@@ -65,7 +65,7 @@
 //! | `int2`（可空） | `X` | **编译报错**（缺 `From<Option<i16>>`，故意留的缺口） |
 //!
 //! 也就是说：**列可空，VO 字段就必须写 `Option<枚举>`**，别让 NULL 被兜底变体吃掉。
-//! 参照 `dtw_locator.bind_target_type`（`Option<i16>` → VO 写 `Option<u16>`）。
+//! 参照 `dtw_locator_bind.bind_target_type`（`Option<i16>` → VO 写 `Option<u16>`）。
 //!
 //! ## 用法
 //!

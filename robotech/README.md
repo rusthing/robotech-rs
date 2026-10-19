@@ -440,7 +440,7 @@ Only when `#[dic(default = VariantName)]` is present, these are generated **in a
 > VO field gets `#[from(~.into())]`, which then lacks the impl **and fails to compile**,
 > forcing the author to write `Option<Enum>` in the VO.
 > A compile error beats silently explaining a database NULL as some state.
-> Compare `dtw_locator.bind_target_type` (`Option<i16>` → `Option<u16>` in the VO).
+> Compare `dtw_locator_bind.bind_target_type` (`Option<i16>` → `Option<u16>` in the VO).
 
 > **When is `default` mandatory?** `#[vo]` emits `#[from(~.into())]` for enum fields
 > (`i16` → enum), and `From` is an infallible contract that cannot report an error — so it can
