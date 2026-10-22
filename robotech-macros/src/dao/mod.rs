@@ -327,11 +327,17 @@ pub(super) fn dao_macro(args: DaoArgs, input: ItemStruct) -> TokenStream {
                 if active_model.id.is_not_set() {
                     active_model.id = ActiveValue::set(idworker::next_id()? as i64);
                 }
-                // 当创建时间未设置时，设置创建时间和修改时间
+                // 当创建时间未设置时补上当前时间
                 if active_model.create_ms.is_not_set() {
-                    let now = ActiveValue::set(wheel_rs::time_utils::now_ms() as i64);
-                    active_model.create_ms = now.clone();
-                    active_model.update_ms = now;
+                    active_model.create_ms =
+                        ActiveValue::set(wheel_rs::time_utils::now_ms() as i64);
+                }
+                // 修改时间独立判断：新增即创建，两者取同一个值。
+                // 不能把这段挂在上面 `create_ms.is_not_set()` 里——调用方显式传了
+                // `_current_ms`（映射到 create_ms）时，上面的分支不会进入，
+                // update_ms 就留成 NotSet，插入直接撞非空约束
+                if active_model.update_ms.is_not_set() {
+                    active_model.update_ms = active_model.create_ms.clone();
                 }
                 // 添加时更新者就是创建者
                 active_model.updater_id = active_model.creater_id.clone();
