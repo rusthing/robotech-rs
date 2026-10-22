@@ -99,9 +99,15 @@ impl ApiClientUtils {
         // 检查状态码，如果不是成功状态码则转换为错误
         let status_code = response.status();
         if !status_code.is_success() {
+            let status = status_code.to_string();
+            // 状态码非 2xx 时也把响应体读出来：控制器返回的 `Ro` JSON 里写着真正的
+            // 失败原因（例如「获取 unique 字段列表错误」），丢掉它调用方只能看到 500。
+            let body = response.text().await.unwrap_or_default();
+            tracing::debug!("{urn} response body: {body}");
             return Err(ApiClientError::NonSuccessStatus(
                 urn.to_string(),
-                status_code.to_string(),
+                status,
+                body,
             ));
         }
         Ok(response)

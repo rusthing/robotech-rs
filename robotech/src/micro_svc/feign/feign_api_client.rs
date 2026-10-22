@@ -268,6 +268,13 @@ impl FeignApiClient {
                 let instances = service_discovery.get_instances();
                 let max_retries = instances.len().max(1);
                 let mut tried_ids = Vec::new();
+                // 最后一个真实错误：全部实例都试过之后要把它抛出去。
+                //
+                // 只抛 NotInit(NoAvailableInstance) 会把「对方其实回了 500」这种
+                // 明确的服务端错误伪装成「没有可用实例」——单实例部署时尤其误导，
+                // 看日志只见到一句 no available service instance，
+                // 真正的失败原因（响应体里的 Ro）反而丢了。
+                let mut last_error: Option<ApiClientError> = None;
 
                 for _ in 0..max_retries {
                     let (base_url, instance_id) = match Self::try_select_instance(
@@ -307,13 +314,14 @@ impl FeignApiClient {
                                 *max_failures,
                                 *cooldown_duration,
                             );
+                            last_error = Some(e);
                         }
                     }
                 }
 
-                Err(ApiClientError::NotInit(
-                    FeignError::NoAvailableInstance.to_string(),
-                ))
+                Err(last_error.unwrap_or_else(|| {
+                    ApiClientError::NotInit(FeignError::NoAvailableInstance.to_string())
+                }))
             }
         }
     }

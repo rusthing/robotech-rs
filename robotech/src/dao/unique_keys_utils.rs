@@ -10,6 +10,17 @@ use std::sync::OnceLock;
 /// 通过 [`init_unique_keys`] 完成初始化，供 DAO 层错误解析使用。
 pub static UNIQUE_KEYS: OnceLock<HashMap<String, UniqueKey>> = OnceLock::new();
 
+/// # PostgreSQL 标识符的最大字节数
+///
+/// PostgreSQL 的标识符上限为 `NAMEDATALEN - 1`，即 63 字节；建表时超长的约束名
+/// 会被**静默截断**，报重复键错误时给出的也是截断后的名字。复合唯一键的约束名
+/// 很容易超过这个上限，例如
+/// `ak_message_id_and_target_category_id_and_target_id_msg_message_target`
+/// 落到库里就成了 `ak_message_id_and_target_category_id_and_target_id_msg_mess`。
+/// 因此注册表除了完整键，还要记住截断后的键，否则查找落空，重复键会被误判成
+/// 「获取 unique 字段列表错误」的运行时错误，接口直接返回 500。
+const PG_IDENT_MAX_BYTES: usize = 63;
+
 /// # 唯一键声明切片
 ///
 /// 通过 [`distributed_slice`] 机制收集各实体模块声明的唯一键元组
@@ -88,17 +99,46 @@ pub fn push_unique_key(
     if columns.len() == 1 {
         // 添加 PostgreSQL 格式的键：ak_{key_name}_{table}
         let key = format!("ak_{}_{}", unique_key.key_name, unique_key.table);
-        unique_keys.insert(key, unique_key.clone());
+        insert_key(unique_keys, key, &unique_key);
         // 添加 MySQL 格式的键：{table}.ak_{key_name}
         let key = format!("{}.ak_{}", unique_key.table, unique_key.key_name);
-        unique_keys.insert(key, unique_key);
+        insert_key(unique_keys, key, &unique_key);
     } else {
         // 复合键：多个列名以 _and_ 连接
         // 添加 PostgreSQL 格式的键：ak_{col1_and_col2}_{table}
         let key = format!("ak_{}_{}", columns.join("_and_"), unique_key.table);
-        unique_keys.insert(key, unique_key.clone());
+        insert_key(unique_keys, key, &unique_key);
         // 添加 MySQL 格式的键：{table}.ak_{col1_and_col2}
         let key = format!("{}.ak_{}", unique_key.table, columns.join("_and_"));
-        unique_keys.insert(key, unique_key);
+        insert_key(unique_keys, key, &unique_key);
     }
+}
+
+/// # 写入唯一键注册表
+///
+/// 除完整键外，还写入 PostgreSQL 截断到 63 字节后的键：数据库里的约束名就是这么
+/// 存的，报错信息回传的也是这个名字。截断键不会覆盖已存在的完整键（`or_insert`），
+/// 避免两个键名恰好前缀相同时互相污染。
+fn insert_key(unique_keys: &mut HashMap<String, UniqueKey>, key: String, unique_key: &UniqueKey) {
+    let truncated = truncate_pg_ident(&key);
+    if truncated != key.as_str() {
+        unique_keys
+            .entry(truncated.to_string())
+            .or_insert_with(|| unique_key.clone());
+    }
+    unique_keys.insert(key, unique_key.clone());
+}
+
+/// # 按 PostgreSQL 规则截断标识符
+///
+/// 超长时截到 63 字节，且不会切断多字节字符（约束名一般是 ASCII，这里只是兜底）。
+fn truncate_pg_ident(ident: &str) -> &str {
+    if ident.len() <= PG_IDENT_MAX_BYTES {
+        return ident;
+    }
+    let mut end = PG_IDENT_MAX_BYTES;
+    while !ident.is_char_boundary(end) {
+        end -= 1;
+    }
+    &ident[..end]
 }

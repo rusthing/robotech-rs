@@ -36,9 +36,11 @@ pub enum ApiClientError {
     ///
     /// 当服务器返回的状态码不在 2xx 范围内时触发此错误，
     /// 包括客户端错误（4xx）和服务端错误（5xx）。
-    /// 此错误携带状态码和响应体信息，便于调试和处理。
-    #[error("响应非2xx状态码: {0} -> {1}")]
-    NonSuccessStatus(String, String),
+    /// 此错误携带 urn、状态码与响应体信息，便于调试和处理——框架的控制器即便
+    /// 走 500 也会返回 `Ro` JSON，响应体里往往就是真正的失败原因，
+    /// 不带出来调用方只能看到一个光秃秃的 `500 Internal Server Error`。
+    #[error("响应非2xx状态码: {0} -> {1}, 响应体: {2}")]
+    NonSuccessStatus(String, String, String),
     #[error("按Json格式解析响应失败: {0}")]
     ParseJson(String, #[source] serde_json::Error),
     #[error("按bytes格式解析响应失败: {0}")]
