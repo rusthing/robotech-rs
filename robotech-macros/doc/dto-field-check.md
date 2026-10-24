@@ -43,8 +43,10 @@ pub target_id: String,
 （`ValidateRange<U16> for U16` 与 `for Option<U16>`），宏据此生成
 
 ```rust
-#[validate(range(min = U16::from(1), max = U16::from(2), message = "…"))]
+#[validate(range(min = U16::from(1u16), max = U16::from(2u16), message = "…"))]
 ```
+
+端点必须带类型后缀（`1u16` 而不是 `1`）：裸字面量会退化成 `i32`，`U16::from` 收不到。
 
 也就是端点写普通数字、宏负责包成包装类型。这是 validator 支持自定义类型的标准做法：
 **给自定义类型实现 `ValidateRange`（长度类字段则是 `ValidateLength`），再让它出现在
@@ -59,7 +61,7 @@ validate 属性里**。validator 自己的 `ValidateRangeType` 标记 trait 没�
 | `String` | `required` + `length(min = 1)`：必须有值、不许空串，**不设上限** |
 | `Option<String>` | 不加校验（`None` 合法、空串也合法） |
 | 数值 | 只加 `required`（`Option` 数值不加） |
-| 其它（时间、布尔、枚举……） | 只加 `required`（`Option` 不加） |
+| 其它（时间、布尔、枚举……） | 只加 `required`（`Option` 不加）；枚举的值域另见第六节 |
 
 所以「允许空串」是显式声明的结果：只有写了 `@len 0..=N`（或 `@len 0..`）才放开
 最小长度，其余一律不许空串。
@@ -91,7 +93,55 @@ pub geo_longitude: f64,
 pub geo_latitude: f64,
 ```
 
-## 六、完整示例
+## 六、枚举字段（`#[dic]` 字典枚举）
+
+枚举字段**不写标签**。`@len` / `@range` 用在枚举上会直接编译报错——这是故意的：
+枚举没有长度，也不该用数字区间去描述它的值域。
+
+那枚举字段靠什么校验？靠**类型本身**，在反序列化那一层就闭环了：
+
+| 环节 | 越界值（比如 `{"jobType": 7}`）的处理 |
+| --- | --- |
+| `#[dic]` 生成的 `Deserialize` | 反序列化即报错，**不会**静默落成默认变体 |
+| `#[dic]` 生成的 `TryGetable` / `ValueType` | 从库里读到越界值同样报错 |
+| `#[crud_dto]` 生成的 `validate` | 只补 `required()`：非 `Option` 的枚举必须给值 |
+
+所以「枚举字段有没有校验」的答案是：**有，而且比 validator 更早更严**。validator 里
+再写一条 `range(min = 0, max = 3)` 是重复劳动，还会和枚举定义漂移——加个变体忘了改数字，
+校验就成了假的。
+
+**确需「这个接口只允许枚举的一部分变体」时**（例如新增任务只允许 `Running`），validator
+没有内建的「取值必须在某个集合里」规则，只能在字段上手写 `custom`：
+
+```rust
+/// 任务状态：新增只允许运行中
+#[validate(required(message = "任务状态不能为空"), custom(function = "check_task_status"))]
+pub status: TaskStatus,
+```
+
+```rust
+fn check_task_status(value: &TaskStatus) -> Result<(), validator::ValidationError> {
+    if matches!(value, TaskStatus::Running) {
+        Ok(())
+    } else {
+        let mut err = validator::ValidationError::new("status");
+        err.message = Some("任务只能以运行中状态创建".into());
+        Err(err)
+    }
+}
+```
+
+三个坑：
+
+- **手写 `#[validate]` 会顶掉宏的自动校验**（宏只在字段没有 `validate` 时才补），所以
+  `required()` 得自己写，否则 `Option` 里没值时这条路直接跳过；
+- validator 对 `Option<T>` 字段会先解包再调用，`custom` 拿到的是 `&T`，不是 `&Option<T>`；
+- 它还会把值塞进错误参数，字段类型要能 `Display`——字典枚举自带 `Display`，没问题。
+
+这类规则是**接口级**的，不是类型级的，所以不进宏：同一个 `TaskStatus` 在查询接口上可以
+取全部变体，在新增接口上只允许一个，宏看不到接口语义。
+
+## 七、完整示例
 
 ```rust
 #[crud_dto]
@@ -121,7 +171,7 @@ pub struct DtwControlPointDto {
 pub geo_longitude: Option<f64>,
 ```
 
-## 七、校验提示语
+## 八、校验提示语
 
 提示语由宏按字段说明 + 区间自动拼，不需要手写：
 
@@ -131,7 +181,7 @@ pub geo_longitude: Option<f64>,
 
 字段说明取注释里第一条不是标签的行；没有说明就用字段名。
 
-## 八、扫描与维护
+## 九、扫描与维护
 
 改列长时，注释要一起改：**注释是唯一出处**，宏不读数据库。检查有没有漏：
 
