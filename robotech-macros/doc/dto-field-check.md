@@ -103,6 +103,11 @@ pub geo_latitude: f64,
 枚举字段在 DTO 里**不写标签**。`@len` / `@range` 用在枚举上会直接编译报错——这是故意的：
 枚举没有长度，也不该用数字区间去描述它的值域。
 
+**用整数承载的枚举列要提炼出类型，不要用 `@range` 糊过去。** 列注释里一旦出现
+`1-人` / `2-车` 这种值表，就说明这列有枚举语义：在 `xxx-api/src/dic/` 建 `#[dic]` 枚举、
+DTO 与 VO 字段换成它、模型列注释改成 `@enum`（10.2、10.3）。`@range 1..=2` 只能说清
+「范围是 1 到 2」，说不出「1 是谁、2 是谁」，生成的代码也只能停在 `u16`。
+
 值表写在哪？写在**模型的列注释**里（`@enum`，见 10.2）：① 这是生成代码的输入，
 ② DTO 侧字段类型已经是枚举，不需要第二份。
 
@@ -212,36 +217,84 @@ grep -rn "pub .*: String" --include="*.rs" */\*-api/src/dto
 | `model/*-pgsql.pdm`、`*-mysql.pdm` | 物理模型列 `Comment` |
 | `model/create-table-*.sql` | `comment on column … is '…'`；MySQL 是列定义行内的 `comment '…'` |
 
-三处内容相同：**散文 + 标签行**。散文是字段说明，标签行单独成行、`@` 打头，语法与
-DTO 完全一致（`@len` / `@range`）。PowerDesigner 重新生成 DDL 时注释原样带出，
-所以标签能一路流到建表语句。
+三处内容相同：**散文 + 标签行**。散文是字段说明；`@len` / `@range` 单独成行、语法与
+DTO 完全一致；枚举列再多一个 `@enum` 块（10.2，只写在模型里）。PowerDesigner 重新
+生成 DDL 时注释原样带出，标签就一路流到建表语句。
 
 ### 10.2 `@enum`：枚举列怎么声明
 
-枚举列在模型里写一行 `@enum`，把「该建什么枚举」一次说清：
+枚举列用「头行 + 缩进变体」的块描述，读起来就是一段枚举定义。块内不留空行：
 
 ```
-计划类型
-@enum JobType default=Manual 0=Manual:手动分派, 1=Cron:cron 表达式, 2=FixedDelay:固定延迟, 3=FixedRate:固定频率
+绑定目标类型
+@enum BindTargetType
+  1=Person   人
+  2=Vehicle  车
 ```
 
-| 片段 | 含义 |
-| --- | --- |
-| `@enum` | 标签名 |
-| `JobType` | 第一个空白分隔的词 = 枚举类型名，生成 `pub enum JobType` |
-| `default=Manual` | 可选；有它才生成 `#[dic(default = Manual)]`（被 `#[vo]` 用到的枚举必须有） |
-| `0=Manual:手动分派` | `判别式=变体名:说明`，说明可省；项之间用**逗号**分隔，项内可以含空格 |
-| 顺序 | 按书写顺序生成，判别式必须在 `i16` 范围内 |
+变体多、带默认值时：
+
+```
+报警状态
+@enum AlertStatus default=Temporary
+  0=Temporary   临时(不是真正报警，用于计算防抖)
+  1=InProgress  进行中
+  2=Confirmed   已确认(用户接收到报警后先手工确认)
+```
+
+| 位置 | 写法 | 含义 |
+| --- | --- | --- |
+| 头行 | `@enum <类型名>` | 要生成的枚举类型名 |
+| 头行 | `default=<变体名>` | 可选；有它才生成 `#[dic(default = …)]` |
+| 变体行 | `  判别式=变体名` | 缩进两格，判别式照抄进 `= N` |
+| 变体行 | 变体名后空**两格** | 之后都是变体说明，进 `///` 文档注释；可省 |
+
+对齐只为读起来像代码：判别式右对齐、变体名左对齐、说明从同一列开始。同步工具生成的
+块已经排好；手改时守住「变体名后至少两个空格」这个边界即可——解析靠它区分变体名和说明。
 
 约定：
 
 - `@enum` **只写在模型里**。DTO 字段类型已经是 `JobType`，再抄一遍值表就是第二份真相。
 - 枚举列的散文**不再重复值表**，别写 `0: 手动分派 / 1: cron表达式`——值表只在 `@enum` 里。
-- 用整数承载枚举的列（`dtw_locator_bind.bind_target_type` 是 `u16` 配 `@range 1..=2`）
-  继续用 `@range`：代码里没有对应枚举类型，写 `@enum` 也生成不出来。
-- 一个枚举被多列引用时，每列各写一行 `@enum`，内容相同。
+- **整数承载的枚举列也必须提炼**，不能拿 `@range` 糊过去：`@range 1..=2` 只说得出取值范围，
+  说不出「1 是谁、2 是谁」，生成的代码也只能停在 `u16`。值表一出现就建枚举（10.3）。
+- 一个枚举被多列引用时，每列各写一个块，内容相同。
+- 判别式必须是整数，范围 `i16`（与库里的 `INT2` 列一致）。
 
-### 10.3 同步与校验
+### 10.3 从 `@enum` 生成枚举类型
+
+模型块到代码是逐行对应的，生成规则固定：
+
+| 模型里 | 生成到代码 |
+| --- | --- |
+| `@enum BindTargetType` | `pub enum BindTargetType {` |
+| `default=Person` | `#[dic(default = Person)]` |
+| `1=Person   人` | `/// 人` + `Person = 1,` |
+| 没写 `default=` | 不生成 `Default` / `From<i16>` |
+
+```rust
+use robotech::macros::dic;
+use strum::{AsRefStr, Display, EnumString};
+
+/// 定位卡绑定的目标类型，对应 `dtw_locator_bind.bind_target_type`。
+#[dic(default = Person)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, AsRefStr, Display, EnumString)]
+#[strum(serialize_all = "kebab-case")]
+pub enum BindTargetType {
+    /// 人
+    Person = 1,
+    /// 车
+    Vehicle = 2,
+}
+```
+
+- 判别式照抄模型，不重排；变体说明原样进 `///`。
+- 列可空 → DTO / VO 字段都写 `Option<枚举>`。被 `#[vo]` 用到的枚举**必须**有 `default`
+  （`#[vo]` 生成 `~.map(|v| v.into())`，需要 `From<i16>`）。
+- 枚举落在 `xxx-api/src/dic/`，`mod.rs` 里 `mod` + `pub use`；`lib.rs` 加 `pub mod dic;`。
+- 生成完把 DTO / VO 原来的 `u16` / `Option<u16>` 换成枚举，然后 `--check` 确认模型与代码对齐。
+
+### 10.4 同步与校验
 
 ```bash
 # 只报告差异（有差异退出码为 1，适合放在提交前）
@@ -257,7 +310,7 @@ python3 robotech-rs/tools/model_comment/sync.py --repo ../msg --write
 - 只处理 DTO 里出现过的列；`[模型缺列]` 表示模型漏了表或列（新表还没进模型）。
 - 新增列时的顺序是：建表脚本 / 模型 → DTO 注释 → 跑 `--check` 确认 0 处不一致。
 
-### 10.4 已知边界
+### 10.5 已知边界
 
 - `@len` 的上限与列长度没有交叉校验（`varchar(50)` 抄成 `@len 1..=500` 不会被发现），
   改列长时两处一起改，再跑一次 `--check`。

@@ -10,8 +10,13 @@
 
 - `@len 1..=50`        字符串长度，DTO 与模型都写
 - `@range -180..=180`  数值区间，DTO 与模型都写
-- `@enum JobType default=Manual 0=Manual:手动分派, 1=Cron:cron表达式`
-  只写在模型里——DTO 侧字段类型已经是枚举，不重复声明值表
+- 枚举块，只写在模型里（DTO 侧字段类型已经是枚举，不重复声明值表）：
+
+      @enum JobType default=Manual
+        0=Manual  手动分派
+        1=Cron    cron 表达式
+
+  头行 `@enum <类型名> [default=<变体>]`，缩进两格的每行是 `值=变体名  说明`。
 
 模型侧落点：
 
@@ -30,6 +35,9 @@ import re
 import sys
 
 TAG_RE = re.compile(r"^\s*@(len|range|enum)\b(.*)$")
+# 枚举块头行 `@enum 类型名 [default=变体]`，下面缩进两格的变体行
+ENUM_HEAD_RE = re.compile(r"^\s*@enum\b(.*)$")
+ENUM_VALUE_RE = re.compile(r"^\s+(-?\d+)\s*=\s*([A-Za-z_][A-Za-z0-9_]*)(?:\s{2,}(.*))?$")
 
 SCALAR_TYPE_RE = re.compile(
     r"^(?:Option<\s*)*(?:String|bool|i8|i16|i32|i64|i128|u8|u16|u32|u64|u128|"
@@ -135,30 +143,58 @@ def parse_dic_enums(repo: pathlib.Path) -> dict[str, dict]:
     return enums
 
 
-def enum_tag(name: str, enum: dict) -> str:
-    items = []
-    for value, ident, doc in enum["variants"]:
-        doc = doc.replace(",", "，").replace(":", "：").replace("&", "＆")
-        items.append(f"{value}={ident}" + (f":{doc}" if doc else ""))
+def enum_tag_lines(name: str, enum: dict) -> list[str]:
+    """枚举块：头行 + 每个变体一行，值/变体名对齐，说明跟在两个空格之后。"""
     head = f"@enum {name}" + (f" default={enum['default']}" if enum["default"] else "")
-    return f"{head} {', '.join(items)}"
+    variants = enum["variants"]
+    value_width = max(len(str(value)) for value, _, _ in variants)
+    ident_width = max(len(ident) for _, ident, _ in variants)
+    lines = [head]
+    for value, ident, doc in variants:
+        line = f"  {str(value).rjust(value_width)}={ident.ljust(ident_width)}"
+        if doc:
+            line += f"  {doc}"
+        lines.append(line.rstrip())
+    return lines
 
 
 # ------------------------------------------------------------------ 文本工具
 
 
 def split_prose(comment: str) -> tuple[list[str], list[str]]:
+    """把注释切成散文行与标签块；`@enum` 之后的缩进变体行属于同一个标签块。"""
     prose, tags = [], []
-    for line in comment.splitlines():
+    lines = comment.splitlines()
+    i = 0
+    while i < len(lines):
+        line = lines[i]
+        if ENUM_HEAD_RE.match(line):
+            block = [line.strip()]
+            i += 1
+            while i < len(lines) and ENUM_VALUE_RE.match(lines[i]):
+                block.append(lines[i].strip())
+                i += 1
+            tags.append("\n".join(block))
+            continue
         if TAG_RE.match(line):
             tags.append(line.strip())
         else:
             prose.append(line)
+        i += 1
     while prose and not prose[-1].strip():
         prose.pop()
     while prose and not prose[0].strip():
         prose.pop(0)
     return prose, tags
+
+
+def canon(tag: str) -> str:
+    """比对时忽略缩进，只比内容——写进模型的是美化过的缩进版。"""
+    return "\n".join(line.strip() for line in tag.splitlines())
+
+
+def same_tags(have: list[str], want: list[str]) -> bool:
+    return sorted(canon(t) for t in have) == sorted(canon(t) for t in want)
 
 
 VALUE_LINE_RE = re.compile(r"^\s*-?\d+\s*[:：=\-]\s*\S")
@@ -181,13 +217,11 @@ def unescape_xml(text: str) -> str:
 
 def wanted_tag_lines(info: dict, enums: dict[str, dict]) -> list[str]:
     tags = info["tags"]
-    if "enum" in tags:
-        return [tags["enum"]]
     ftype = info["type"]
     base = re.sub(r"^(?:Option<\s*)+", "", ftype)
     base = re.sub(r"\s*>+$", "", base).strip()
     if base in enums:
-        return [enum_tag(base, enums[base])]
+        return ["\n".join(enum_tag_lines(base, enums[base]))]
     if SCALAR_TYPE_RE.match(ftype):
         out = []
         if "len" in tags:
@@ -275,7 +309,7 @@ def check_file(path: pathlib.Path, tags: dict[str, dict[str, list[str]]], obj_re
         if not want:
             continue
         _, have = split_prose(comment or "")
-        if sorted(have) != sorted(want):
+        if not same_tags(have, want):
             detail = "缺" if not have else ("多" if not set(want) & set(have) else "不一致")
             problems.append(f"{owner}.{code}: {detail} want={want} have={have}")
     return problems
@@ -289,7 +323,7 @@ def write_model(path: pathlib.Path, tags: dict[str, dict[str, list[str]]], obj_r
         if not want:
             continue
         prose, have = split_prose(comment or "")
-        if sorted(have) == sorted(want) and comment is not None:
+        if same_tags(have, want) and comment is not None:
             continue
         prose = drop_value_lines(prose, want)
         body = prose if prose else [name or code]
@@ -328,7 +362,7 @@ def check_sql(path: pathlib.Path, tags: dict[str, dict[str, list[str]]]) -> list
         if not want:
             continue
         _, have = split_prose(body)
-        if sorted(have) != sorted(want):
+        if not same_tags(have, want):
             problems.append(f"{table}.{col}: want={want} have={have}")
     return problems
 
@@ -343,7 +377,7 @@ def write_sql(path: pathlib.Path, tags: dict[str, dict[str, list[str]]]) -> list
         if not want:
             return m.group(0)
         prose, have = split_prose(body)
-        if sorted(have) == sorted(want):
+        if same_tags(have, want):
             return m.group(0)
         prose = drop_value_lines(prose, want)
         new = "\n".join((prose if prose else [col]) + want)
@@ -392,7 +426,7 @@ def _mysql_rewrite(path: pathlib.Path, tags, write: bool) -> list[str]:
         if not want:
             continue
         prose, have = split_prose(m.group(4))
-        if sorted(have) == sorted(want):
+        if same_tags(have, want):
             continue
         prose = drop_value_lines(prose, want)
         new_comment = "\n".join((prose if prose else [col]) + want)
