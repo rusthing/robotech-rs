@@ -1032,3 +1032,65 @@ impl_from_u!(U16, u16);
 impl_from_u!(U32, u32);
 impl_from_u!(U64, u64);
 impl_from_u!(U128, u128);
+// ========= validator 支持 =========
+//
+// `#[crud_dto]` 会把 DTO 里的 `u8..u128` 包装成 U8..U128，而 validator 只为
+// 原生整数和 `Option<原生整数>` 实现了 `ValidateRange`，包装类型没有实现时，
+// 字段上写 `@range 1..=2` 就编译不过。
+//
+// 这里按包装类型补齐：比较走内层原生值，`Option<包装>` 只在有值时比较
+// （与 validator 对 `Option<u16>` 的语义一致）。区间端点也必须是包装类型，
+// 所以宏生成的是 `range(min = U16::from(1), max = U16::from(2))` 这种形式。
+//
+// 注：validator 的 `ValidateRangeType` 标记 trait 没有公开导出（`validation`
+// 模块是私有的），没法走「实现标记 trait + 复用 blanket impl」那条路，
+// 只能直接实现 `ValidateRange`。
+#[cfg(feature = "app")]
+macro_rules! impl_validate_range {
+    ($U:ident, $u:ty) => {
+        impl ::validator::ValidateRange<$U> for $U {
+            fn greater_than(&self, max: $U) -> Option<bool> {
+                Some(self.0 > max.0)
+            }
+
+            fn less_than(&self, min: $U) -> Option<bool> {
+                Some(self.0 < min.0)
+            }
+        }
+
+        // 只能以包装类型作区间端点：`Option<$U>` 不在本 crate，
+        // 按孤儿规则「trait 参数里得先出现本地类型」必须写成 `ValidateRange<$U>`
+        impl ::validator::ValidateRange<$U> for Option<$U> {
+            fn greater_than(&self, max: $U) -> Option<bool> {
+                self.map(|v| v.0 > max.0)
+            }
+
+            fn less_than(&self, min: $U) -> Option<bool> {
+                self.map(|v| v.0 < min.0)
+            }
+        }
+
+        // `#[crud_dto]` 生成的 AddDto 把可空列写成 `Option<Option<T>>`：
+        // 外层区分「字段没传」，内层是列上的 NULL
+        impl ::validator::ValidateRange<$U> for Option<Option<$U>> {
+            fn greater_than(&self, max: $U) -> Option<bool> {
+                self.flatten().map(|v| v.0 > max.0)
+            }
+
+            fn less_than(&self, min: $U) -> Option<bool> {
+                self.flatten().map(|v| v.0 < min.0)
+            }
+        }
+    };
+}
+
+#[cfg(feature = "app")]
+impl_validate_range!(U8, u8);
+#[cfg(feature = "app")]
+impl_validate_range!(U16, u16);
+#[cfg(feature = "app")]
+impl_validate_range!(U32, u32);
+#[cfg(feature = "app")]
+impl_validate_range!(U64, u64);
+#[cfg(feature = "app")]
+impl_validate_range!(U128, u128);
