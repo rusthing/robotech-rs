@@ -1,4 +1,4 @@
-use serde::{Deserialize, Serialize};
+use serde::{Deserialize, Deserializer, Serialize};
 use std::ops::Deref;
 
 #[cfg(feature = "orm")]
@@ -18,12 +18,25 @@ use sea_orm::{ColIdx, QueryResult, TryGetError, TryGetable, Value};
 ///
 /// - `TryGetable`：先按 `Decimal` 读（`NUMERIC`/`DECIMAL` 列），读不到再按
 ///   `f64` 读（`float8`/`float4` 列），两种列都能解；
-/// - `Serialize`/`Deserialize`：与 `f64` 一样是裸数字，不改变接口形态；
-/// - `ToSchema`：映射为 `number/double`；
+/// - `Serialize`：与 `f64` 一样是裸数字，不改变接口形态；
+///   `Deserialize`：数字与字符串都收（查询参数是字符串，JSON body 里是数字）；
+/// - 没有 `ToSchema`：接口文档里的小数用 `f64` 表达（`F64` 只用于解码数据库
+///   `NUMERIC` 列，见上一条 `TryGetable`）；
 /// - `Deref` 到 `f64`，可直接参与运算。
-#[derive(Debug, Clone, Copy, Default, PartialEq, PartialOrd, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, Default, PartialEq, PartialOrd, Serialize)]
 #[serde(transparent)]
 pub struct F64(pub f64);
+
+/// 入参同时收字符串与数字：查询参数 / 路径参数永远是字符串，
+/// `Json` 请求体里则是 JSON number（含整数形态的 `1`）。
+///
+/// 判定逻辑与 `U8..U128`、有符号整型共用 [`crate::api::tolerant_number`]，
+/// 这里只负责把裸 `f64` 包回来。`NaN`/`inf` 会被挡在门外（JSON 本身也表达不了）。
+impl<'de> Deserialize<'de> for F64 {
+    fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        crate::api::tolerant_number::de::<f64, D>(deserializer).map(F64)
+    }
+}
 
 impl F64 {
     /// 返回包装的 `f64` 值
@@ -163,5 +176,27 @@ mod tests {
         let v = F64(2.5);
         assert_eq!(*v, 2.5);
         assert_eq!(f64::from(v), 2.5);
+    }
+
+    /// 字符串与数字都收：查询参数是字符串，JSON body 里是数字（整数形态也算）
+    #[test]
+    fn accepts_string_and_number() {
+        assert_eq!(serde_json::from_str::<F64>("1.5").unwrap(), F64(1.5));
+        assert_eq!(serde_json::from_str::<F64>("\"1.5\"").unwrap(), F64(1.5));
+        assert_eq!(serde_json::from_str::<F64>("12").unwrap(), F64(12.0));
+        assert_eq!(serde_json::from_str::<F64>("\"12\"").unwrap(), F64(12.0));
+        assert_eq!(serde_json::from_str::<F64>("-0.25").unwrap(), F64(-0.25));
+        // 科学计数法与带空白的字符串
+        assert_eq!(serde_json::from_str::<F64>("\"1e3\"").unwrap(), F64(1000.0));
+        assert_eq!(serde_json::from_str::<F64>("\" 1.5 \"").unwrap(), F64(1.5));
+    }
+
+    /// 非数字、空串、NaN/inf 字符串都要报错（JSON 本身表达不了 NaN/inf）
+    #[test]
+    fn rejects_invalid() {
+        assert!(serde_json::from_str::<F64>("\"abc\"").is_err());
+        assert!(serde_json::from_str::<F64>("\"\"").is_err());
+        assert!(serde_json::from_str::<F64>("\"NaN\"").is_err());
+        assert!(serde_json::from_str::<F64>("\"inf\"").is_err());
     }
 }

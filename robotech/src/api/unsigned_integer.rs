@@ -6,27 +6,38 @@ use serde::{Deserialize, Deserializer, Serialize, Serializer};
 #[cfg(feature = "openapi")]
 use utoipa::ToSchema;
 
+/// # 无符号整数的 `Deserialize`：字符串与数字都收
+///
+/// 判定与范围检查都在 [`crate::api::tolerant_number`] 里（与有符号整型、浮点共用
+/// 一套逻辑），这里只负责把裸值包回包装类型。要收的形态有三种：
+///
+/// - 查询参数 / 路径参数走 `serde_urlencoded` 与 axum 的 path deserializer，
+///   值永远是字符串；
+/// - `Json` 请求体里是 JSON number（`visit_u64` / `visit_i64`）；
+/// - 有些 JSON 库（Python、Java）会把整数写成 `1.0`。
+macro_rules! impl_unsigned_de {
+    ($U:ident, $u:ty) => {
+        impl<'de> Deserialize<'de> for $U {
+            fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+                crate::api::tolerant_number::de::<$u, D>(deserializer).map($U)
+            }
+        }
+    };
+}
+
 /// # 无符号 8 位整数包装类型
 ///
 /// 用于表示数据库中的无符号小整数（如状态、标记等），
-/// 序列化时输出为裸数字而非嵌套对象；支持与 `u8` / `i8` 互转，
+/// 序列化时输出为裸数字而非嵌套对象；反序列化同时接受数字与字符串
+/// （查询参数是字符串，JSON body 里是数字）；支持与 `u8` / `i8` 互转，
 /// 并实现 `Deref` 以便直接作为 `u8` 使用。
 #[cfg_attr(feature = "openapi", derive(ToSchema))]
-#[derive(
-    Clone,
-    Copy,
-    Debug,
-    Default,
-    PartialEq,
-    Eq,
-    Hash,
-    PartialOrd,
-    Ord,
-    Serialize,
-    Deserialize,
-)]
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize)]
 #[serde(transparent)] // 序列化成裸数字,而不是 {"0": 123} 这种嵌套对象
 pub struct U8(pub u8);
+
+// 入参：字符串与数字都收（见 impl_unsigned_de 的说明）
+impl_unsigned_de!(U8, u8);
 
 impl U8 {
     /// 返回包装的 `u8` 值
@@ -123,23 +134,15 @@ impl Nullable for U8 {
 /// # 无符号 16 位整数包装类型
 ///
 /// 用于表示数据库中的无符号整数，序列化时输出为裸数字而非嵌套对象；
+/// 反序列化同时接受数字与字符串（查询参数是字符串，JSON body 里是数字）；
 /// 支持与 `u16` / `i16` 互转，并实现 `Deref` 以便直接作为 `u16` 使用。
 #[cfg_attr(feature = "openapi", derive(ToSchema))]
-#[derive(
-    Clone,
-    Copy,
-    Debug,
-    Default,
-    PartialEq,
-    Eq,
-    Hash,
-    PartialOrd,
-    Ord,
-    Serialize,
-    Deserialize,
-)]
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize)]
 #[serde(transparent)] // 序列化成裸数字,而不是 {"0": 123} 这种嵌套对象
 pub struct U16(pub u16);
+
+// 入参：字符串与数字都收（见 impl_unsigned_de 的说明）
+impl_unsigned_de!(U16, u16);
 
 impl U16 {
     /// 返回包装的 `u16` 值
@@ -236,24 +239,16 @@ impl Nullable for U16 {
 /// # 无符号 32 位整数包装类型
 ///
 /// 用于表示数据库中的无符号整数（如计数、时长毫秒数），
-/// 序列化时输出为裸数字而非嵌套对象；
+/// 序列化时输出为裸数字而非嵌套对象；反序列化同时接受数字与字符串
+/// （查询参数是字符串，JSON body 里是数字）；
 /// 支持与 `u32` / `i32` 互转，并实现 `Deref` 以及 SeaORM 的取值/绑定能力。
 #[cfg_attr(feature = "openapi", derive(ToSchema))]
-#[derive(
-    Clone,
-    Copy,
-    Debug,
-    Default,
-    PartialEq,
-    Eq,
-    Hash,
-    PartialOrd,
-    Ord,
-    Serialize,
-    Deserialize,
-)]
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize)]
 #[serde(transparent)] // 序列化成裸数字,而不是 {"0": 123} 这种嵌套对象
 pub struct U32(pub u32);
+
+// 入参：字符串与数字都收（见 impl_unsigned_de 的说明）
+impl_unsigned_de!(U32, u32);
 
 impl U32 {
     /// 返回包装的 `u32` 值
@@ -358,8 +353,8 @@ impl Nullable for U32 {
 ///
 /// 用于表示数据库中的无符号大整数（如主键 ID），
 /// 序列化时输出为字符串以避免 JavaScript 精度丢失；
+/// 反序列化同时接受字符串与数字（查询参数是字符串，JSON body 里可能是数字）；
 /// 支持与 `u64` / `i64` 互转，并实现 `Deref` 以及 SeaORM 的取值/绑定能力。
-#[cfg_attr(feature = "openapi", derive(ToSchema))]
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub struct U64(pub u64);
 
@@ -408,29 +403,8 @@ impl Serialize for U64 {
     }
 }
 
-impl<'de> Deserialize<'de> for U64 {
-    fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
-        struct U64Visitor;
-
-        impl<'de> serde::de::Visitor<'de> for U64Visitor {
-            type Value = u64;
-
-            fn expecting(&self, formatter: &mut std::fmt::Formatter) -> std::fmt::Result {
-                formatter.write_str("a string")
-            }
-
-            fn visit_str<E: serde::de::Error>(self, v: &str) -> Result<Self::Value, E> {
-                v.parse::<u64>().map_err(E::custom)
-            }
-
-            fn visit_string<E: serde::de::Error>(self, v: String) -> Result<Self::Value, E> {
-                v.parse::<u64>().map_err(E::custom)
-            }
-        }
-
-        deserializer.deserialize_any(U64Visitor).map(U64)
-    }
-}
+// 入参：字符串（查询参数）与数字（JSON body）都收
+impl_unsigned_de!(U64, u64);
 
 // ========= SeaORM四件套 =========
 #[cfg(feature = "orm")]
@@ -498,8 +472,8 @@ impl std::ops::Deref for U64 {
 ///
 /// 用于表示数据库中的超大无符号整数，
 /// 序列化时输出为字符串以避免 JavaScript 精度丢失；
+/// 反序列化同时接受字符串与数字（查询参数是字符串，JSON body 里可能是数字）；
 /// 支持与 `u128` / `i128` 互转，并实现 `Deref` 以便直接作为 `u128` 使用。
-#[cfg_attr(feature = "openapi", derive(ToSchema))]
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub struct U128(pub u128);
 
@@ -540,29 +514,8 @@ impl Serialize for U128 {
     }
 }
 
-impl<'de> Deserialize<'de> for U128 {
-    fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
-        struct U128Visitor;
-
-        impl<'de> serde::de::Visitor<'de> for U128Visitor {
-            type Value = u128;
-
-            fn expecting(&self, formatter: &mut std::fmt::Formatter) -> std::fmt::Result {
-                formatter.write_str("a string")
-            }
-
-            fn visit_str<E: serde::de::Error>(self, v: &str) -> Result<Self::Value, E> {
-                v.parse::<u128>().map_err(E::custom)
-            }
-
-            fn visit_string<E: serde::de::Error>(self, v: String) -> Result<Self::Value, E> {
-                v.parse::<u128>().map_err(E::custom)
-            }
-        }
-
-        deserializer.deserialize_any(U128Visitor).map(U128)
-    }
-}
+// 入参：字符串（查询参数）与数字（JSON body）都收
+impl_unsigned_de!(U128, u128);
 
 impl std::fmt::Display for U128 {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -1094,3 +1047,185 @@ impl_validate_range!(U32, u32);
 impl_validate_range!(U64, u64);
 #[cfg(feature = "app")]
 impl_validate_range!(U128, u128);
+
+// ========= OpenAPI schema：字符串与数字并存的大整数 =========
+//
+// `U64` / `U128` 的响应是字符串（避免 JS 精度丢失），入参则是字符串和数字都收，
+// 所以不能像 `U8..U32` 那样直接 derive 成 `integer`——那样文档与实现不一致，
+// 客户端照着 schema 生成的模型也会把响应当数字。这里标成 `oneOf`：
+// `string` 对应响应与查询参数，`integer` 对应 JSON body 里直接传数字的写法。
+#[cfg(feature = "openapi")]
+macro_rules! impl_string_or_integer_schema {
+    ($($U:ident),* $(,)?) => {$(
+        impl utoipa::PartialSchema for $U {
+            fn schema() -> utoipa::openapi::RefOr<utoipa::openapi::schema::Schema> {
+                use utoipa::openapi::schema::{Object, OneOf, Schema, SchemaType, Type};
+
+                Schema::OneOf(OneOf {
+                    items: vec![
+                        Object::with_type(SchemaType::new(Type::String)).into(),
+                        Object::with_type(SchemaType::new(Type::Integer)).into(),
+                    ],
+                    ..Default::default()
+                })
+                .into()
+            }
+        }
+
+        impl utoipa::ToSchema for $U {
+            fn name() -> std::borrow::Cow<'static, str> {
+                std::borrow::Cow::Borrowed(stringify!($U))
+            }
+        }
+    )*};
+}
+
+#[cfg(feature = "openapi")]
+impl_string_or_integer_schema!(U64, U128);
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[derive(Debug, Deserialize)]
+    struct IdBody {
+        id: U64,
+    }
+
+    /// 字符串与数字都要能进：查询参数是字符串，JSON body 里前端可能直接传数字
+    #[test]
+    fn u64_accepts_string_and_number() {
+        assert_eq!(serde_json::from_str::<U64>("\"123\"").unwrap(), U64(123));
+        assert_eq!(serde_json::from_str::<U64>("123").unwrap(), U64(123));
+        // 查询参数带空白（`?id=%20123`）
+        assert_eq!(serde_json::from_str::<U64>("\" 123 \"").unwrap(), U64(123));
+
+        // 边界值：u64::MAX 两种形态都能进
+        assert_eq!(
+            serde_json::from_str::<U64>(&u64::MAX.to_string()).unwrap(),
+            U64(u64::MAX)
+        );
+        assert_eq!(
+            serde_json::from_str::<U64>(&format!("\"{}\"", u64::MAX)).unwrap(),
+            U64(u64::MAX)
+        );
+
+        // 请求体形态：2^53+1 已经超出 JS 安全整数，仍要精确还原
+        let body: IdBody = serde_json::from_str(r#"{"id": 9007199254740993}"#).unwrap();
+        assert_eq!(body.id, U64(9_007_199_254_740_993));
+        let body: IdBody = serde_json::from_str(r#"{"id": "9007199254740993"}"#).unwrap();
+        assert_eq!(body.id, U64(9_007_199_254_740_993));
+    }
+
+    /// 负数、空串、非数字、超上界必须报错，不能静默取 0
+    #[test]
+    fn u64_rejects_invalid() {
+        assert!(serde_json::from_str::<U64>("-1").is_err());
+        assert!(serde_json::from_str::<U64>("\"-1\"").is_err());
+        assert!(serde_json::from_str::<U64>("\"\"").is_err());
+        assert!(serde_json::from_str::<U64>("\"abc\"").is_err());
+        // u64::MAX + 1：JSON 解析成浮点，进不了整数分支
+        assert!(serde_json::from_str::<U64>("18446744073709551616").is_err());
+    }
+
+    /// 输出仍是字符串，JS 侧不丢精度；且能原样读回
+    #[test]
+    fn u64_serializes_as_string() {
+        assert_eq!(
+            serde_json::to_string(&U64(9_007_199_254_740_993)).unwrap(),
+            "\"9007199254740993\""
+        );
+        let s = serde_json::to_string(&U64(u64::MAX)).unwrap();
+        assert_eq!(serde_json::from_str::<U64>(&s).unwrap(), U64(u64::MAX));
+    }
+
+    #[test]
+    fn u128_accepts_string_and_number() {
+        assert_eq!(serde_json::from_str::<U128>("42").unwrap(), U128(42));
+        assert_eq!(serde_json::from_str::<U128>("\"42\"").unwrap(), U128(42));
+
+        // 超 u64 的量只能走字符串：serde_json 会把装不进 u64/i64 的裸数字
+        // 退化成 f64，精度在解析阶段就没了，u128 只能用字符串形态保证无损
+        let big = u128::MAX.to_string();
+        assert_eq!(
+            serde_json::from_str::<U128>(&format!("\"{big}\"")).unwrap(),
+            U128(u128::MAX)
+        );
+    }
+
+    /// 小整型（U8/U16/U32）同样收字符串，但上界、负数、小数不能放松
+    #[test]
+    fn small_uints_accept_string_and_number() {
+        assert_eq!(serde_json::from_str::<U8>("7").unwrap(), U8(7));
+        assert_eq!(serde_json::from_str::<U8>("\"7\"").unwrap(), U8(7));
+        assert_eq!(serde_json::from_str::<U16>("\"700\"").unwrap(), U16(700));
+        assert_eq!(serde_json::from_str::<U32>("70000").unwrap(), U32(70000));
+        assert_eq!(
+            serde_json::from_str::<U32>("\"70000\"").unwrap(),
+            U32(70000)
+        );
+
+        assert!(serde_json::from_str::<U8>("300").is_err());
+        assert!(serde_json::from_str::<U8>("\"300\"").is_err());
+        assert!(serde_json::from_str::<U8>("-1").is_err());
+        assert!(serde_json::from_str::<U8>("1.5").is_err());
+    }
+
+    /// Python / Java 的 JSON 库会把整数写成 `1.0`，这种也要收
+    #[test]
+    fn accepts_integral_float() {
+        assert_eq!(serde_json::from_str::<U8>("1.0").unwrap(), U8(1));
+        assert_eq!(serde_json::from_str::<U32>("1.0").unwrap(), U32(1));
+        assert_eq!(serde_json::from_str::<U32>("\"1.0\"").unwrap(), U32(1));
+        assert_eq!(serde_json::from_str::<U64>("123.0").unwrap(), U64(123));
+
+        // 小数部分不为 0 仍然报错
+        assert!(serde_json::from_str::<U64>("123.5").is_err());
+        assert!(serde_json::from_str::<U32>("\"1.5\"").is_err());
+    }
+
+    /// 可空字段：null 与缺失仍是 None，传值两种形态都能进
+    #[test]
+    fn option_u64_still_nullable() {
+        #[derive(Debug, Deserialize)]
+        struct Body {
+            id: Option<U64>,
+        }
+
+        assert_eq!(
+            serde_json::from_str::<Body>(r#"{"id":null}"#).unwrap().id,
+            None
+        );
+        assert_eq!(
+            serde_json::from_str::<Body>(r#"{"id":123}"#).unwrap().id,
+            Some(U64(123))
+        );
+        assert_eq!(
+            serde_json::from_str::<Body>(r#"{"id":"123"}"#).unwrap().id,
+            Some(U64(123))
+        );
+    }
+
+    /// OpenAPI schema 要同时给出 string 与 integer：响应是字符串，
+    /// 查询参数是字符串，body 里也可以直接传数字
+    #[cfg(feature = "openapi")]
+    #[test]
+    fn big_uint_schema_is_string_or_integer() {
+        use utoipa::PartialSchema;
+
+        fn types_of<S: PartialSchema>() -> Vec<String> {
+            let schema = serde_json::to_value(S::schema()).unwrap();
+            schema
+                .get("oneOf")
+                .expect("应该是 oneOf")
+                .as_array()
+                .unwrap()
+                .iter()
+                .map(|item| item.get("type").unwrap().as_str().unwrap().to_string())
+                .collect()
+        }
+
+        assert_eq!(types_of::<U64>(), ["string", "integer"]);
+        assert_eq!(types_of::<U128>(), ["string", "integer"]);
+    }
+}

@@ -6,11 +6,14 @@
 //! - `Duration` 包装类型（用于 DTO/VO 与数据库 `String` 类型的互转）
 //! - `F64` 包装类型（用于 DTO/VO 与数据库 `NUMERIC`/`DECIMAL` 列的互转）
 //! - 无符号整数包装类型（`U8`/`U16`/`U32`/`U64`/`U128`，避免 JavaScript 精度丢失）
+//! - `tolerant_number`：原生数值字段「字符串与数字都收」的 `deserialize_with` 助手
 
 mod duration;
 mod float;
 mod ro;
 mod unsigned_integer;
+
+pub mod tolerant_number;
 
 pub use duration::*;
 pub use float::*;

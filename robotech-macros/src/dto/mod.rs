@@ -979,34 +979,53 @@ fn generate_builder_attr() -> Attribute {
 /// 手写优先。
 fn generate_serde_attr(field: &Field) -> Option<Attribute> {
     let ty = &field.ty;
-    if let syn::Type::Path(type_path) = ty {
-        if let Some(segment) = type_path.path.segments.last() {
-            let type_name = segment.ident.to_string();
-            match type_name.as_str() {
-                "Option" => {
-                    if let syn::PathArguments::AngleBracketed(args) = &segment.arguments {
-                        if let Some(syn::GenericArgument::Type(inner_ty)) = args.args.first() {
-                            if let syn::Type::Path(inner_path) = inner_ty {
-                                if let Some(inner_segment) = inner_path.path.segments.last() {
-                                    if inner_segment.ident == "String" {
-                                        return Some(syn::parse_quote!(
-                                            #[serde(
-                                                deserialize_with = "option_option_serde::deserialize",
-                                                serialize_with = "option_option_serde::serialize",
-                                                skip_serializing_if = "option_option_serde::is_none"
-                                            )]
-                                        ));
-                                    }
-                                }
-                            }
-                        }
-                    }
-                }
-                _ => {}
-            }
+    let syn::Type::Path(type_path) = ty else {
+        return None;
+    };
+    let type_name = type_path.path.segments.last()?.ident.to_string();
+
+    if type_name == "Option" {
+        let inner = extract_option_inner_type(type_path)?;
+        if inner == "String" {
+            return Some(syn::parse_quote!(
+                #[serde(
+                    deserialize_with = "option_option_serde::deserialize",
+                    serialize_with = "option_option_serde::serialize",
+                    skip_serializing_if = "option_option_serde::is_none"
+                )]
+            ));
         }
+        // 可空数值列：DTO 字段是 Option<Option<T>>，null 仍是外层 None（= 字段没传）
+        if is_tolerant_num(&inner) {
+            return Some(syn::parse_quote!(
+                #[serde(deserialize_with = "robotech::api::tolerant_number::de_opt_opt")]
+            ));
+        }
+        return None;
     }
+
+    // 非空数值字段：DTO 字段是 Option<T>
+    if is_tolerant_num(&type_name) {
+        return Some(syn::parse_quote!(
+            #[serde(deserialize_with = "robotech::api::tolerant_number::de_opt")]
+        ));
+    }
+
     None
+}
+
+/// 需要挂宽容反序列化的原生数值类型
+///
+/// 只含有符号整型与浮点：无符号在 DTO 里已经被 [`map_unsigned_type`] 换成
+/// `U8..U128`，包装类型自己的 `Deserialize` 就同时收字符串和数字；再挂一层
+/// `deserialize_with` 反而编译不过（`U8` 不是 `TolerantNumber`）。
+///
+/// 挂载点见 [`generate_serde_attr`]，实现见 `robotech::api::tolerant_number`。
+fn is_tolerant_num(type_name: &str) -> bool {
+    matches!(
+        type_name,
+        "i8" | "i16" | "i32" | "i64" | "i128" | "f32" | "f64"
+    )
 }
 
 /// 判断是否是Option类型
@@ -1287,5 +1306,53 @@ mod tests {
     fn malformed_bound_is_rejected() {
         let error = check_field_tags(&field("code", "@len 1-10", "String")).unwrap_err();
         assert!(error.to_string().contains("区间"), "{}", error);
+    }
+
+    // ---- 数值字段的宽容反序列化（字符串与数字都收）----
+
+    /// 生成出来的 serde 属性（没有就是空串），去掉空格方便断言
+    fn serde_of(field: &Field) -> String {
+        generate_serde_attr(field)
+            .map(|attr| attr.to_token_stream().to_string().replace(' ', ""))
+            .unwrap_or_default()
+    }
+
+    /// 有符号整型与浮点：挂 `deserialize_with`，DTO 字段是 Option<T>
+    #[test]
+    fn signed_and_float_fields_are_tolerant() {
+        for ty in ["i8", "i16", "i32", "i64", "i128", "f32", "f64"] {
+            let attr = serde_of(&field("v", "数值", ty));
+            assert!(
+                attr.contains("deserialize_with=\"robotech::api::tolerant_number::de_opt\""),
+                "{ty} 应该挂 de_opt: {attr}"
+            );
+        }
+    }
+
+    /// 可空数值列：DTO 字段是 Option<Option<T>>，挂双层版本
+    #[test]
+    fn optional_numeric_field_is_tolerant() {
+        let attr = serde_of(&field("v", "数值", "Option<i64>"));
+        assert!(
+            attr.contains("deserialize_with=\"robotech::api::tolerant_number::de_opt_opt\""),
+            "{attr}"
+        );
+    }
+
+    /// 无符号字段在 DTO 里已经是 U8..U128（包装类型自己就宽容），不能再挂
+    #[test]
+    fn unsigned_field_gets_no_deserialize_with() {
+        for ty in ["u8", "u16", "u32", "u64", "u128", "Option<u64>"] {
+            let attr = serde_of(&field("v", "数值", ty));
+            assert!(!attr.contains("deserialize_with"), "{ty} 不该挂: {attr}");
+        }
+    }
+
+    /// 字符串字段的口径不变（只有 Option<String> 需要双层 serde）
+    #[test]
+    fn string_fields_keep_their_serde_attr() {
+        assert_eq!(serde_of(&field("name", "名称", "String")), "");
+        let attr = serde_of(&field("remark", "备注", "Option<String>"));
+        assert!(attr.contains("option_option_serde::deserialize"), "{attr}");
     }
 }
