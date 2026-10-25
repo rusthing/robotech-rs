@@ -18,6 +18,8 @@ use wheel_rs::serde::rotation_serde;
 /// - `file_time_format`：文件日志时间格式
 /// - `rotation`：日志文件滚动策略
 /// - `show_spans`：是否在控制台输出中打印 span 链
+/// - `mute_targets`：日志屏蔽生效的 target 前缀列表（为空表示不限制 target）
+/// - `mute_keywords`：日志屏蔽关键字（大小写不敏感，命中即丢弃该条日志）
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "kebab-case")]
 pub struct LogConfig {
@@ -39,6 +41,12 @@ pub struct LogConfig {
     /// 是否显示spans
     #[serde(default)]
     pub show_spans: bool,
+    /// 日志屏蔽生效的 target 前缀列表（为空表示对所有 target 生效，建议显式配置）
+    #[serde(default)]
+    pub mute_targets: Vec<String>,
+    /// 日志屏蔽关键字（大小写不敏感，命中即丢弃该条日志；旧键名 `sql-mute-keywords` 仍可用）
+    #[serde(default, alias = "sql-mute-keywords")]
+    pub mute_keywords: Vec<String>,
 }
 
 impl Default for LogConfig {
@@ -50,6 +58,8 @@ impl Default for LogConfig {
             file_time_format: file_time_format_default(),
             rotation: log_rotation_default(),
             show_spans: bool::default(),
+            mute_targets: Vec::new(),
+            mute_keywords: Vec::new(),
         }
     }
 }

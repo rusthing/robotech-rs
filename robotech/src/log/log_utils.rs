@@ -1,7 +1,7 @@
-use crate::cfg::{build_cfg, CfgError};
-use crate::cfg::{deserialize_config, BaseConfig};
-use crate::env::{AppEnv, EnvError, APP_ENV};
-use crate::log::{LogConfig, LogError};
+use crate::cfg::{BaseConfig, deserialize_config};
+use crate::cfg::{CfgError, build_cfg};
+use crate::env::{APP_ENV, AppEnv, EnvError};
+use crate::log::{LogConfig, LogError, MuteFilter};
 use arc_swap::ArcSwap;
 use chrono::{Local, Utc};
 use config::{Config, Value};
@@ -18,12 +18,12 @@ use tracing_log::NormalizeEvent;
 use tracing_subscriber::fmt::format::{DefaultFields, Writer};
 use tracing_subscriber::fmt::time::ChronoLocal;
 use tracing_subscriber::fmt::{FmtContext, FormatEvent, FormatFields};
-use tracing_subscriber::layer::SubscriberExt;
+use tracing_subscriber::layer::{Layer, SubscriberExt};
 use tracing_subscriber::registry::LookupSpan;
 use tracing_subscriber::util::SubscriberInitExt;
-use tracing_subscriber::{fmt, reload, EnvFilter};
+use tracing_subscriber::{EnvFilter, fmt, reload};
 use wheel_rs::config_utils::diff_config;
-use wheel_rs::file_utils::{watch_file_changed, FileWatcher};
+use wheel_rs::file_utils::{FileWatcher, watch_file_changed};
 
 /// 日志文件输出锁。
 ///
@@ -228,15 +228,28 @@ impl LogWatcher {
             file_time_format,
             show_spans,
             rotation,
+            mute_targets,
+            mute_keywords,
         } = deserialize_config(config.clone()).await?;
+
+        // 日志屏蔽规则（target 前缀 + 关键字），配置热更新时整体替换
+        let mute_targets = Arc::new(ArcSwap::from_pointee(mute_targets));
+        let mute_keywords = Arc::new(ArcSwap::from_pointee(normalize_mute_keywords(
+            mute_keywords,
+        )));
 
         // 创建环境过滤器，支持 RUST_LOG 环境变量和模块级别配置
         let env_filter = create_env_filter(level.clone(), &modules);
         let (env_filter_layer, env_layer_reload_handle) = reload::Layer::new(env_filter);
 
-        // 控制台输出层
-        let console_layer = creat_console_layer!(console_time_format, show_spans);
-        let (console_layer, console_layer_reload_handle) = reload::Layer::new(console_layer);
+        // 控制台输出层：先包 reload 再叠加屏蔽过滤器，
+        // 保证热更新替换的是内层格式化器而不是整条过滤链
+        let (console_layer, console_layer_reload_handle) =
+            reload::Layer::new(creat_console_layer!(console_time_format, show_spans));
+        let console_layer = console_layer.with_filter(MuteFilter::new(
+            Arc::clone(&mute_targets),
+            Arc::clone(&mute_keywords),
+        ));
 
         // 文件输出层
         let AppEnv {
@@ -253,13 +266,17 @@ impl LogWatcher {
             .build(log_dir_path) // 日志目录
             .map_err(LogError::CreateFileAppender)?;
         let (non_blocking, log_guard) = tracing_appender::non_blocking(file_appender);
-        let file_layer = creat_file_layer!(file_time_format, non_blocking);
+        let (file_layer, file_layer_reload_handle) =
+            reload::Layer::new(creat_file_layer!(file_time_format, non_blocking));
+        let file_layer = file_layer.with_filter(MuteFilter::new(
+            Arc::clone(&mute_targets),
+            Arc::clone(&mute_keywords),
+        ));
         {
             let mut log_guard_write_lock =
                 LOG_GUARD.write().map_err(|_| LogError::SetLogGuard())?;
             *log_guard_write_lock = Some(log_guard); // 解决锁在初始化方法结束后被提前释放导致后续日志不能输出
         }
-        let (file_layer, file_layer_reload_handle) = reload::Layer::new(file_layer);
 
         tracing_subscriber::registry()
             .with(env_filter_layer)
@@ -269,6 +286,8 @@ impl LogWatcher {
         debug!("初始化日志成功");
 
         let files_clone = files.clone();
+        let mute_targets_shared = Arc::clone(&mute_targets);
+        let mute_keywords_shared = Arc::clone(&mute_keywords);
         // 监听重新加载日志任务
         let reload_join_handle = tokio::spawn(async move {
             info!("watching log config: {:?}", files_clone);
@@ -283,7 +302,13 @@ impl LogWatcher {
                             show_spans,
                             file_time_format,
                             rotation,
+                            mute_targets,
+                            mute_keywords,
                         } = log_config;
+                        // 更新屏蔽规则（过滤器通过共享句柄读取，无需重建 layer）
+                        mute_targets_shared.store(Arc::new(mute_targets));
+                        mute_keywords_shared
+                            .store(Arc::new(normalize_mute_keywords(mute_keywords)));
                         // 应用新配置
                         env_layer_reload_handle
                             .modify(|filter| {
@@ -390,4 +415,18 @@ fn create_env_filter(level: String, modules: &HashMap<String, String>) -> EnvFil
     }
 
     EnvFilter::new(filter_string)
+}
+
+/// 把屏蔽关键字统一转成小写。
+///
+/// 过滤器对每条命中 target 的日志只把事件文本转小写一次，关键字侧预先转好，
+/// 避免逐关键字重复转换。
+///
+/// ## 参数
+/// * `keywords` - 配置中的原始关键字列表
+///
+/// ## 返回值
+/// 全部为小写的关键字列表
+fn normalize_mute_keywords(keywords: Vec<String>) -> Vec<String> {
+    keywords.into_iter().map(|k| k.to_lowercase()).collect()
 }
