@@ -28,14 +28,33 @@ const PG_IDENT_MAX_BYTES: usize = 63;
 #[distributed_slice]
 pub static UNIQUE_KEYS_SLICE: [(&str, &str, &str)];
 
+/// # 主键声明切片
+///
+/// 通过 [`distributed_slice`] 机制收集各实体模块声明的主键元组 `(表名, 键备注)`。
+///
+/// 主键约束在 PostgreSQL 里按表命名（`pk_{表名}`），与业务唯一键的 `ak_*` 不同名，
+/// 但插入重复主键时同样报 23505。不单独登记的话，报错信息回查不到，会被误判成
+/// 「获取 unique 字段列表错误」的运行时错误，接口直接 500，日志里反而看不到
+/// 真正的「主键重复」。
+#[distributed_slice]
+pub static PRIMARY_KEYS_SLICE: [(&str, &str)];
+
 /// # 初始化唯一键注册表
 ///
-/// 遍历 `UNIQUE_KEYS_SLICE` 中声明的全部唯一键，构建唯一键元数据注册表。
+/// 遍历 `PRIMARY_KEYS_SLICE` 与 `UNIQUE_KEYS_SLICE` 中声明的全部键，
+/// 构建唯一键元数据注册表（主键在前，业务唯一键在后）。
 ///
 /// ## 返回值
 /// 初始化成功返回 `Ok(())`；注册表已初始化时返回 `DaoError::AlreadyInitialized`
 pub fn init_unique_keys() -> Result<(), DaoError> {
     let mut entries = HashMap::new();
+    for (table, key_remark) in PRIMARY_KEYS_SLICE {
+        push_primary_key(
+            &mut entries,
+            table.to_string(),
+            key_remark.to_string(),
+        );
+    }
     for (table, key_name, key_remark) in UNIQUE_KEYS_SLICE {
         push_unique_key(
             &mut entries,
@@ -54,7 +73,8 @@ pub fn init_unique_keys() -> Result<(), DaoError> {
 /// 从唯一键注册表中查询指定键对应的唯一键元数据。
 ///
 /// ## 参数
-/// * `key` - 唯一键注册表中的键值，如 `ak_{键名}_{表名}` 或 `{表名}.ak_{键名}`
+/// * `key` - 唯一键注册表中的键值，如 `ak_{键名}_{表名}`、`{表名}.ak_{键名}`
+///   或主键的 `pk_{表名}`
 ///
 /// ## 返回值
 /// 返回查询到的唯一键元数据；未找到时返回 `Ok(None)`
@@ -112,6 +132,29 @@ pub fn push_unique_key(
         let key = format!("{}.ak_{}", unique_key.table, columns.join("_and_"));
         insert_key(unique_keys, key, &unique_key);
     }
+}
+
+/// # 注册主键元数据
+///
+/// 只登记 PostgreSQL 的 `pk_{表名}`。MySQL 的主键约束名固定是 `PRIMARY`，
+/// 不含表名，无法反查表，因此不在注册表里登记（由错误解析处兜底），
+/// 避免登记成一条表名错误的记录。
+///
+/// ## 参数
+/// * `unique_keys` - 唯一键注册表
+/// * `table` - 表名
+/// * `key_remark` - 键备注（一般为「主键」）
+pub fn push_primary_key(
+    unique_keys: &mut HashMap<String, UniqueKey>,
+    table: String,
+    key_remark: String,
+) {
+    let unique_key = UniqueKey::builder()
+        .table(table.clone())
+        .key_name("id".to_string())
+        .key_remark(key_remark)
+        .build();
+    insert_key(unique_keys, format!("pk_{table}"), &unique_key);
 }
 
 /// # 写入唯一键注册表

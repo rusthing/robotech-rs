@@ -136,8 +136,25 @@ impl DaoError {
         let value = caps["value"].to_string();
         let unique_filed = match get_from_unique_keys(&ak_name) {
             Ok(Some(unique_filed)) => unique_filed,
+            // 注册表里没有这个约束名：主键（MySQL 的 PRIMARY、没登记的 pk_*）、
+            // 手工建的索引、或别的服务建的表。这里不能退化成运行时错误——
+            // 那会让接口 500，日志里只剩一句「获取unique字段列表错误」，
+            // 真正的原因（某列/主键重复）反而看不到。用约束名兜底构造重复键错误，
+            // 调用方仍能收到「已存在」的提示。
             Ok(None) => {
-                return DaoError::from(anyhow!(format!("获取unique字段列表错误: {ak_name}不存在")));
+                let (key_name, key_remark) = if ak_name == "primary" {
+                    ("id".to_string(), "主键".to_string())
+                } else {
+                    (ak_name.clone(), format!("约束{ak_name}"))
+                };
+                return DaoError::DuplicateKey(
+                    UniqueKey::builder()
+                        .table(ak_name.clone())
+                        .key_name(key_name)
+                        .key_remark(key_remark)
+                        .build(),
+                    value,
+                );
             }
             Err(e) => {
                 return DaoError::from(anyhow!(format!("获取unique字段列表错误: {e}")));

@@ -215,18 +215,13 @@ pub(super) fn dao_macro(args: DaoArgs, input: ItemStruct) -> TokenStream {
     let table_name = module_name;
 
     // 生成 use 导入
-    let generated_use_linkme = if !unique_keys.is_empty() || !foreign_keys.is_empty() {
-        quote! {
-            use linkme::distributed_slice;
-        }
-    } else {
-        quote! {}
+    // 主键条目恒有，因此 linkme 的 distributed_slice 属性总会被用到
+    let generated_use_linkme = quote! {
+        use linkme::distributed_slice;
     };
 
-    // 生成 UNIQUE_KEYS
-    let generated_unique_keys = if unique_keys.is_empty() {
-        quote! {}
-    } else {
+    // 生成 UNIQUE_KEYS（含恒有的主键条目）
+    let generated_unique_keys = {
         let mut i = 0;
         let field_inits: Vec<TokenStream> = unique_keys
             .iter()
@@ -241,9 +236,23 @@ pub(super) fn dao_macro(args: DaoArgs, input: ItemStruct) -> TokenStream {
                 }
             })
             .collect();
+        // 主键也要登记：PostgreSQL 的主键约束名是 pk_{表名}，重复主键同样报 23505，
+        // 不登记就会退化成「获取 unique 字段列表错误」的运行时错误（接口 500）
+        let primary_item_name = Ident::new(
+            &format!("PRIMARY_KEY_{}", table_name.to_uppercase()),
+            Span::call_site(),
+        );
+        let unique_slice_import = if field_inits.is_empty() {
+            quote! {}
+        } else {
+            quote! { use robotech::dao::UNIQUE_KEYS_SLICE; }
+        };
 
         quote! {
-            use robotech::dao::UNIQUE_KEYS_SLICE;
+            use robotech::dao::PRIMARY_KEYS_SLICE;
+            #unique_slice_import
+            #[distributed_slice(PRIMARY_KEYS_SLICE)]
+            static #primary_item_name: (&str, &str) = (#table_name, "主键");
             #(#field_inits)*
         }
     };
