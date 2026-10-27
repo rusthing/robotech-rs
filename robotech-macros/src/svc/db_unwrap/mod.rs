@@ -67,6 +67,13 @@ pub(crate) fn db_unwrap_macro(args: DbUnwrapArgs, input: ItemFn) -> TokenStream 
     let user_block = &input.block;
 
     // 生成包装后的方法
+    //
+    // `transaction_required` 分支里事务必须**包住**用户块并在正常结束处提交：
+    // 之前把 `let db = &tx;` 写在 `if` 块内部，遮蔽只在该块生效，用户块实际
+    // 拿到的还是池连接——事务开了又空转着回滚，等于没有事务。
+    //
+    // 块内 `?` / `return` 会直接跳出函数，tx 随之 drop（即回滚），只有正常
+    // 走到块尾才会提交。
     let expanded = quote! {
         #(#fn_attrs)*
         #fn_vis #fn_sig {
@@ -74,13 +81,18 @@ pub(crate) fn db_unwrap_macro(args: DbUnwrapArgs, input: ItemFn) -> TokenStream 
                 #user_block
             } else {
                 let db_conn = robotech::db::get_db_conn()?;
-                let db = db_conn.as_ref();
                 if #transaction_required {
-                    // 开启事务
-                    let tx = begin_transaction(db).await?;
-                    let db = &tx;
+                    let tx = robotech::dao::begin_transaction(db_conn.as_ref()).await?;
+                    let out = {
+                        let db = &tx;
+                        #user_block
+                    };
+                    robotech::dao::commit_transaction(tx).await?;
+                    out
+                } else {
+                    let db = db_conn.as_ref();
+                    #user_block
                 }
-                #user_block
             }
         }
     };
