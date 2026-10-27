@@ -1,5 +1,5 @@
 [workspace]
-members = ["robotech-macros", "robotech"]
+members = ["robotech-macros", "robotech", "robotech-tests"]
 resolver = "3"
 
 [workspace.dependencies]

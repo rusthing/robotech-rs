@@ -1,0 +1,29 @@
+[package]
+name = "robotech-tests"
+version = "0.0.0"
+edition = "2024"
+publish = false
+description = "robotech 的集成测试：事务与钩子语义（需要真实 PostgreSQL）"
+
+[dependencies]
+robotech = { path = "../robotech", features = ["macros", "db", "openapi"] }
+sea-orm = { workspace = true, features = ["sqlx-postgres", "runtime-tokio-rustls"] }
+serde = { workspace = true, features = ["derive"] }
+serde_json = { workspace = true }
+anyhow = { workspace = true }
+tokio = { workspace = true, features = ["macros", "rt-multi-thread"] }
+derive_setters = { workspace = true }
+typed-builder = { workspace = true }
+utoipa = { workspace = true }
+wheel-rs = { workspace = true }
+linkme = { workspace = true }
+serde_with = { workspace = true }
+tracing = { workspace = true }
+idworker = { workspace = true, features = ["utils"] }
+o2o = "0.5.5"
+validator = { version = "0.21.0", features = ["derive"] }
+
+[features]
+default = ["server"]
+# 与业务 crate 一致：`#[crud_dto]` 生成的 DTO 只在 `server` feature 下展开
+server = []
