@@ -69,7 +69,7 @@ typed-builder = { workspace = true }
 serde = { workspace = true, features = ["derive"] }
 serde_json = { workspace = true }
 serde_with = { workspace = true }
-tokio = { workspace = true, features = ["macros"] }
+tokio = { workspace = true, features = ["macros", "time"] }
 nix = { workspace = true }
 notify = { workspace = true }
 # 以下三个按 feature 开启：utoipa（openapi）/ utoipa-swagger-ui（web）/ sea-orm（orm，db 隐含）

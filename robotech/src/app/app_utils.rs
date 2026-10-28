@@ -10,7 +10,7 @@ use std::collections::HashMap;
 use std::future::Future;
 use std::path::{Path, PathBuf};
 use std::pin::Pin;
-use std::sync::Arc;
+use std::sync::{Arc, Mutex, OnceLock};
 use std::time::Duration;
 use tokio::sync::{broadcast, watch};
 use tracing::{debug, error, info, warn};
@@ -383,15 +383,105 @@ pub async fn register_app() {
 ///
 /// 由 `bootstrap!` 生成的 `main()` 在收到退出信号后调用。**按 robotech 自身启用的
 /// feature 决定实际清理内容**：
+/// - 先执行通过 [`register_shutdown_hook`] 注册的停机钩子（见下）
 /// - 启用 `config-center` / `registry-center` 时注销微服务实例
 /// - 启用 `web` 时停止 Web 服务
 ///
 /// 未启用相应 feature 时为空操作。
+///
+/// ## 为什么钩子排在最前面
+///
+/// 钩子往往要发 HTTP 请求（例如 jobx 执行器把「已领取但还没跑」的任务上报为失败）。
+/// 注销注册中心、停 Web 服务都会耗时甚至阻塞，排在它们后面可能还没轮到进程就退出了。
+/// 钩子本身另有 [`SHUTDOWN_HOOK_TIMEOUT`] 兜底，不会把退出流程拖死。
 pub async fn shutdown_app() {
+    run_shutdown_hooks().await;
     #[cfg(any(feature = "config-center", feature = "registry-center"))]
     crate::micro_svc::drop_hub_client().await;
     #[cfg(feature = "web")]
     if let Err(e) = crate::web::stop_web_service().await {
         error!("无法停止旧的Web服务: {e:?}");
     }
+}
+
+/// 单个停机钩子的最长执行时间。
+///
+/// 钩子跑在退出流程的关键路径上，必须有上限：卡住的钩子不能让进程等到被 SIGKILL。
+/// 10s 足够一次本地/内网 HTTP 往返，也远小于 k8s 默认的 30s `terminationGracePeriodSeconds`。
+pub const SHUTDOWN_HOOK_TIMEOUT: Duration = Duration::from_secs(10);
+
+/// 停机钩子：调用后返回一个待 await 的 future。
+///
+/// 用 `FnOnce` 而不是 `Fn`：钩子只在退出时执行一次，允许消耗自己的捕获变量
+/// （典型场景是把 `Arc<...>`、连接池句柄 move 进去）。
+type ShutdownHook = Box<dyn FnOnce() -> Pin<Box<dyn Future<Output = ()> + Send>> + Send + Sync>;
+
+/// 停机钩子注册表。
+///
+/// 用 `OnceLock<Mutex<Vec<_>>>` 而不是 `static mut` / `lazy_static`：
+/// 注册发生在各子系统的 `setup_*` 阶段（可能是多线程 runtime 里的任意线程），
+/// 需要一个进程级、线程安全且可重复写入的容器。
+static SHUTDOWN_HOOKS: OnceLock<Mutex<Vec<ShutdownHook>>> = OnceLock::new();
+
+fn shutdown_hooks() -> &'static Mutex<Vec<ShutdownHook>> {
+    SHUTDOWN_HOOKS.get_or_init(|| Mutex::new(Vec::new()))
+}
+
+/// # 注册一个停机钩子
+///
+/// 钩子会在进程收到 SIGINT / SIGTERM / SIGQUIT、`bootstrap!` 生成的 `main()` 调用
+/// [`shutdown_app`] 时被**依次执行一次**，执行顺序即注册顺序。
+///
+/// ## 适用场景
+///
+/// 子系统有「进程退出后无法自动恢复」的在途状态，必须在退出前主动收尾。典型例子是
+/// jobx 执行器：它领取任务后会先在数据库里落一条「运行中」的记录，进程若直接退出，
+/// 这条记录就永远停在「运行中」（服务端只能靠超时巡检兜底）。注册一个钩子把这类任务
+/// 主动上报为失败，能让状态在秒级收敛，而不是等巡检。
+///
+/// ## 约束
+///
+/// - 钩子**不能**依赖 `main` 之后才存在的状态，也不应无限阻塞：单个钩子超过
+///   [`SHUTDOWN_HOOK_TIMEOUT`] 会被跳过并打 `warn`。
+/// - 钩子可以调用异步 API（HTTP、DB），但退出流程此时可能正在拆解其它子系统，
+///   能拿到什么就只用什么，失败要自己吞掉，不要 `panic`。
+/// - 同一个钩子重复注册会被执行多次，需要幂等的场景请自行用 `OnceLock` 保护。
+pub fn register_shutdown_hook<F, Fut>(hook: F)
+where
+    F: FnOnce() -> Fut + Send + Sync + 'static,
+    Fut: Future<Output = ()> + Send + 'static,
+{
+    let hook: ShutdownHook = Box::new(move || Box::pin(hook()));
+    let mut hooks = shutdown_hooks()
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
+    hooks.push(hook);
+}
+
+/// # 执行并清空所有停机钩子
+///
+/// 由 [`shutdown_app`] 调用。取出全部钩子后**先清空注册表再逐个执行**，
+/// 这样即使某个钩子内部又触发了一次退出流程，也不会重复执行同一批钩子。
+pub async fn run_shutdown_hooks() {
+    let hooks: Vec<ShutdownHook> = {
+        let mut guard = shutdown_hooks()
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        std::mem::take(&mut *guard)
+    };
+    if hooks.is_empty() {
+        return;
+    }
+    let total = hooks.len();
+    info!("执行 {total} 个停机钩子...");
+    for (index, hook) in hooks.into_iter().enumerate() {
+        match tokio::time::timeout(SHUTDOWN_HOOK_TIMEOUT, hook()).await {
+            Ok(()) => debug!("停机钩子 #{}/{total} 完成", index + 1),
+            Err(_) => warn!(
+                "停机钩子 #{}/{total} 超时（>{SHUTDOWN_HOOK_TIMEOUT:?}），跳过",
+                index + 1
+            ),
+        }
+    }
+    info!("停机钩子执行完毕");
 }
