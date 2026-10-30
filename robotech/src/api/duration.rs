@@ -53,6 +53,12 @@ impl From<Duration> for StdDuration {
 
 impl From<String> for Duration {
     fn from(s: String) -> Self {
+        Self(wheel_rs::time_utils::string_to_duration(&s))
+    }
+}
+
+impl From<&str> for Duration {
+    fn from(s: &str) -> Self {
         Self(wheel_rs::time_utils::string_to_duration(s))
     }
 }
