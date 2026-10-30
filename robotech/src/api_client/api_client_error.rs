@@ -41,8 +41,14 @@ pub enum ApiClientError {
     /// 不带出来调用方只能看到一个光秃秃的 `500 Internal Server Error`。
     #[error("响应非2xx状态码: {0} -> {1}, 响应体: {2}")]
     NonSuccessStatus(String, String, String),
-    #[error("按Json格式解析响应失败: {0}")]
-    ParseJson(String, #[source] serde_json::Error),
+    /// JSON 解析失败
+    ///
+    /// 带上响应体：解析失败最常见的原因不是「对方少写了一个字段」，而是**请求打到了
+    /// 另一套服务**（服务名/端口配错、注册中心里留着旧实例）。这时对方的信封本来
+    /// 就不是本框架的 `Ro`，serde 只会报 `missing field xxx`，而真正的线索——响应体
+    /// 里的 `result`/`detail`/`code`——被丢掉了，排查得绕一大圈。
+    #[error("按Json格式解析响应失败: {0}, 响应体: {1}, 原因: {2}")]
+    ParseJson(String, String, #[source] serde_json::Error),
     #[error("按bytes格式解析响应失败: {0}")]
     ParseBytes(String, #[source] reqwest::Error),
     #[error("设置API客户端失败: {0}")]

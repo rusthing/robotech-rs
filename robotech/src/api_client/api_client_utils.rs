@@ -19,6 +19,18 @@ use wheel_rs::urn_utils::Urn;
 /// 基于 reqwest 的全局复用客户端，供所有 API 请求使用。
 pub static REQWEST_CLIENT: LazyLock<Client> = LazyLock::new(Client::new);
 
+/// # 截断响应体
+///
+/// 解析失败时把响应体一起带进错误里，但要挡住整页 HTML 之类的长内容把日志冲掉。
+/// 开头 512 个字符足够判断「这是不是本框架的 `Ro`」。
+fn clip_body(body: &str) -> String {
+    const MAX_CHARS: usize = 512;
+    match body.char_indices().nth(MAX_CHARS) {
+        Some((idx, _)) => format!("{}...(共 {} 字符)", &body[..idx], body.chars().count()),
+        None => body.to_string(),
+    }
+}
+
 /// # API 客户端工具
 ///
 /// 提供基于 URN 约定的 GET/POST/PUT/DELETE、multipart 与 webhook 等请求封装，
@@ -125,8 +137,9 @@ impl ApiClientUtils {
         tracing::debug!("{urn} response body: {response_text}");
 
         // 将文本解析为JSON
-        let result: Ro<E> = serde_json::from_str(&response_text)
-            .map_err(|e| ApiClientError::ParseJson(urn.to_string(), e))?;
+        let result: Ro<E> = serde_json::from_str(&response_text).map_err(|e| {
+            ApiClientError::ParseJson(urn.to_string(), clip_body(&response_text), e)
+        })?;
         Ok(result)
     }
 
