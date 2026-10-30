@@ -319,7 +319,7 @@ pub(super) fn dao_macro(args: DaoArgs, input: ItemStruct) -> TokenStream {
             ///
             /// 此函数负责向数据库中插入一个新的记录。它会自动处理以下逻辑：
             /// - 如果记录 ID 未设置（默认值），则生成一个新的唯一 ID
-            /// - 如果创建时间戳未设置，则设置当前时间为创建和更新时间
+            /// - 如果创建时间戳未设置（或传了 0），则设置当前时间为创建和更新时间
             /// - 将更新者 ID 设置为创建者 ID（因为是新建记录）
             ///
             /// ## 参数
@@ -335,6 +335,19 @@ pub(super) fn dao_macro(args: DaoArgs, input: ItemStruct) -> TokenStream {
                 // 当id为默认值(0)时生成ID
                 if active_model.id.is_not_set() {
                     active_model.id = ActiveValue::set(idworker::next_id()? as i64);
+                }
+                // 时间为 0 与未设置等价。
+                // `_current_ms` 是「调用方时间」这一可选入参（DTO 里是
+                // `Option<U64>`，映射到 create_ms / update_ms）：默认不传，
+                // 由服务端在落库时补。传了 0 只可能是调用方漏填（拼 DTO 时
+                // `Some(U64(0))`、或者上游把空值当成了 0），而 0 不是合法
+                // 时间戳——落库后整条记录的审计时间就永久废了，没有任何调用
+                // 方会想要这个结果，所以在这里统一回到「未设置」。
+                if matches!(
+                    active_model.create_ms,
+                    ActiveValue::Set(0) | ActiveValue::Unchanged(0)
+                ) {
+                    active_model.create_ms = ActiveValue::NotSet;
                 }
                 // 当创建时间未设置时补上当前时间
                 if active_model.create_ms.is_not_set() {
@@ -365,7 +378,7 @@ pub(super) fn dao_macro(args: DaoArgs, input: ItemStruct) -> TokenStream {
             /// # 更新记录
             ///
             /// 此函数负责更新数据库中的现有记录。它会自动处理以下逻辑：
-            /// - 如果更新时间戳未设置，则设置当前时间为更新时间
+            /// - 如果更新时间戳未设置（或传了 0），则设置当前时间为更新时间
             /// - 更新完成后，重新查询并返回更新后的完整记录
             ///
             /// ## 参数
@@ -381,6 +394,13 @@ pub(super) fn dao_macro(args: DaoArgs, input: ItemStruct) -> TokenStream {
                 // 保护创建者信息不能被修改
                 active_model.creater_id = ActiveValue::NotSet;
                 active_model.create_ms = ActiveValue::NotSet;
+                // 同 insert：0 不是合法时间戳，视作未设置交给服务端时钟
+                if matches!(
+                    active_model.update_ms,
+                    ActiveValue::Set(0) | ActiveValue::Unchanged(0)
+                ) {
+                    active_model.update_ms = ActiveValue::NotSet;
+                }
                 // 当修改时间未设置时，设置修改时间
                 if active_model.update_ms.is_not_set() {
                     let now = ActiveValue::set(wheel_rs::time_utils::now_ms() as i64);

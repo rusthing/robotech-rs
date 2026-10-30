@@ -170,6 +170,11 @@ pub fn crud_dto_macro(args: CrudDtoArgs, input: ItemStruct) -> TokenStream {
             #[builder(default, setter(strip_option))]
             pub id: Option<U64>,
             #add_fields
+            /// # 调用方时间戳（毫秒）
+            ///
+            /// **默认不要传**：审计列由服务端在落库时补当前时间。只有确实需要
+            /// 「一次请求里的多次写共用一个时间戳」时才显式指定；传 0 与不传
+            /// 等价（DAO 把 0 当作未设置）。
             #[serde(skip_deserializing)]
             #[into(create_ms, match ~ {Some(v)=>ActiveValue::Set(v.into()),None=>ActiveValue::NotSet})]
             #[builder(default, setter(strip_option))]
@@ -195,6 +200,11 @@ pub fn crud_dto_macro(args: CrudDtoArgs, input: ItemStruct) -> TokenStream {
             #[builder(default, setter(strip_option))]
             pub id: Option<U64>,
             #modify_fields
+            /// # 调用方时间戳（毫秒）
+            ///
+            /// **默认不要传**：审计列由服务端在落库时补当前时间。只有确实需要
+            /// 「一次请求里的多次写共用一个时间戳」时才显式指定；传 0 与不传
+            /// 等价（DAO 把 0 当作未设置）。
             #[serde(skip_deserializing)]
             #[into(update_ms, match ~ {Some(v)=>ActiveValue::Set(v.into()),None=>ActiveValue::NotSet})]
             #[builder(default, setter(strip_option))]
@@ -217,6 +227,11 @@ pub fn crud_dto_macro(args: CrudDtoArgs, input: ItemStruct) -> TokenStream {
             #save_fields
             #[serde(skip_deserializing)]
             pub _current_user_id: U64,
+            /// # 调用方时间戳（毫秒）
+            ///
+            /// **默认不要传**：审计列由服务端在落库时补当前时间。只有确实需要
+            /// 「一次请求里的多次写共用一个时间戳」时才显式指定；传 0 与不传
+            /// 等价（DAO 把 0 当作未设置）。
             #[serde(skip_deserializing)]
             pub _current_ms: Option<U64>,
         }
@@ -278,6 +293,11 @@ pub fn crud_dto_macro(args: CrudDtoArgs, input: ItemStruct) -> TokenStream {
             #[builder(default, setter(strip_option))]
             pub id: Option<U64>,
             #client_add_fields
+            /// # 调用方时间戳（毫秒）
+            ///
+            /// **默认不要传**：审计列由服务端在落库时补当前时间。只有确实需要
+            /// 「一次请求里的多次写共用一个时间戳」时才显式指定；传 0 与不传
+            /// 等价（DAO 把 0 当作未设置）。
             #[serde(skip_serializing)]
             #[builder(default, setter(strip_option))]
             pub _current_ms: Option<U64>,
@@ -293,6 +313,11 @@ pub fn crud_dto_macro(args: CrudDtoArgs, input: ItemStruct) -> TokenStream {
             #[builder(default, setter(strip_option))]
             pub id: Option<U64>,
             #client_modify_fields
+            /// # 调用方时间戳（毫秒）
+            ///
+            /// **默认不要传**：审计列由服务端在落库时补当前时间。只有确实需要
+            /// 「一次请求里的多次写共用一个时间戳」时才显式指定；传 0 与不传
+            /// 等价（DAO 把 0 当作未设置）。
             #[serde(skip_serializing)]
             #[builder(default, setter(strip_option))]
             pub _current_ms: Option<U64>,
@@ -310,6 +335,11 @@ pub fn crud_dto_macro(args: CrudDtoArgs, input: ItemStruct) -> TokenStream {
             #client_save_fields
             #[serde(skip_serializing)]
             pub _current_user_id: U64,
+            /// # 调用方时间戳（毫秒）
+            ///
+            /// **默认不要传**：审计列由服务端在落库时补当前时间。只有确实需要
+            /// 「一次请求里的多次写共用一个时间戳」时才显式指定；传 0 与不传
+            /// 等价（DAO 把 0 当作未设置）。
             #[serde(skip_serializing)]
             pub _current_ms: Option<U64>,
         }
