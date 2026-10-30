@@ -368,6 +368,29 @@ impl U64 {
     pub fn max() -> Self {
         Self(u64::MAX)
     }
+
+    /// # 查询条件用的绑定值（PG `int8`）
+    ///
+    /// 与写路径（`From<U64> for i64`）和读路径（`TryGetable for U64`）保持同一套
+    /// 位模式：`u64 as i64` 在 `2^64` 上是一一映射，`int8` 就是装 8 个字节的容器，
+    /// 超过 `i64::MAX` 的值会以负数形式落库，读回来 `as u64` 仍原样还原。
+    ///
+    /// **三条路径必须一致**：`int8` 是有符号的，若条件里把超范围值折成 `NULL`，
+    /// 就会出现「写进去一个负数行、按同一个 u64 查却查不到」——幂等键永不命中，
+    /// 重复上报被当成新事件，且不报错。所以这里**不做范围裁剪**。
+    ///
+    /// 裸 `u64` 不能直接交给 sea-query：它会被当成 `Value::BigUnsigned`，而
+    /// sea-query-sqlx 绑参时对它做 `i64::try_from(..).unwrap()`（`sqlx_postgres.rs`），
+    /// 一个 `?businessId=18446744073709551615` 就能把请求任务 panic 掉、连响应都没有。
+    ///
+    /// 注意代价：`int8` 的有符号序会让负数排在正数之前，`ORDER BY` / `> <` /
+    /// 游标分页在含负数的列上都不成立（等值匹配不受影响）。什么时候真要在意：
+    /// 这一列要当游标锚点或做范围扫描时。装哈希这类“本来就没有序”的业务 ID
+    /// 则无所谓，不必为此把 64 位砍成 63 位——那只会让生成端多记一条约束。
+    #[cfg(feature = "orm")]
+    pub fn to_db_value(&self) -> Value {
+        Value::BigInt(Some(self.0 as i64))
+    }
 }
 
 impl From<u64> for U64 {
@@ -1126,6 +1149,39 @@ mod tests {
         assert!(serde_json::from_str::<U64>("\"abc\"").is_err());
         // u64::MAX + 1：JSON 解析成浮点，进不了整数分支
         assert!(serde_json::from_str::<U64>("18446744073709551616").is_err());
+    }
+
+    /// # 查询条件的绑定值要与读写路径同一位模式
+    ///
+    /// 三处必须一致：写 `From<U64> for i64`、读 `TryGetable for U64`、查这里。
+    /// 只要有一处做了范围裁剪（比如超范围折 `NULL`），就会出现「写进去查不到」：
+    /// 高位的值以负数落库，条件却恒不成立，幂等键永不命中且不报错。
+    ///
+    /// 另外裸 u64 交给 sea-query 会变成 `BigUnsigned`，sea-query-sqlx 绑参时
+    /// `i64::try_from(..).unwrap()` 直接 panic，所以必须包成 `BigInt`。
+    #[cfg(feature = "orm")]
+    #[test]
+    fn u64_db_value_keeps_bit_pattern() {
+        assert_eq!(U64(42).to_db_value(), Value::BigInt(Some(42)));
+        assert_eq!(
+            U64(i64::MAX as u64).to_db_value(),
+            Value::BigInt(Some(i64::MAX))
+        );
+        // 超范围不折不裁，而是按位模式落成负数——读回来能还原成原值
+        assert_eq!(
+            U64(i64::MAX as u64 + 1).to_db_value(),
+            Value::BigInt(Some(i64::MIN))
+        );
+        assert_eq!(U64::max().to_db_value(), Value::BigInt(Some(-1)));
+
+        // 往返：写出再读回，任意 u64 都不丢位
+        for v in [0, 1, 42, i64::MAX as u64, i64::MAX as u64 + 1, u64::MAX] {
+            let bound = U64(v).to_db_value();
+            let Value::BigInt(Some(raw)) = bound else {
+                panic!("u64 必须折成非空 BigInt，否则条件恒不成立");
+            };
+            assert_eq!(raw as u64, v, "位模式往返丢了信息");
+        }
     }
 
     /// 输出仍是字符串，JS 侧不丢精度；且能原样读回

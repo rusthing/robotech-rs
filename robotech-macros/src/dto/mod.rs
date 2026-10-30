@@ -275,7 +275,7 @@ pub fn crud_dto_macro(args: CrudDtoArgs, input: ItemStruct) -> TokenStream {
                 let mut condition = Condition::all();
 
                 if let Some(id) = self.id {
-                    condition = condition.add(Column::Id.eq(id.value()));
+                    condition = condition.add(Column::Id.eq(id.to_db_value()));
                 }
 
                 #query_field_to_condition
@@ -1127,7 +1127,13 @@ fn add_query_field_to_condition_tokens(field: &Field) -> TokenStream {
 
 fn get_value_token_stream(type_name: &str) -> TokenStream {
     match type_name {
-        "u8" | "u16" | "u32" | "u64" | "u128" | "U8" | "U16" | "U32" | "U64" | "U128" => {
+        // u64 不能直接把裸值交给 sea-query：它会变成 `Value::BigUnsigned`，
+        // 而数据库列是 int8，sea-query-sqlx 绑参时对超范围值 `unwrap()` panic。
+        // 统一走 `U64::to_db_value`——按位模式绑 `BigInt`，与读写路径一致
+        "u64" | "U64" => {
+            quote! { v.to_db_value() }
+        }
+        "u8" | "u16" | "u32" | "u128" | "U8" | "U16" | "U32" | "U128" => {
             quote! { v.value() }
         }
         "bool" => {
