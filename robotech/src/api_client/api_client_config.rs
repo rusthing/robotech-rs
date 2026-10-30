@@ -39,12 +39,30 @@ pub enum ApiClientConfig {
         /// 最大失败次数，超过后进入冷却期，默认 3
         #[serde(default = "default_max_failures")]
         max_failures: usize,
-        /// 失败冷却时间，默认 30s
+        /// 首次进入冷却期的基础时长，默认 1s
+        ///
+        /// 冷却时长按连续失败次数指数增长，封顶 `max-cooldown`。
+        /// 默认只有 1s 是有意的：单副本部署时，「冷却 = 整个下游不可用」，
+        /// 30s 的固定冷却会把一次抖动放大成半分钟的静默。
         #[serde(default = "default_cooldown_duration", with = "duration_serde")]
         cooldown_duration: Duration,
+        /// 冷却时长上限，默认 30s
+        #[serde(default = "default_max_cooldown", with = "duration_serde")]
+        max_cooldown: Duration,
         /// 服务发现刷新间隔，默认 30s
         #[serde(default = "default_refresh_interval", with = "duration_serde")]
         refresh_interval: Duration,
+        /// 单次请求超时，默认 3s
+        ///
+        /// **不配的时候 reqwest 没有超时**：下游慢查询、锁等待、网络黑洞里
+        /// TCP 半开，调用方就会一直等下去。而调用方常常是单消费者的 MQ 循环
+        /// ——一跳卡住，整条队列停摆。
+        ///
+        /// 这是**整个请求**（含连接建立）的超时，所以不再单独提供
+        /// connect-timeout：连接阶段卡住同样会被它掐断。确实需要长请求的
+        /// 客户端（大文件上传）单独把这个值调大，不要去动全局 `REQWEST_CLIENT`。
+        #[serde(default = "default_timeout", with = "duration_serde")]
+        timeout: Duration,
     },
     /// 简单直连模式
     #[serde(rename_all = "kebab-case")]
@@ -54,6 +72,9 @@ pub enum ApiClientConfig {
         /// 认证策略
         #[serde(default)]
         auth: Option<ApiAuthStrategy>,
+        /// 单次请求超时，默认 3s（语义同 `MicroSvc::timeout`）
+        #[serde(default = "default_timeout", with = "duration_serde")]
+        timeout: Duration,
     },
 }
 
@@ -62,7 +83,15 @@ fn default_max_failures() -> usize {
 }
 
 fn default_cooldown_duration() -> Duration {
+    Duration::from_secs(1)
+}
+
+fn default_max_cooldown() -> Duration {
     Duration::from_secs(30)
+}
+
+fn default_timeout() -> Duration {
+    Duration::from_secs(3)
 }
 
 fn default_refresh_interval() -> Duration {

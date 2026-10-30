@@ -141,4 +141,55 @@ impl RedisCache {
             .with_context(|| format!("Redis EXPIRE {key} 失败"))?;
         Ok(ok)
     }
+
+    /// # 仅在键不存在时写入，并同时带上过期时间（SET NX EX）
+    ///
+    /// ## 为什么必须是原子的
+    ///
+    /// 「先 `exists` 再 `set`」会在两个并发请求之间留一个窗口：两边都判「不
+    /// 存在」、都写入，去重就失效了。典型用法是「同一个对象的处理窗口」——
+    /// 窗口要拦的恰恰就是并发的那几条。
+    ///
+    /// ## 为什么用 Lua 而不是 `SETNX` + `EXPIRE`
+    ///
+    /// 两步之间有个致命中间态：`SETNX` 成功但 `EXPIRE` 没发出去（连接断、
+    /// 进程崩），这个键就**永不过期**——去重从此变成「这个对象只处理一次」，
+    /// 后面的全被吞掉。对报警这类「宁可重复、不可丢」的业务，这是不可接受的
+    /// 失败模式。放进一段 Lua 里，Redis 保证 SET 与 EX 同时生效。
+    ///
+    /// ## 参数
+    ///
+    /// - `key`：Redis 键
+    /// - `val`：值引用，需实现 [`Serialize`]
+    /// - `ttl`：过期时间，至少 1 秒（`EX` 的单位是秒，传 0 会被 Redis 拒绝）
+    ///
+    /// ## 返回值
+    ///
+    /// - `Ok(true)`：本次抢到（键原本不存在，已写入并带上 TTL）
+    /// - `Ok(false)`：键已存在，本次没抢到
+    pub async fn set_nx<T: Serialize>(key: &str, val: &T, ttl: Duration) -> anyhow::Result<bool> {
+        // 秒级 TTL 是 Redis EX 的最小粒度；不足 1 秒按 1 秒算，好过直接报错
+        const SET_NX_EX: &str = r"
+            if redis.call('SET', KEYS[1], ARGV[1], 'NX', 'EX', ARGV[2]) then
+                return 1
+            end
+            return 0
+        ";
+
+        let mut conn = get_redis_conn()
+            .map_err(|e| anyhow::anyhow!("Redis 连接失败: {e}"))?;
+        let json = serde_json::to_string(val)
+            .with_context(|| format!("Redis SETNX {key} 序列化失败"))?;
+        let seconds = ttl.as_secs().max(1);
+
+        let acquired: i32 = redis::Script::new(SET_NX_EX)
+            .key(key)
+            .arg(json)
+            .arg(seconds)
+            .invoke_async(&mut conn)
+            .await
+            .with_context(|| format!("Redis SET NX EX {key} 失败"))?;
+
+        Ok(acquired == 1)
+    }
 }

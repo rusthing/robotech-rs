@@ -30,8 +30,16 @@ pub enum FeignError {
 
 #[derive(Debug, Clone)]
 struct FailureRecord {
+    /// 连续失败次数（成功一次即清零）
     count: usize,
+    /// 冷却结束时刻；`None` 表示不在冷却里
     cooldown_until: Option<Instant>,
+    /// 冷却到期后，那个「试探请求」是否已经放出去了
+    ///
+    /// half-open 的关键：冷却一到就把该实例放回候选池，会让**所有**并发请求
+    /// 一起涌向一个刚刚才失败的实例，它还没缓过来就又被压垮，冷却白等。
+    /// 所以只放一个探针出去，成功即恢复，失败则重新进冷却（更久）。
+    probe_in_flight: bool,
 }
 
 #[derive(Debug)]
@@ -46,25 +54,65 @@ impl FailureTracker {
         }
     }
 
-    fn is_in_cooldown(&self, instance_id: &str, now: Instant) -> bool {
-        self.records
-            .get(instance_id)
-            .and_then(|r| r.cooldown_until)
-            .map(|until| now < until)
-            .unwrap_or(false)
+    /// # 这个实例现在能不能被选中
+    ///
+    /// 三种情况：
+    ///
+    /// - 没记录（从没失败过）→ 可以；
+    /// - 冷却中 → 不可以；
+    /// - 冷却到期 → 放一个探针（half-open），其余继续挡着。
+    fn is_available(&mut self, instance_id: &str, now: Instant) -> bool {
+        let Some(record) = self.records.get_mut(instance_id) else {
+            return true;
+        };
+
+        match record.cooldown_until {
+            None => true,
+            Some(until) if now < until => false,
+            Some(_) => {
+                if record.probe_in_flight {
+                    false
+                } else {
+                    record.probe_in_flight = true;
+                    true
+                }
+            }
+        }
     }
 
-    fn record_failure(&mut self, instance_id: &str, max_failures: usize, cooldown: Duration) {
+    /// # 记一次失败，并按次数拉长冷却
+    ///
+    /// 冷却时长 = `cooldown * 2^(超出阈值的次数)`，封顶 `max_cooldown`：
+    ///
+    /// - 第一次触顶：1x（默认 1s）——抖一下而已，很快回来；
+    /// - 持续失败：2x、4x…… 一路退到 30s。
+    ///
+    /// 定长 30s 的旧策略在单副本部署下等于「一次抖动 → 半分钟全站静默」，
+    /// 而立刻重试又会把已经过载的下游继续压。指数退避是这两者之间的解。
+    fn record_failure(
+        &mut self,
+        instance_id: &str,
+        max_failures: usize,
+        cooldown: Duration,
+        max_cooldown: Duration,
+    ) {
         let entry = self
             .records
             .entry(instance_id.to_string())
             .or_insert(FailureRecord {
                 count: 0,
                 cooldown_until: None,
+                probe_in_flight: false,
             });
         entry.count += 1;
+        entry.probe_in_flight = false;
+
         if entry.count >= max_failures {
-            entry.cooldown_until = Some(Instant::now() + cooldown);
+            let over = entry.count - max_failures;
+            // 移位上限 6，避免持续失败时溢出；再大的值都会被 max_cooldown 截住
+            let factor = 1u32 << over.min(6);
+            let span = (cooldown * factor).min(max_cooldown);
+            entry.cooldown_until = Some(Instant::now() + span);
         }
     }
 
@@ -80,10 +128,13 @@ enum FeignMode {
         failure_tracker: Arc<Mutex<FailureTracker>>,
         max_failures: usize,
         cooldown_duration: Duration,
+        max_cooldown: Duration,
+        timeout: Option<Duration>,
     },
     Simple {
         base_url: String,
         auth: Option<ApiAuthStrategy>,
+        timeout: Option<Duration>,
     },
 }
 
@@ -110,7 +161,9 @@ impl FeignApiClient {
                 auth: _,
                 max_failures,
                 cooldown_duration,
+                max_cooldown,
                 refresh_interval,
+                timeout,
             } => {
                 let service_discovery = Arc::new(ServiceDiscovery::with_namespace_and_group(
                     &svc_name,
@@ -133,11 +186,21 @@ impl FeignApiClient {
                         failure_tracker: Arc::new(Mutex::new(FailureTracker::new())),
                         max_failures,
                         cooldown_duration,
+                        max_cooldown,
+                        timeout: Some(timeout),
                     },
                 }
             }
-            ApiClientConfig::Simple { base_url, auth } => Self {
-                mode: FeignMode::Simple { base_url, auth },
+            ApiClientConfig::Simple {
+                base_url,
+                auth,
+                timeout,
+            } => Self {
+                mode: FeignMode::Simple {
+                    base_url,
+                    auth,
+                    timeout: Some(timeout),
+                },
             },
         }
     }
@@ -199,11 +262,12 @@ impl FeignApiClient {
         instances: &[ServiceInstance],
         failure_tracker: &Mutex<FailureTracker>,
     ) -> Vec<ServiceInstance> {
-        let tracker = failure_tracker.lock().unwrap();
+        // 需要 `&mut`：冷却到期的实例会被标记「探针已放出」，这是状态变更
+        let mut tracker = failure_tracker.lock().unwrap();
         let now = Instant::now();
         instances
             .iter()
-            .filter(|i| !tracker.is_in_cooldown(&i.instance_id, now))
+            .filter(|i| tracker.is_available(&i.instance_id, now))
             .cloned()
             .collect()
     }
@@ -231,9 +295,10 @@ impl FeignApiClient {
         instance_id: &str,
         max_failures: usize,
         cooldown_duration: Duration,
+        max_cooldown: Duration,
     ) {
         let mut tracker = failure_tracker.lock().unwrap();
-        tracker.record_failure(instance_id, max_failures, cooldown_duration);
+        tracker.record_failure(instance_id, max_failures, cooldown_duration, max_cooldown);
     }
 
     fn record_success(failure_tracker: &Mutex<FailureTracker>, instance_id: &str) {
@@ -254,9 +319,22 @@ impl FeignApiClient {
         E: DeserializeOwned + Debug,
     {
         match &self.mode {
-            FeignMode::Simple { base_url, auth } => {
-                ApiClientUtils::request(method, base_url, uri, params, body, headers, auth.as_ref())
-                    .await
+            FeignMode::Simple {
+                base_url,
+                auth,
+                timeout,
+            } => {
+                ApiClientUtils::request(
+                    method,
+                    base_url,
+                    uri,
+                    params,
+                    body,
+                    headers,
+                    auth.as_ref(),
+                    *timeout,
+                )
+                .await
             }
             FeignMode::MicroSvc {
                 service_discovery,
@@ -264,6 +342,8 @@ impl FeignApiClient {
                 failure_tracker,
                 max_failures,
                 cooldown_duration,
+                max_cooldown,
+                timeout,
             } => {
                 let instances = service_discovery.get_instances();
                 let max_retries = instances.len().max(1);
@@ -295,6 +375,7 @@ impl FeignApiClient {
                         body,
                         headers,
                         None,
+                        *timeout,
                     )
                     .await;
 
@@ -313,6 +394,7 @@ impl FeignApiClient {
                                 &instance_id,
                                 *max_failures,
                                 *cooldown_duration,
+                                *max_cooldown,
                             );
                             last_error = Some(e);
                         }
@@ -389,8 +471,20 @@ impl FeignApiClient {
         headers: Option<&HeaderMap>,
     ) -> Result<Vec<u8>, ApiClientError> {
         match &self.mode {
-            FeignMode::Simple { base_url, auth } => {
-                ApiClientUtils::get_bytes(base_url, uri, params, headers, auth.as_ref()).await
+            FeignMode::Simple {
+                base_url,
+                auth,
+                timeout,
+            } => {
+                ApiClientUtils::get_bytes(
+                    base_url,
+                    uri,
+                    params,
+                    headers,
+                    auth.as_ref(),
+                    *timeout,
+                )
+                .await
             }
             FeignMode::MicroSvc {
                 service_discovery,
@@ -398,6 +492,8 @@ impl FeignApiClient {
                 failure_tracker,
                 max_failures,
                 cooldown_duration,
+                max_cooldown,
+                timeout,
             } => {
                 let instances = service_discovery.get_instances();
                 let max_retries = instances.len().max(1);
@@ -415,7 +511,8 @@ impl FeignApiClient {
                     };
 
                     let result =
-                        ApiClientUtils::get_bytes(&base_url, uri, params, headers, None).await;
+                        ApiClientUtils::get_bytes(&base_url, uri, params, headers, None, *timeout)
+                            .await;
 
                     match result {
                         Ok(bytes) => {
@@ -432,6 +529,7 @@ impl FeignApiClient {
                                 &instance_id,
                                 *max_failures,
                                 *cooldown_duration,
+                                *max_cooldown,
                             );
                         }
                     }
@@ -485,8 +583,13 @@ impl FeignApiClient {
         headers: Option<&HeaderMap>,
     ) -> Result<Ro<serde_json::Value>, ApiClientError> {
         match &self.mode {
-            FeignMode::Simple { base_url, auth } => {
-                ApiClientUtils::multipart(base_url, uri, form, headers, auth.as_ref()).await
+            FeignMode::Simple {
+                base_url,
+                auth,
+                timeout,
+            } => {
+                ApiClientUtils::multipart(base_url, uri, form, headers, auth.as_ref(), *timeout)
+                    .await
             }
             FeignMode::MicroSvc {
                 service_discovery,
@@ -494,6 +597,8 @@ impl FeignApiClient {
                 failure_tracker,
                 max_failures,
                 cooldown_duration,
+                max_cooldown,
+                timeout,
             } => {
                 let instances = service_discovery.get_instances();
                 let mut tried_ids = Vec::new();
@@ -511,7 +616,8 @@ impl FeignApiClient {
                     }
                 };
 
-                let result = ApiClientUtils::multipart(&base_url, uri, form, headers, None).await;
+                let result =
+                    ApiClientUtils::multipart(&base_url, uri, form, headers, None, *timeout).await;
 
                 match result {
                     Ok(resp) => {
@@ -528,6 +634,7 @@ impl FeignApiClient {
                             &instance_id,
                             *max_failures,
                             *cooldown_duration,
+                            *max_cooldown,
                         );
                         Err(e)
                     }

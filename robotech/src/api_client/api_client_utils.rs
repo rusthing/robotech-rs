@@ -10,6 +10,7 @@ use robotech_macros::log_call;
 use serde::de::DeserializeOwned;
 use serde::Serialize;
 use std::fmt::Debug;
+use std::time::Duration;
 use std::str::FromStr;
 use std::sync::LazyLock;
 use wheel_rs::urn_utils::Urn;
@@ -40,6 +41,12 @@ pub struct ApiClientUtils;
 
 impl ApiClientUtils {
     /// 构建请求（组装 URL、headers、params、body 与认证信息）
+    ///
+    /// ## 超时
+    ///
+    /// `timeout` 是**按请求**设的，不动全局 [`REQWEST_CLIENT`]：给全局客户端加
+    /// 超时会顺带掐死 oss 大文件上传这类合法长请求，而各下游能忍的时长本来就
+    /// 不一样（调报警中心 800ms 嫌长，传文件 30s 都不够）。
     fn build_request<D: Serialize + ?Sized>(
         method: Method,
         base_url: &str,
@@ -48,12 +55,16 @@ impl ApiClientUtils {
         body: Option<&D>,
         headers: Option<&HeaderMap>,
         auth: Option<&ApiAuthStrategy>,
+        timeout: Option<Duration>,
     ) -> Result<(Urn, RequestBuilder), ApiClientError> {
         let url = format!("{}{}", base_url, uri);
         let urn = Urn::from_str(&format!("{method}:{url}"))
             .map_err(|e| ApiClientError::SetApiClient(format!("解析url失败: {e}")))?;
         tracing::debug!("request: {urn}....");
         let mut request_builder = REQWEST_CLIENT.request(method, &url);
+        if let Some(timeout) = timeout {
+            request_builder = request_builder.timeout(timeout);
+        }
         if let Some(headers) = headers {
             request_builder = request_builder.headers(headers.clone());
         }
@@ -167,13 +178,14 @@ impl ApiClientUtils {
         body: Option<&D>,
         headers: Option<&HeaderMap>,
         auth: Option<&ApiAuthStrategy>,
+        timeout: Option<Duration>,
     ) -> Result<Ro<E>, ApiClientError>
     where
         D: Serialize + ?Sized + Debug,
         E: DeserializeOwned + Debug,
     {
         let (urn, request_builder) =
-            Self::build_request(method, base_url, uri, params, body, headers, auth)?;
+            Self::build_request(method, base_url, uri, params, body, headers, auth, timeout)?;
         let response = Self::send(&urn, request_builder).await?;
         Self::response_json(&urn, response).await
     }
@@ -201,14 +213,15 @@ impl ApiClientUtils {
         data: Option<&D>,
         headers: Option<&HeaderMap>,
         auth: Option<&ApiAuthStrategy>,
+        timeout: Option<Duration>,
     ) -> Result<Ro<E>, ApiClientError>
     where
         D: Serialize + ?Sized + Debug,
         E: DeserializeOwned + Debug,
     {
         match method {
-            Method::GET => Self::request(method, base_url, uri, data, None, headers, auth).await,
-            _ => Self::request(method, base_url, uri, None, data, headers, auth).await,
+            Method::GET => Self::request(method, base_url, uri, data, None, headers, auth, timeout).await,
+            _ => Self::request(method, base_url, uri, None, data, headers, auth, timeout).await,
         }
     }
 
@@ -230,9 +243,10 @@ impl ApiClientUtils {
         params: Option<&D>,
         headers: Option<&HeaderMap>,
         auth: Option<&ApiAuthStrategy>,
+        timeout: Option<Duration>,
     ) -> Result<Ro<serde_json::Value>, ApiClientError> {
         let (urn, request_builder) =
-            Self::build_request(Method::GET, base_url, uri, params, None, headers, auth)?;
+            Self::build_request(Method::GET, base_url, uri, params, None, headers, auth, timeout)?;
         let response = Self::send(&urn, request_builder).await?;
         Self::response_json(&urn, response).await
     }
@@ -255,9 +269,10 @@ impl ApiClientUtils {
         params: Option<&D>,
         headers: Option<&HeaderMap>,
         auth: Option<&ApiAuthStrategy>,
+        timeout: Option<Duration>,
     ) -> Result<Vec<u8>, ApiClientError> {
         let (urn, request_builder) =
-            Self::build_request(Method::GET, base_url, uri, params, None, headers, auth)?;
+            Self::build_request(Method::GET, base_url, uri, params, None, headers, auth, timeout)?;
         let response = Self::send(&urn, request_builder).await?;
         let result = response
             .bytes()
@@ -285,9 +300,10 @@ impl ApiClientUtils {
         body: Option<&D>,
         headers: Option<&HeaderMap>,
         auth: Option<&ApiAuthStrategy>,
+        timeout: Option<Duration>,
     ) -> Result<Ro<serde_json::Value>, ApiClientError> {
         let (urn, request_builder) =
-            Self::build_request(Method::POST, base_url, uri, None, body, headers, auth)?;
+            Self::build_request(Method::POST, base_url, uri, None, body, headers, auth, timeout)?;
         let response = Self::send(&urn, request_builder).await?;
         Self::response_json(&urn, response).await
     }
@@ -309,9 +325,10 @@ impl ApiClientUtils {
         headers: Option<&HeaderMap>,
         body: &D,
         auth: Option<&ApiAuthStrategy>,
+        timeout: Option<Duration>,
     ) -> Result<Ro<serde_json::Value>, ApiClientError> {
         let (urn, request_builder) =
-            Self::build_request(Method::PUT, base_url, uri, None, Some(body), headers, auth)?;
+            Self::build_request(Method::PUT, base_url, uri, None, Some(body), headers, auth, timeout)?;
         let response = Self::send(&urn, request_builder).await?;
         Self::response_json(&urn, response).await
     }
@@ -333,9 +350,10 @@ impl ApiClientUtils {
         body: Option<&D>,
         headers: Option<&HeaderMap>,
         auth: Option<&ApiAuthStrategy>,
+        timeout: Option<Duration>,
     ) -> Result<Ro<serde_json::Value>, ApiClientError> {
         let (urn, request_builder) =
-            Self::build_request(Method::DELETE, base_url, uri, None, body, headers, auth)?;
+            Self::build_request(Method::DELETE, base_url, uri, None, body, headers, auth, timeout)?;
         let response = Self::send(&urn, request_builder).await?;
         Self::response_json(&urn, response).await
     }
@@ -358,9 +376,10 @@ impl ApiClientUtils {
         form: reqwest::multipart::Form,
         headers: Option<&HeaderMap>,
         auth: Option<&ApiAuthStrategy>,
+        timeout: Option<Duration>,
     ) -> Result<Ro<serde_json::Value>, ApiClientError> {
         let (urn, mut request_builder) =
-            Self::build_request::<String>(Method::POST, base_url, uri, None, None, headers, auth)?;
+            Self::build_request::<String>(Method::POST, base_url, uri, None, None, headers, auth, timeout)?;
         request_builder = request_builder.multipart(form);
         let response = Self::send(&urn, request_builder).await?;
         Self::response_json(&urn, response).await
