@@ -78,7 +78,7 @@ Note: Both `web` and `db` depend on `app` feature, meaning enabling them automat
 ### Logging & Monitoring
 - **Tracing Ecosystem**: Structured logging with JSON output
   - `tracing-subscriber`: Log subscriber and filters
-  - `tracing-appender`: File output and log rotation
+  - `tracing-appender`: Non-blocking writer（滚动文件名由框架内的 `LocalRollingFile` 生成）
   - `tracing-log`: Compatibility with `log` crate
 - **Notify**: File system events for config hot-reload
 

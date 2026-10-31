@@ -1,18 +1,22 @@
 use crate::cfg::{BaseConfig, deserialize_config};
 use crate::cfg::{CfgError, build_cfg};
 use crate::env::{APP_ENV, AppEnv, EnvError};
-use crate::log::{LogConfig, LogError, MuteFilter};
+use crate::log::{
+    DEFAULT_LOG_RETAIN_DAYS, LocalRollingFile, LogConfig, LogError, LogTimeZone, MuteFilter,
+    max_log_files_for_days,
+};
 use arc_swap::ArcSwap;
 use chrono::{Local, Utc};
 use config::{Config, Value};
 use std::collections::HashMap;
 use std::env;
+use std::fs;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, RwLock};
 use tokio::sync::watch;
-use tracing::{debug, error, info};
+use tracing::{debug, error, info, warn};
 use tracing_appender::non_blocking::WorkerGuard;
-use tracing_appender::rolling::RollingFileAppender;
+use tracing_appender::rolling::Rotation;
 use tracing_core::{Event, Level, Subscriber};
 use tracing_log::NormalizeEvent;
 use tracing_subscriber::fmt::format::{DefaultFields, Writer};
@@ -228,6 +232,8 @@ impl LogWatcher {
             file_time_format,
             show_spans,
             rotation,
+            tz_offset,
+            max_log_files,
             mute_targets,
             mute_keywords,
         } = deserialize_config(config.clone()).await?;
@@ -252,6 +258,9 @@ impl LogWatcher {
         ));
 
         // 文件输出层
+        //
+        // 文件名中的时间戳按配置时区（缺省跟随系统本地时区）生成，与文件 mtime
+        // 使用同一时区，避免出现「文件名比 mtime 慢 8 小时」的 UTC/本地时区错位。
         let AppEnv {
             app_dir,
             app_file_name,
@@ -259,12 +268,20 @@ impl LogWatcher {
         } = APP_ENV.get().ok_or(EnvError::GetAppEnv())?;
         let log_dir_path = app_dir.join("log");
         let log_dir = log_dir_path.to_string_lossy().to_string();
-        let file_appender = RollingFileAppender::builder()
-            .rotation(rotation.clone()) // 滚动策略
-            .filename_prefix(format!("{}.log", app_file_name)) // 文件名前缀
-            .filename_suffix("json") // 文件后缀，如 "log", "txt" 等
-            .build(log_dir_path) // 日志目录
-            .map_err(LogError::CreateFileAppender)?;
+        let log_prefix = format!("{}.log", app_file_name);
+        let log_suffix = "json";
+        let log_time_zone = resolve_time_zone(tz_offset);
+        let file_appender = build_file_appender(
+            &log_dir_path,
+            &log_prefix,
+            log_suffix,
+            &rotation,
+            log_time_zone,
+            max_log_files,
+        )?;
+        // tracing 尚未 init，先把自检结果采集下来，init 之后再输出
+        let log_naming_probe =
+            LogNamingProbe::collect(&file_appender, &log_dir_path, &log_prefix, log_suffix);
         let (non_blocking, log_guard) = tracing_appender::non_blocking(file_appender);
         let (file_layer, file_layer_reload_handle) =
             reload::Layer::new(creat_file_layer!(file_time_format, non_blocking));
@@ -284,6 +301,8 @@ impl LogWatcher {
             .with(file_layer) // 文件输出层
             .init();
         debug!("初始化日志成功");
+        // 日志文件名时区自检：输出实际生效的偏移与文件名样例，并提示按其它时区命名的历史文件
+        log_naming_probe.report();
 
         let files_clone = files.clone();
         let mute_targets_shared = Arc::clone(&mute_targets);
@@ -302,6 +321,8 @@ impl LogWatcher {
                             show_spans,
                             file_time_format,
                             rotation,
+                            tz_offset,
+                            max_log_files,
                             mute_targets,
                             mute_keywords,
                         } = log_config;
@@ -324,13 +345,17 @@ impl LogWatcher {
 
                         file_layer_reload_handle
                             .modify(|layer| {
-                                // 重新创建文件appender
-                                let file_appender = RollingFileAppender::builder()
-                                    .rotation(rotation.clone())
-                                    .filename_prefix(format!("{}.log", app_file_name))
-                                    .filename_suffix("json")
-                                    .build(Path::new(log_dir.as_str()))
-                                    .expect("create file appender error");
+                                // 重新创建文件appender（时区随之更新）
+                                let log_time_zone = resolve_time_zone(tz_offset);
+                                let file_appender = build_file_appender(
+                                    Path::new(log_dir.as_str()),
+                                    &format!("{}.log", app_file_name),
+                                    "json",
+                                    &rotation,
+                                    log_time_zone,
+                                    max_log_files,
+                                )
+                                .expect("create file appender error");
                                 let (non_blocking, log_guard) =
                                     tracing_appender::non_blocking(file_appender);
 
@@ -400,6 +425,168 @@ impl LogWatcher {
 /// 仅构建日志配置（`log` 配置文件），不涉及配置中心初始化。
 async fn build_log_cfg(app_dir: &PathBuf) -> crate::cfg::Result<(Config, Vec<String>)> {
     build_cfg(app_dir, "LOG", None, "log", None).await
+}
+
+/// 解析日志文件名时间戳使用的时区。
+///
+/// 优先级：配置项 `tz-offset` > 环境变量 `LOG_TZ_OFFSET` > 系统本地时区。
+/// 偏移超出 `±86399` 秒视为非法，回退到系统本地时区；实际生效值会在启动自检日志中打印，
+/// 便于与 `date +%z` 对照。
+///
+/// ## 参数
+/// * `tz_offset` - 配置中的时区偏移（秒）
+///
+/// ## 返回值
+/// 实际使用的时区
+fn resolve_time_zone(tz_offset: Option<i32>) -> LogTimeZone {
+    let offset = tz_offset.or_else(|| {
+        env::var("LOG_TZ_OFFSET")
+            .ok()
+            .and_then(|value| value.trim().parse::<i32>().ok())
+    });
+    match offset {
+        Some(secs) if (-86_399..=86_399).contains(&secs) => LogTimeZone::Fixed(secs),
+        _ => LogTimeZone::Local,
+    }
+}
+
+/// 构建本地时区滚动文件 appender。
+///
+/// 未配置 `max-log-files` 时按 [`DEFAULT_LOG_RETAIN_DAYS`] 天换算保留个数；
+/// 配置为 `0` 表示关闭清理。
+///
+/// ## 参数
+/// * `log_dir` - 日志目录
+/// * `prefix` - 文件名前缀（如 `gatex-svr.log`）
+/// * `suffix` - 文件名后缀（如 `json`）
+/// * `rotation` - 滚动策略
+/// * `time_zone` - 文件名时间戳使用的时区
+/// * `max_log_files` - 保留文件个数上限
+///
+/// ## 返回值
+/// 成功返回 appender，失败返回 [`LogError`]
+fn build_file_appender(
+    log_dir: &Path,
+    prefix: &str,
+    suffix: &str,
+    rotation: &Rotation,
+    time_zone: LogTimeZone,
+    max_log_files: Option<usize>,
+) -> Result<LocalRollingFile> {
+    let mut builder = LocalRollingFile::builder()
+        .rotation(rotation.clone())
+        .filename_prefix(prefix.to_string())
+        .filename_suffix(suffix.to_string())
+        .time_zone(time_zone);
+    // 缺省按保留天数换算；显式配 0 视为关闭清理
+    let max_files = match max_log_files {
+        Some(0) => None,
+        Some(max_files) => Some(max_files),
+        None => max_log_files_for_days(rotation, DEFAULT_LOG_RETAIN_DAYS),
+    };
+    if let Some(max_files) = max_files {
+        builder = builder.max_log_files(max_files);
+    }
+    builder
+        .build(log_dir)
+        .map_err(LogError::CreateLocalRollingFile)
+}
+
+/// 日志文件名时区自检结果。
+///
+/// tracing 初始化之前无法输出日志，因此先把结论采集到该结构体，`init` 之后再统一打印。
+struct LogNamingProbe {
+    /// 实际生效的时区偏移（秒）
+    offset_secs: i32,
+    /// 当前周期的时间戳样例
+    sample: String,
+    /// 扫描到的日志文件总数
+    total: usize,
+    /// 文件名时间戳与 mtime 不在同一滚动周期的文件数
+    mismatched: usize,
+    /// 不匹配样例（最多 3 条）
+    examples: Vec<String>,
+}
+
+impl LogNamingProbe {
+    /// 采集自检信息。
+    ///
+    /// 逐个比对已有日志文件的「文件名时间戳」与「mtime 换算出的时间戳」：
+    /// 二者由同一套时区与滚动策略计算，落在同一周期才算一致。不一致说明该文件
+    /// 是按其它时区命名的（例如旧版本按 UTC 生成，东八区下相差 8 小时）。
+    ///
+    /// ## 参数
+    /// * `appender` - 已构建的 appender，提供时区与时间戳换算
+    /// * `log_dir` - 日志目录
+    /// * `prefix` - 文件名前缀
+    /// * `suffix` - 文件名后缀
+    ///
+    /// ## 返回值
+    /// 自检结果
+    fn collect(appender: &LocalRollingFile, log_dir: &Path, prefix: &str, suffix: &str) -> Self {
+        let mut total = 0usize;
+        let mut mismatched = 0usize;
+        let mut examples = Vec::new();
+        let suffix_part = format!(".{}", suffix);
+        if let Ok(entries) = fs::read_dir(log_dir) {
+            for entry in entries.flatten() {
+                let Ok(metadata) = entry.metadata() else {
+                    continue;
+                };
+                if !metadata.is_file() {
+                    continue;
+                }
+                let file_name = entry.file_name().to_string_lossy().to_string();
+                // 只认 {prefix}.{stamp}.{suffix} 这种形态
+                let Some(rest) = file_name
+                    .strip_prefix(prefix)
+                    .and_then(|rest| rest.strip_prefix('.'))
+                else {
+                    continue;
+                };
+                let Some(stamp) = rest.strip_suffix(suffix_part.as_str()) else {
+                    continue;
+                };
+                let Some(modified) = metadata.modified().ok() else {
+                    continue;
+                };
+                total += 1;
+                let expected = appender.stamp_of(modified);
+                if expected != stamp {
+                    mismatched += 1;
+                    if examples.len() < 3 {
+                        examples.push(format!("{file_name}（文件名={stamp}, mtime={expected}）"));
+                    }
+                }
+            }
+        }
+        Self {
+            offset_secs: appender.time_zone_offset_secs(),
+            sample: appender.now_stamp(),
+            total,
+            mismatched,
+            examples,
+        }
+    }
+
+    /// 输出自检结果。
+    ///
+    /// 正常情况下 INFO 一行即可确认时区；发现历史文件时区不一致时额外打 WARN。
+    fn report(&self) {
+        info!(
+            offset_secs = self.offset_secs,
+            sample = %self.sample,
+            "日志文件名时区"
+        );
+        if self.mismatched > 0 {
+            warn!(
+                mismatched = self.mismatched,
+                total = self.total,
+                examples = ?self.examples,
+                "存在文件名时间戳与 mtime 不在同一滚动周期的日志文件，可能是旧版本按 UTC 命名留下的，建议改名或归档"
+            );
+        }
+    }
 }
 
 /// 创建 tracing 环境过滤器。

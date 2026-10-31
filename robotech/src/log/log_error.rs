@@ -16,6 +16,8 @@ pub enum LogError {
     WatchFile(#[from] notify::Error),
     #[error("Fail to create file appender: {0}")]
     CreateFileAppender(InitError),
+    #[error("Fail to create local rolling file: {0}")]
+    CreateLocalRollingFile(#[from] std::io::Error),
     #[error("Fail to set LOG_GUARD")]
     SetLogGuard(),
     #[error("Fail to set LOG_CONFIG_GUARD")]
