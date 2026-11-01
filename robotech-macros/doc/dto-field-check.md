@@ -17,8 +17,8 @@
 pub target_id: String,
 ```
 
-- 行首（去掉缩进后）必须是 `@`，紧跟标签名：`@len` 或 `@range`。
-- 标签名后面跟一个区间，区间是**第一个空白分隔的词**；区间之后可以继续写说明，
+- 行首（去掉缩进后）必须是 `@`，紧跟标签名：`@len`、`@range`、`@check`、`@unit`。
+- 标签名后面跟一个区间（或函数名），是**第一个空白分隔的词**；之后可以继续写说明，
   宏不解析说明文字。
 - 区间写法（Rust 语法，和 `..=` 一致）：
 
@@ -34,14 +34,59 @@ pub target_id: String,
 - `@len` 的下限写 `0` 就是「允许空串」的机器写法：不再生成 `min`，只留上限。
 - 标签名拼错、区间写法不对、标签和字段类型不匹配 → **编译报错**，不会静默忽略。
 
-## 二、两个标签（DTO 侧）
+## 二、四个标签（DTO 侧）
 
 | 标签 | 适用字段 | 校验 |
 | --- | --- | --- |
 | `@len` | `String`、`Option<String>` | 字符数（不是字节数），生成 `length(min, max)` |
 | `@range` | `i8` `i16` `i32` `i64` `f32` `f64`、`u8` `u16` `u32` `u64` `u128`（含 `Option`） | 数值区间，生成 `range(min, max)` |
+| `@check` | `String`、`Option<String>` | 语义校验，生成 `custom(function = "robotech::api::validators::xxx")` |
+| `@unit` | 任意 | **不生成校验**，只标明物理单位（目前只有 `@unit ms`） |
 
-第三个标签 `@enum` 只出现在模型里（第十节），DTO 侧不写。
+第五个标签 `@enum` 只出现在模型里（第十节），DTO 侧不写。
+
+### 2.1 `@check`：什么时候用、怎么用
+
+`@len` 与 `@range` 只能表达结构约束。有些规则表达不了：
+
+- 带校验位：身份证的 ISO 7064、统一社会信用代码的模 31、银行卡的 Luhn
+- 要解析：IP 地址（压缩零、双冒号只能出现一次，正则几乎必然写错）
+- 要多步判断：出生日期必须真实存在且不在未来
+
+这些写成 `@check`，指向 `wheel_rs::regex_utils` 里的谓词函数（`is_` 开头）：
+
+```rust
+/// 身份证号
+/// @len 18..=18
+/// @check is_id_card_cn
+pub id_card: String,
+```
+
+宏把它翻译成：
+
+```rust
+#[validate(
+    required(message = "身份证号不能为空"),
+    length(min = 18, max = 18, message = "身份证号长度需在 18~18 个字符之间"),
+    custom(function = "robotech::api::validators::id_card_cn")
+)]
+```
+
+函数名去掉 `is_` 前缀后与 `robotech::api::validators` 一一对应，那一层负责把 `bool`
+包成 `Result<(), ValidationError>`。可空字段的 `None` 由 validator 自己跳过，不会走进
+函数——**格式校验不替必填规则报错**，否则可空字段会收到两条互相矛盾的提示。
+
+选 `@check` 还是 `@regex`（给 OpenAPI / 前端用的正则文本）？模型里默认写 `@check`：
+它认的是函数，比正则严。只有确实要把正则文本导给外部系统时才另外维护 `pattern::*` 常量。
+
+### 2.2 `@unit`：为什么认它却不校验
+
+时间戳列的合法区间完全取决于业务（事件时间可以是历史、到期时间必须在未来），
+写死一个范围只会误伤。所以 `@unit ms` 只做标记：读代码的人知道这列是毫秒，
+而宏不生成任何规则。
+
+关键在于**宏必须认识它**——模型里每个时间戳列都带 `@unit ms`，如果当成未知标签报错，
+模型就没法直接喂给代码生成。
 
 无符号字段在 DTO 里会被包装成 `U8/U16/U32/U64/U128`，validator 只给原生整数实现了
 `ValidateRange`。包装类型上的实现由 `robotech/src/api/unsigned_integer.rs` 补齐
@@ -191,6 +236,7 @@ pub geo_longitude: Option<f64>,
 - 必填：`{字段说明}不能为空`
 - 长度：`{字段说明}长度需在 1~50 个字符之间` / `长度不能超过 N 个字符` / `长度不能少于 N 个字符`
 - 区间：`{字段说明}取值范围是 -180~180` / `不能大于 N` / `不能小于 N`
+- 格式（`@check`）：`{字段中文名}格式不正确`，由 `validators` 里的函数给出
 
 字段说明取注释里第一条不是标签的行；没有说明就用字段名。
 
@@ -217,9 +263,9 @@ grep -rn "pub .*: String" --include="*.rs" */\*-api/src/dto
 | `model/*-pgsql.pdm`、`*-mysql.pdm` | 物理模型列 `Comment` |
 | `model/create-table-*.sql` | `comment on column … is '…'`；MySQL 是列定义行内的 `comment '…'` |
 
-三处内容相同：**散文 + 标签行**。散文是字段说明；`@len` / `@range` 单独成行、语法与
-DTO 完全一致；枚举列再多一个 `@enum` 块（10.2，只写在模型里）。PowerDesigner 重新
-生成 DDL 时注释原样带出，标签就一路流到建表语句。
+三处内容相同：**散文 + 标签行**。散文是字段说明；`@len` / `@range` / `@check` / `@unit`
+单独成行、语法与 DTO 完全一致；枚举列再多一个 `@enum` 块（10.2，只写在模型里）。
+PowerDesigner 重新生成 DDL 时注释原样带出，标签就一路流到建表语句。
 
 ### 10.2 `@enum`：枚举列怎么声明
 

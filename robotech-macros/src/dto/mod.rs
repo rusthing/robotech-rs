@@ -447,9 +447,12 @@ fn process_field(field: &Field, target: &str) -> TokenStream {
         }
     }
 
-    // 如果是添加，且没有手动写validate，且没有db_default，自动生成检验属性
-    if target == "add" && !has_validate && !has_db_default {
-        if let Some(attr) = generate_validate_attr(field) {
+    // 如果是添加，且没有手动写validate，自动生成检验属性
+    //
+    // `#[db_default]` 只影响「必填」这一条：有数据库默认值，客户端可以不传；
+    // 但一旦传了值，长度/区间/格式一样要校验——否则 `status` 传 999 也能落库。
+    if target == "add" && !has_validate {
+        if let Some(attr) = generate_validate_attr(field, has_db_default) {
             new_attrs.push(attr);
         }
     }
@@ -505,7 +508,7 @@ fn has_attr(attrs: &[Attribute], name: &str) -> bool {
     attrs.iter().any(|attr| attr.path().is_ident(name))
 }
 
-/// 字段校验声明，来自文档注释里的 `@len` / `@range` 标签
+/// 字段校验声明，来自文档注释里的 `@len` / `@range` / `@check` / `@unit` 标签
 ///
 /// 规范见 `robotech-macros/doc/dto-field-check.md`：约束只认标签，
 /// 不从散文里猜（「最长 100 字符」这种描述对宏没有约束力）。
@@ -518,6 +521,17 @@ struct FieldCheck {
     len_declared: bool,
     /// 数值区间
     range: Option<Bound>,
+    /// 语义校验函数名，来自 `@check is_email`
+    ///
+    /// 只认 `wheel_rs::regex_utils` 里的 `is_*` 谓词：结构能正则表达的用 `@len`/`@range`，
+    /// 带校验位、要解析、要多步判断的规则才用 `@check` 调函数。
+    check: Option<String>,
+    /// 物理单位，来自 `@unit ms`
+    ///
+    /// 纯文档标记，不生成任何校验：时间戳列的合法区间依赖业务（事件时间 / 到期时间
+    /// 各不相同），写死一个范围只会误伤。宏认识它是为了**不报未知标签**——模型里
+    /// 每个时间戳列都带这个标记。
+    unit: Option<String>,
 }
 
 /// 一个区间声明：`a..=b`、`a..`、`..=b`；空的一侧表示不限
@@ -621,6 +635,15 @@ fn check_field_tags(field: &Field) -> syn::Result<FieldCheck> {
             }
         }
     }
+    if check.check.is_some() && !matches!(kind, FieldKind::Str | FieldKind::OptStr) {
+        return Err(syn::Error::new_spanned(
+            field,
+            format!(
+                "字段 {field_name} 的 `@check` 只能用在 String / Option<String> 上：\
+                 它把整串交给格式校验函数，数字与枚举没有这个概念"
+            ),
+        ));
+    }
     Ok(check)
 }
 
@@ -666,10 +689,44 @@ fn parse_check_tags(field: &Field) -> syn::Result<FieldCheck> {
                     check.range = Some(bound);
                 }
             }
+            "check" => {
+                let fn_name = spec.split_whitespace().next().unwrap_or_default();
+                if fn_name.is_empty() {
+                    return Err(syn::Error::new_spanned(
+                        attr,
+                        format!(
+                            "字段 {field_name} 的 `@check` 缺少函数名，写法：`@check is_email`"
+                        ),
+                    ));
+                }
+                let legal = fn_name.starts_with("is_")
+                    && fn_name
+                        .chars()
+                        .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '_');
+                if !legal {
+                    return Err(syn::Error::new_spanned(
+                        attr,
+                        format!(
+                            "字段 {field_name} 的 `@check` 要写 `wheel_rs::regex_utils` 里的\
+                             谓词函数名（`is_` 开头、只含小写字母/数字/下划线），\
+                             例如 `@check is_email`；给的是 `{fn_name}`。\
+                             只想表达结构约束请用 `@len` / `@range`"
+                        ),
+                    ));
+                }
+                check.check = Some(fn_name.to_string());
+            }
+            "unit" => {
+                // 只做标记，不生成校验：合法区间随业务而定，写死会误伤
+                check.unit = Some(spec.to_string());
+            }
             other => {
                 return Err(syn::Error::new_spanned(
                     attr,
-                    format!("字段 {field_name} 用了未知的校验标签 `@{other}`，只支持 `@len` 与 `@range`"),
+                    format!(
+                        "字段 {field_name} 用了未知的校验标签 `@{other}`，\
+                         只支持 `@len`、`@range`、`@check`、`@unit`"
+                    ),
                 ));
             }
         }
@@ -747,13 +804,15 @@ fn field_label(field: &Field) -> String {
 /// - 写了 `@len 0..=N` 才算允许空串：去掉最小长度，只留上限
 /// - 上限只认 `@len` 声明的值，没有就不限长（由数据库列类型兜底）
 /// - 数值只在写了 `@range` 时才校验区间
-fn generate_validate_attr(field: &Field) -> Option<Attribute> {
+fn generate_validate_attr(field: &Field, has_db_default: bool) -> Option<Attribute> {
     let (kind, optional) = field_kind(&field.ty);
     let label = field_label(field);
     let check = parse_check_tags(field).unwrap_or_default();
     let mut metas: Vec<syn::Meta> = Vec::new();
 
-    if !optional {
+    // 有数据库默认值的列，客户端可以不传，所以不生成 required；
+    // 传了值仍然要过长度/区间/格式校验
+    if !optional && !has_db_default {
         let required = format!("{label}不能为空");
         metas.push(syn::parse_quote!(required(message = #required)));
     }
@@ -829,6 +888,20 @@ fn generate_validate_attr(field: &Field) -> Option<Attribute> {
             }
         }
         FieldKind::Other => {}
+    }
+
+    // `@check is_email` → `#[validate(custom(function = "robotech::api::validators::email"))]`
+    //
+    // 函数名去掉 `is_` 前缀后与本模块一一对应；适配层负责把 `bool` 包成
+    // `Result<(), ValidationError>`，并让同一个函数同时支持 `String` 与 `Option<String>`
+    // （`None` 直接放过，是否必填由 `required` 规则决定）。
+    if let Some(fn_name) = &check.check {
+        let validator = fn_name.trim_start_matches("is_");
+        let path = syn::LitStr::new(
+            &format!("robotech::api::validators::{validator}"),
+            proc_macro2::Span::call_site(),
+        );
+        metas.push(syn::parse_quote!(custom(function = #path)));
     }
 
     if metas.is_empty() {
@@ -1212,13 +1285,15 @@ mod tests {
 
     /// 生成出来的 validate 属性（没有就是空串），去掉空格方便断言
     fn validate_of(field: &Field) -> String {
-        generate_validate_attr(field)
+        generate_validate_attr(field, false)
             .map(|attr| attr.to_token_stream().to_string().replace(' ', ""))
             .unwrap_or_default()
     }
 
     fn field(name: &str, doc: &str, ty: &str) -> Field {
-        field_of(&format!("struct Dto {{ /// {doc}\n pub {name}: {ty} }}"))
+        // 允许传多行注释（每行一个标签），逐行转成 `///`
+        let docs: String = doc.lines().map(|line| format!("/// {line}\n")).collect();
+        field_of(&format!("struct Dto {{ {docs} pub {name}: {ty} }}"))
     }
 
     // ---- 默认口径：没写 @len 的字符串仍不许空串 ----
@@ -1390,5 +1465,53 @@ mod tests {
         assert_eq!(serde_of(&field("name", "名称", "String")), "");
         let attr = serde_of(&field("remark", "备注", "Option<String>"));
         assert!(attr.contains("option_option_serde::deserialize"), "{attr}");
+    }
+
+    // ---- @check / @unit ----
+
+    /// `@check is_email` → `custom(function = "robotech::api::validators::email")`
+    #[test]
+    fn check_tag_maps_to_validator_function() {
+        let attr = validate_of(&field("email", "@len 0..=50\n@check is_email", "Option<String>"));
+        assert!(
+            attr.contains("custom(function=\"robotech::api::validators::email\")"),
+            "{attr}"
+        );
+    }
+
+    /// `@check` 与非 `is_*` 的名字组合：直接报错，别让宏生成一个不存在的路径
+    #[test]
+    fn check_tag_requires_is_prefix() {
+        let error =
+            check_field_tags(&field("email", "@check EMAIL", "String")).unwrap_err();
+        assert!(error.to_string().contains("is_"), "{}", error);
+    }
+
+    /// `@check` 挂在数值上：报错（格式校验只对字符串有意义）
+    #[test]
+    fn check_tag_on_number_is_rejected() {
+        let error =
+            check_field_tags(&field("age", "@check is_code", "i32")).unwrap_err();
+        assert!(error.to_string().contains("@check"), "{}", error);
+    }
+
+    /// `@unit ms` 只是标记：不生成校验，也不能报未知标签
+    #[test]
+    fn unit_tag_is_accepted_and_generates_nothing() {
+        let f = field("create_ms", "创建时间\n@unit ms", "i64");
+        assert!(check_field_tags(&f).is_ok());
+        let attr = validate_of(&f);
+        assert!(!attr.contains("range"), "@unit 不该生成校验: {attr}");
+    }
+
+    /// 有 `#[db_default]` 的字段：不加 required，但传了值仍要过区间校验
+    #[test]
+    fn db_default_keeps_range_but_drops_required() {
+        let f = field("status", "状态\n@range 1..=3", "i16");
+        let attr = generate_validate_attr(&f, true)
+            .map(|a| a.to_token_stream().to_string().replace(' ', ""))
+            .unwrap_or_default();
+        assert!(!attr.contains("required"), "不该要求必填: {attr}");
+        assert!(attr.contains("range(min=1,max=3"), "区间校验要保留: {attr}");
     }
 }

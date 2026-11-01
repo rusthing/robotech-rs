@@ -7,6 +7,7 @@
 //! - `F64` 包装类型（用于 DTO/VO 与数据库 `NUMERIC`/`DECIMAL` 列的互转）
 //! - 无符号整数包装类型（`U8`/`U16`/`U32`/`U64`/`U128`，避免 JavaScript 精度丢失）
 //! - `tolerant_number`：原生数值字段「字符串与数字都收」的 `deserialize_with` 助手
+//! - `validators`：字段格式校验适配，`#[crud_dto]` 的 `@check` 标签指向这里
 
 mod duration;
 mod float;
@@ -14,6 +15,9 @@ mod ro;
 mod unsigned_integer;
 
 pub mod tolerant_number;
+/// 字段格式校验适配：`#[crud_dto]` 的 `@check` 标签指向这里（需 `app` feature）
+#[cfg(feature = "app")]
+pub mod validators;
 
 pub use duration::*;
 pub use float::*;
