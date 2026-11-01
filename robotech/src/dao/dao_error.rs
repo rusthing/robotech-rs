@@ -35,9 +35,15 @@ static REGEX_INSERT_VIOLATE_FK_MYSQL: LazyLock<Regex> = LazyLock::new(|| {
 });
 
 /// # 正则匹配删除(或更新)操作违反了约束条件错误-Postgres
-/// 格式: update or delete on table "..." violates foreign key constraint "..." on table "..."
+/// 格式（`on delete no action`）: update or delete on table "..." violates foreign key constraint "..." on table "..."
+/// 格式（`on delete restrict`）: update or delete on table "..." violates RESTRICT setting of foreign key constraint "..." on table "..."
+///
+/// 两种约束动作的报错措辞不同：`NO ACTION` 直接是 `violates foreign key constraint`，
+/// 而 `RESTRICT` 会多出 `RESTRICT setting of`。这里把这段做成可选分组，否则
+/// `on delete restrict` 的删除冲突匹配不上，会退化成运行时错误（接口 500），
+/// 而不是「关联仍被引用」的可读提示。
 static REGEX_DELETE_VIOLATE_FK_POSTGRES: LazyLock<Regex> = LazyLock::new(|| {
-    Regex::new(r#"update or delete on table \\"(?P<pk_table>[A-Za-z_0-9]+)\\" violates foreign key constraint \\"fk_(?P<fk_column>[A-Za-z_0-9]+)__from__[A-Za-z_0-9]+\\" on table \\"(?P<fk_table>[A-Za-z_0-9]+)\\""#).expect("正则表达式错误")
+    Regex::new(r#"update or delete on table \\"(?P<pk_table>[A-Za-z_0-9]+)\\" violates (?:RESTRICT setting of )?foreign key constraint \\"fk_(?P<fk_column>[A-Za-z_0-9]+)__from__[A-Za-z_0-9]+\\" on table \\"(?P<fk_table>[A-Za-z_0-9]+)\\""#).expect("正则表达式错误")
 });
 
 /// # 正则匹配删除(或更新)操作违反了约束条件错误-MySQL
@@ -212,5 +218,51 @@ impl DaoError {
             Ok(foreign_key) => DaoError::DeleteViolateFk(foreign_key),
             Err(e) => e,
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// SeaORM 用 `{:?}` 打印底层错误，消息里的引号会被转义成 `\"`，这里照样还原。
+    fn debug_view(pg_message: &str) -> String {
+        pg_message.replace('"', "\\\"")
+    }
+
+    /// `on delete restrict`：PG 会多出 `RESTRICT setting of`，删除父行时必须能识别，
+    /// 否则退化成运行时错误（接口 500）。
+    #[test]
+    fn delete_violate_fk_matches_restrict_setting() {
+        let msg = debug_view(
+            r#"update or delete on table "dtw_control_point_group" violates RESTRICT setting of foreign key constraint "fk_group_id__from__dtw_control_point_group" on table "dtw_control_point""#,
+        );
+        let caps = REGEX_DELETE_VIOLATE_FK_POSTGRES
+            .captures(&msg)
+            .expect("on delete restrict 的报错应能匹配");
+        assert_eq!(&caps["pk_table"], "dtw_control_point_group");
+        assert_eq!(&caps["fk_column"], "group_id");
+        assert_eq!(&caps["fk_table"], "dtw_control_point");
+    }
+
+    /// `on delete no action`（默认）：措辞里没有 `RESTRICT setting of`，不能回归。
+    #[test]
+    fn delete_violate_fk_matches_no_action() {
+        let msg = debug_view(
+            r#"update or delete on table "dtw_control_point_group" violates foreign key constraint "fk_group_id__from__dtw_control_point_group" on table "dtw_control_point""#,
+        );
+        let caps = REGEX_DELETE_VIOLATE_FK_POSTGRES
+            .captures(&msg)
+            .expect("on delete no action 的报错应能匹配");
+        assert_eq!(&caps["pk_table"], "dtw_control_point_group");
+        assert_eq!(&caps["fk_column"], "group_id");
+        assert_eq!(&caps["fk_table"], "dtw_control_point");
+    }
+
+    /// 不相干的错误信息不能误匹配。
+    #[test]
+    fn delete_violate_fk_ignores_irrelevant_message() {
+        let msg = debug_view(r#"duplicate key value violates unique constraint "ak_geo_coord""#);
+        assert!(REGEX_DELETE_VIOLATE_FK_POSTGRES.captures(&msg).is_none());
     }
 }
