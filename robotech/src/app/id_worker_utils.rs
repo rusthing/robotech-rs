@@ -5,8 +5,8 @@
 //!
 //! - `node = Some(n)`：视为显式指定，直接使用；
 //! - `node = None`（配置里不写 `node`）：视为自动分配，启动时从注册中心发现
-//!   同服务的健康实例，读取其实例 metadata 里的 `id-node`，取最小的空闲编号
-//!   （范围 `0..=2^node_bits-1`，0 号也是合法编号）；
+//!   同服务的健康实例，读取其实例 metadata 里的 `id-node`，从本实例的哈希起点
+//!   环形扫描第一个空闲编号（范围 `0..=2^node_bits-1`，0 号也是合法编号）；
 //! - 分配结果写入实例 metadata，后续启动的实例据此避让；
 //! - 首次注册成功后再做一次冲突检查：若发现同号，按 `instance_id` 字典序决定
 //!   胜者，败者重新选号并重建生成器。
@@ -14,12 +14,15 @@
 //! node 在进程内只确定一次：配置热更新沿用首次分配的结果，因为重建生成器会把
 //! sequence 归零，同一个时间窗口内可能产生重号。
 //!
-//! ## 已知窗口
+//! ## 并发冷启动
 //!
-//! 两个副本同时冷启动时，双方都可能先看到"没有已占用的 node"而选中同一个号。
-//! 冲突检查会在首次注册后数秒内发现并纠正，但纠正前的这一小段时间里，
-//! 双方生成的 ID 可能重复。要求强一致的场景请在配置里显式指定 `node`，
-//! 或让副本错峰启动。
+//! 两个副本同时冷启动时，双方都可能先看到"没有已占用的 node"。因此选号起点由
+//! `instance_id` 哈希打散（见 [`node_start`]），只有哈希落到同一位置才会撞，概率
+//! 为 1/号池（默认 `node_bits = 6`，即 1/64）；而固定从 0 起扫时是**必然**撞。
+//!
+//! 撞上之后由 [`spawn_id_node_conflict_check`] 纠正：首档 300ms 就开始检查，
+//! 之后按 1s / 3s / 12s / 30s 重试。纠正前这段时间里双方生成的 ID 仍可能重复，
+//! 要绝对避免重号，只能显式指定 `node`，或让副本错峰启动。
 
 use crate::app::AppError;
 use config::Value;
@@ -133,18 +136,54 @@ async fn resolve_node(config: &IdWorkerConfig) -> Result<u8, AppError> {
         Err(e) => warn!("id worker node 自动分配失败: {e:?}"),
     }
 
-    warn!("id worker node 回退为 0：多副本部署时会生成重复 ID，请检查注册中心配置");
+    warn!(
+        "id worker node 回退为 0：单进程部署时正确，多副本部署会生成重复 ID；\
+         请检查注册中心配置，或显式指定 node"
+    );
     Ok(0)
 }
 
-/// 从未占用的编号里挑最小的一个。
+/// 从本实例的起点开始环形扫描，挑第一个未被占用的编号。
 ///
 /// 0 是合法编号，同样参与分配；`exclude` 用于重新选号时排除当前值。
 fn pick_node(occupied: &[u8], max: u8, exclude: Option<u8>) -> Option<u8> {
-    (0..=max).find(|node| Some(*node) != exclude && !occupied.contains(node))
+    pick_node_from(occupied, max, exclude, node_start(max))
 }
 
-/// 从注册中心发现同服务实例，返回最小的空闲 node。
+/// 与 [`pick_node`] 相同，但起点由调用方给出（便于测试不同起点下的回绕行为）。
+fn pick_node_from(occupied: &[u8], max: u8, exclude: Option<u8>, start: usize) -> Option<u8> {
+    // max = 255 时 span = 256，不能用 u8 承载
+    let span = max as usize + 1;
+    let start = start % span;
+    (0..span)
+        .map(|offset| ((start + offset) % span) as u8)
+        .find(|node| Some(*node) != exclude && !occupied.contains(node))
+}
+
+/// 本实例的选号起点。
+///
+/// 用 `instance_id` 的哈希取模，把各副本的扫描起点打散。固定从 0 起扫时，两个副本
+/// 同时冷启动会**必然**选中同一个号（双方都看到"没人占号"→ 都拿 0）；打散之后
+/// 只有哈希落到同一个起点才会撞，概率降到 1/号池。
+///
+/// `instance_id` 在 `setup_id_worker` 阶段是 ULID（Web 服务器尚未启动，还没换成
+/// `{app}-{ip}-{port}`），每次启动都不同，因此起点等价于随机。
+fn node_start(max: u8) -> usize {
+    let instance_id = crate::env::get_app_instance_id();
+    (fnv1a_64(instance_id.as_bytes()) % ((max as usize + 1) as u64)) as usize
+}
+
+/// FNV-1a 64 位哈希。只用于把实例 ID 摊到号池上，不做安全用途。
+fn fnv1a_64(bytes: &[u8]) -> u64 {
+    let mut hash: u64 = 0xcbf2_9ce4_8422_2325;
+    for byte in bytes {
+        hash ^= *byte as u64;
+        hash = hash.wrapping_mul(0x0000_0100_0000_01b3);
+    }
+    hash
+}
+
+/// 从注册中心发现同服务实例，返回从本实例起点起算的第一个空闲 node。
 #[cfg(feature = "registry-center")]
 async fn allocate_node(max: u8) -> Result<Option<u8>, AppError> {
     let hub_client = crate::micro_svc::get_hub_client()?;
@@ -185,10 +224,13 @@ async fn occupied_nodes(
 
 /// # 启动首次注册后的 node 冲突检查
 ///
-/// 两个副本同时冷启动时可能选中同一个 node，这里在首次注册成功后（延迟数秒，
-/// 等对端的注册可见）再查一次：
+/// 两个副本同时冷启动时可能选中同一个 node，这里在注册前后按递增档位反复检查
+/// （300ms / 1s / 3s / 12s / 30s，等对端的注册可见）：
 /// - 自动分配模式：同号的实例按 `instance_id` 字典序排序，排序靠后的一方重新选号；
 /// - 显式配置模式：只告警，不改配置（显式指定意味着运维自己负责）。
+///
+/// 首档不能太晚：原来从 3 秒才开始查，对高频写服务已经是几十万条重号。
+/// 也不能"查一次没看到同号就收工"——300ms 时对端很可能还没注册完。
 ///
 /// 该函数自身立即返回，检查在后台任务中完成。
 pub fn spawn_id_node_conflict_check() {
@@ -204,12 +246,19 @@ pub fn spawn_id_node_conflict_check() {
     tokio::spawn(async move {
         #[cfg(feature = "registry-center")]
         {
-            // 注册中心可能比本进程晚就绪（或启动瞬间网络抖动），
-            // 因此按递增间隔重试；检查成功后立即退出。
-            for delay in [3u64, 12, 30] {
-                tokio::time::sleep(std::time::Duration::from_secs(delay)).await;
+            // 注册中心可能比本进程晚就绪（或启动瞬间网络抖动），因此按递增档位重试。
+            let marks = [300u64, 1_000, 3_000, 12_000, 30_000];
+            let started = tokio::time::Instant::now();
+            for (idx, at_ms) in marks.iter().enumerate() {
+                let is_last = idx + 1 == marks.len();
+                tokio::time::sleep_until(started + std::time::Duration::from_millis(*at_ms))
+                    .await;
                 match resolve_conflict().await {
-                    Ok(()) => return,
+                    // 已经有结论（处理过同号，或显式配置只告警）
+                    Ok(true) => return,
+                    // 本档没看到同号：可能只是对端还没注册，继续等下一档
+                    Ok(false) if is_last => return,
+                    Ok(false) => {}
                     Err(e) => warn!("id worker node 冲突检查失败（稍后重试）: {e:?}"),
                 }
             }
@@ -218,14 +267,18 @@ pub fn spawn_id_node_conflict_check() {
 }
 
 /// 检查并纠正同号冲突。
+///
+/// 返回 `true` 表示这一轮已有结论（处理完同号，或没有可查的对象），调用方可以停止
+/// 后续档位；返回 `false` 表示**本轮没看到同号**——这通常只是对端还没注册完成，
+/// 需要留到下一档再查，不能当成"无冲突"而提前收工。
 #[cfg(feature = "registry-center")]
-async fn resolve_conflict() -> Result<(), AppError> {
+async fn resolve_conflict() -> Result<bool, AppError> {
     let Some(node) = assigned_id_node() else {
-        return Ok(());
+        return Ok(true);
     };
     let hub_client = crate::micro_svc::get_hub_client()?;
     let Some(svc_name) = hub_client.registry_svc_name() else {
-        return Ok(());
+        return Ok(true);
     };
     let me = crate::env::get_app_instance_id();
     let instances = hub_client.discover(&svc_name, None, None).await?;
@@ -244,7 +297,7 @@ async fn resolve_conflict() -> Result<(), AppError> {
         .collect();
 
     if same_node.is_empty() {
-        return Ok(());
+        return Ok(false);
     }
 
     if !AUTO_ALLOCATE.load(Ordering::Acquire) {
@@ -252,7 +305,7 @@ async fn resolve_conflict() -> Result<(), AppError> {
             "id worker node {node} 与实例 {same_node:?} 重复：配置中显式指定的 node 必须在\
              同一服务的所有副本间唯一，否则会生成重复 ID"
         );
-        return Ok(());
+        return Ok(true);
     }
 
     // 所有同号实例按 instance_id 排序，最小者保留该 node
@@ -261,11 +314,12 @@ async fn resolve_conflict() -> Result<(), AppError> {
     candidates.sort_unstable();
     if candidates.first() == Some(&me.as_str()) {
         info!("id worker node {node} 与实例 {same_node:?} 同号，按字典序本实例保留该编号");
-        return Ok(());
+        return Ok(true);
     }
 
     warn!("id worker node {node} 与实例 {same_node:?} 冲突，重新分配");
-    reallocate(node).await
+    reallocate(node).await?;
+    Ok(true)
 }
 
 /// 重新选号并重建生成器。
@@ -310,33 +364,58 @@ mod tests {
     }
 
     #[test]
-    fn pick_smallest_free_node() {
-        assert_eq!(pick_node(&[], 15, None), Some(0));
-        assert_eq!(pick_node(&[0], 15, None), Some(1));
-        assert_eq!(pick_node(&[0, 1, 2], 15, None), Some(3));
-        assert_eq!(pick_node(&[1], 15, None), Some(0));
+    fn pick_from_start() {
+        // 起点未被占用时直接从起点开始，而不是从 0
+        assert_eq!(pick_node_from(&[], 15, None, 3), Some(3));
+        // 起点被占用则顺延
+        assert_eq!(pick_node_from(&[3, 4], 15, None, 3), Some(5));
+        // 起点超出号池按池宽取模
+        assert_eq!(pick_node_from(&[], 15, None, 20), Some(4));
+        // 从末尾起扫要能回绕到 0
+        assert_eq!(pick_node_from(&[15], 15, None, 15), Some(0));
     }
 
     #[test]
     fn zero_is_a_valid_node() {
         // 0 号是合法编号，可以被分配，也可以被显式使用
-        assert_eq!(pick_node(&[], 1, None), Some(0));
-        assert_eq!(pick_node(&[0], 1, None), Some(1));
-        assert_eq!(pick_node(&[0], 1, None).map(|n| n as u16), Some(1));
+        assert_eq!(pick_node_from(&[], 1, None, 0), Some(0));
+        assert_eq!(pick_node_from(&[0], 1, None, 0), Some(1));
         assert_eq!(max_node(0), 0);
-        assert_eq!(pick_node(&[0], 0, None), None);
+        assert_eq!(pick_node_from(&[0], 0, None, 0), None);
     }
 
     #[test]
     fn pick_node_excludes_current() {
-        assert_eq!(pick_node(&[0], 15, Some(0)), Some(1));
-        assert_eq!(pick_node(&[0, 1], 15, Some(2)), Some(3));
+        assert_eq!(pick_node_from(&[0], 15, Some(0), 0), Some(1));
+        assert_eq!(pick_node_from(&[0, 1], 15, Some(2), 3), Some(3));
     }
 
     #[test]
     fn full_range_returns_none() {
         let all: Vec<u8> = (0..=15).collect();
-        assert_eq!(pick_node(&all, 15, None), None);
+        assert_eq!(pick_node_from(&all, 15, None, 7), None);
+    }
+
+    /// 两个副本同时冷启动、都看到空表时，不同起点必须拿到不同的号——
+    /// 这是把「必然撞 0」变成「1/号池 才撞」的核心。
+    #[test]
+    fn different_starts_do_not_collide() {
+        assert_eq!(pick_node_from(&[], 63, None, 0), Some(0));
+        assert_eq!(pick_node_from(&[], 63, None, 17), Some(17));
+    }
+
+    #[test]
+    fn fnv1a_is_stable() {
+        // 标准 FNV-1a 64 位测试向量
+        assert_eq!(fnv1a_64(b""), 0xcbf2_9ce4_8422_2325);
+        assert_eq!(fnv1a_64(b"a"), 0xaf63_dc4c_8601_ec8c);
+    }
+
+    #[test]
+    fn node_start_fits_range() {
+        for max in [0u8, 1, 15, 63, 255] {
+            assert!(node_start(max) <= max as usize);
+        }
     }
 
     #[test]

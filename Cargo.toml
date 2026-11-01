@@ -69,5 +69,7 @@ syn = "3.0.6"                       # 用于解析 Rust 代码为语法树（AST
 
 [patch.crates-io]
 wheel-rs = { path = "../wheel-rs" }
-#idworker = { path = "../idworker" }
+# 本地 idworker（1.5.0 尚未发布）：worker node 的默认位宽（4 → 6）在这里生效。
+# `idworker = "1.4.0"` 是 caret 要求，1.5.0 满足；发布 1.5.0 之后这一行可以去掉。
+idworker = { path = "../idworker" }
 robotech-macros = { path = "./robotech-macros" }
