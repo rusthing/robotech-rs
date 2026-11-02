@@ -103,6 +103,10 @@ check_fn!(
     bank_card => wheel_rs::regex_utils::is_bank_card, "银行卡号"
 );
 check_fn!(
+    /// 车牌号码（省份简称 + 发牌机关字母 + 序号，7/8 位，只认大写）
+    plate_cn => wheel_rs::regex_utils::is_plate_cn, "车牌号"
+);
+check_fn!(
     /// `http://` / `https://` 开头的绝对 URL
     url_http => wheel_rs::regex_utils::is_url_http, "URL"
 );
@@ -170,6 +174,13 @@ mod tests {
         // 校验位错了要能拦住：正则只认 18 位形状
         assert!(id_card_cn("11010519491231002X").is_ok());
         assert!(id_card_cn("110105194912310021").is_err());
+    }
+
+    #[test]
+    fn plate_rejects_lowercase() {
+        assert!(plate_cn("京AD12345").is_ok());
+        // 大小写混入会让库里的唯一约束失效，因此只认大写
+        assert!(plate_cn("京a12345").is_err());
     }
 
     #[test]
