@@ -14,41 +14,57 @@ use wheel_rs::str_utils::{split_camel_case, CamelFormat};
 pub(crate) struct CtrlArgs {
     /// 需要跳过的的方法名集合
     pub skip: HashSet<String>,
+    /// 批量接口的响应 VO（脱敏列表 VO）；未配置时沿用 Vo / ExVo
+    pub list_vo: Option<Ident>,
 }
 
 impl Parse for CtrlArgs {
     fn parse(input: ParseStream) -> syn::Result<Self> {
         let mut skip = HashSet::new();
+        let mut list_vo = None;
 
-        if input.is_empty() {
-            return Ok(CtrlArgs { skip });
+        while !input.is_empty() {
+            let ident: Ident = input.parse()?;
+            match ident.to_string().as_str() {
+                "skip" => {
+                    let lookahead = input.lookahead1();
+                    if lookahead.peek(Token![:]) {
+                        let _: Token![:] = input.parse()?;
+                    } else if lookahead.peek(Token![=]) {
+                        let _: Token![=] = input.parse()?;
+                    }
+
+                    let content;
+                    bracketed!(content in input);
+                    let method_names = content.parse_terminated(Ident::parse, Token![,])?;
+                    for method_name in method_names {
+                        skip.insert(method_name.to_string());
+                    }
+                }
+                "list_vo" => {
+                    let _: Token![=] = input.parse()?;
+                    list_vo = Some(input.parse()?);
+                }
+                unknown => {
+                    return Err(syn::Error::new_spanned(
+                        ident,
+                        format!("Unknown argument: {unknown}"),
+                    ));
+                }
+            }
+
+            if input.is_empty() {
+                break;
+            }
+            let _: Token![,] = input.parse()?;
         }
 
-        let ident: Ident = input.parse()?;
-        if ident != "skip" {
-            return Err(syn::Error::new_spanned(ident, "expected `skip`"));
-        }
-
-        let lookahead = input.lookahead1();
-        if lookahead.peek(Token![:]) {
-            let _: Token![:] = input.parse()?;
-        } else if lookahead.peek(Token![=]) {
-            let _: Token![=] = input.parse()?;
-        }
-
-        let content;
-        bracketed!(content in input);
-        let method_names = content.parse_terminated(Ident::parse, Token![,])?;
-        for method_name in method_names {
-            skip.insert(method_name.to_string());
-        }
-
-        Ok(CtrlArgs { skip })
+        Ok(CtrlArgs { skip, list_vo })
     }
 }
 
 pub(crate) fn ctrl_macro(args: CtrlArgs, input: ItemStruct) -> TokenStream {
-    let CtrlArgs { skip } = args;
+    let CtrlArgs { skip, list_vo } = args;
     let struct_name = &input.ident;
 
     // 解析结构体的名称，必须是Ctrl结尾，符合大驼峰命名规范
@@ -98,6 +114,19 @@ pub(crate) fn ctrl_macro(args: CtrlArgs, input: ItemStruct) -> TokenStream {
     let svc_name = format_ident!("{}Svc", entity_name);
     let vo_name = format_ident!("{}Vo", entity_name);
     let ex_vo_name = format_ident!("{}ExVo", entity_name);
+    // 批量查询的响应类型：默认沿用 Vo；配了 list_vo（脱敏列表 VO）则批量接口全部返回它
+    let list_vo_name = list_vo.clone().unwrap_or_else(|| vo_name.clone());
+    // ex 批量默认仍是 ExVo（带关联字段）；只有配了 list_vo 才替换成它，
+    // 与 svc 宏保持同一规则，否则两个宏生成的类型对不上
+    let ex_list_vo_name = list_vo
+        .clone()
+        .unwrap_or_else(|| ex_vo_name.clone());
+    // 配了 list_vo 才额外引入它；放进 {vo, ex_vo} 列表会在未配置时与 vo 重名（E0252）
+    let list_vo_import = if list_vo.is_some() {
+        quote! { #[allow(unused_imports)] use crate::vo::#list_vo_name; }
+    } else {
+        quote! {}
+    };
     let add_dto_name = format_ident!("{}AddDto", entity_name);
     let modify_dto_name = format_ident!("{}ModifyDto", entity_name);
     let save_dto_name = format_ident!("{}SaveDto", entity_name);
@@ -387,12 +416,12 @@ pub(crate) fn ctrl_macro(args: CtrlArgs, input: ItemStruct) -> TokenStream {
             path = #list_by_query_dto_path,
             params(#query_dto_name),
             responses(
-                (status = OK, body = Ro<Vec<#vo_name>>)
+                (status = OK, body = Ro<Vec<#list_vo_name>>)
             )
         )]
         #[debug_handler]
         #[log_call]
-        pub async fn list_by_query_dto(Query(dto): Query<#query_dto_name>) -> Result<Json<Ro<Vec<#vo_name>>>, CtrlError> {
+        pub async fn list_by_query_dto(Query(dto): Query<#query_dto_name>) -> Result<Json<Ro<Vec<#list_vo_name>>>, CtrlError> {
             let ro = #svc_name::list_by_query_dto::<DatabaseConnection>(dto, None).await?;
             Ok(Json(ro))
         }
@@ -417,12 +446,12 @@ pub(crate) fn ctrl_macro(args: CtrlArgs, input: ItemStruct) -> TokenStream {
             path = #page_by_query_dto_path,
             params(#query_dto_name),
             responses(
-                (status = OK, body = Ro<PageRx<#vo_name>>)
+                (status = OK, body = Ro<PageRx<#list_vo_name>>)
             )
         )]
         #[debug_handler]
         #[log_call]
-        pub async fn page_by_query_dto(Query(dto): Query<#query_dto_name>) -> Result<Json<Ro<PageRx<#vo_name>>>, CtrlError> {
+        pub async fn page_by_query_dto(Query(dto): Query<#query_dto_name>) -> Result<Json<Ro<PageRx<#list_vo_name>>>, CtrlError> {
             let ro = #svc_name::page_by_query_dto::<DatabaseConnection>(dto, None).await?;
             Ok(Json(ro))
         }
@@ -514,12 +543,12 @@ pub(crate) fn ctrl_macro(args: CtrlArgs, input: ItemStruct) -> TokenStream {
             path = #list_ex_by_query_dto_path,
             params(#query_dto_name),
             responses(
-                (status = OK, body = Ro<Vec<#ex_vo_name>>)
+                (status = OK, body = Ro<Vec<#ex_list_vo_name>>)
             )
         )]
         #[debug_handler]
         #[log_call]
-        pub async fn list_ex_by_query_dto(Query(dto): Query<#query_dto_name>) -> Result<Json<Ro<Vec<#ex_vo_name>>>, CtrlError> {
+        pub async fn list_ex_by_query_dto(Query(dto): Query<#query_dto_name>) -> Result<Json<Ro<Vec<#ex_list_vo_name>>>, CtrlError> {
             let ro = #svc_name::list_ex_by_query_dto::<DatabaseConnection>(dto, None).await?;
             Ok(Json(ro))
         }
@@ -544,12 +573,12 @@ pub(crate) fn ctrl_macro(args: CtrlArgs, input: ItemStruct) -> TokenStream {
             path = #page_ex_by_query_dto_path,
             params(#query_dto_name),
             responses(
-                (status = OK, body = Ro<PageRx<#ex_vo_name>>)
+                (status = OK, body = Ro<PageRx<#ex_list_vo_name>>)
             )
         )]
         #[debug_handler]
         #[log_call]
-        pub async fn page_ex_by_query_dto(Query(dto): Query<#query_dto_name>) -> Result<Json<Ro<PageRx<#ex_vo_name>>>, CtrlError> {
+        pub async fn page_ex_by_query_dto(Query(dto): Query<#query_dto_name>) -> Result<Json<Ro<PageRx<#ex_list_vo_name>>>, CtrlError> {
             let ro = #svc_name::page_ex_by_query_dto::<DatabaseConnection>(dto, None).await?;
             Ok(Json(ro))
         }
@@ -640,13 +669,13 @@ pub(crate) fn ctrl_macro(args: CtrlArgs, input: ItemStruct) -> TokenStream {
         #[utoipa::path(
             get,
             path = #search_list_path,
-            responses((status = OK, body = Ro<Vec<#vo_name>>))
+            responses((status = OK, body = Ro<Vec<#list_vo_name>>))
         )]
         #[debug_handler]
         #[log_call]
         pub async fn search_list(
             Query(query): Query<HashMap<String, String>>,
-        ) -> Result<Json<Ro<Vec<#vo_name>>>, CtrlError> {
+        ) -> Result<Json<Ro<Vec<#list_vo_name>>>, CtrlError> {
             let params = SearchParams::from_query(&query);
             let ro = #svc_name::search_list::<DatabaseConnection>(params, None).await?;
             Ok(Json(ro))
@@ -671,13 +700,13 @@ pub(crate) fn ctrl_macro(args: CtrlArgs, input: ItemStruct) -> TokenStream {
         #[utoipa::path(
             get,
             path = #search_page_path,
-            responses((status = OK, body = Ro<PageRx<#vo_name>>))
+            responses((status = OK, body = Ro<PageRx<#list_vo_name>>))
         )]
         #[debug_handler]
         #[log_call]
         pub async fn search_page(
             Query(query): Query<HashMap<String, String>>,
-        ) -> Result<Json<Ro<PageRx<#vo_name>>>, CtrlError> {
+        ) -> Result<Json<Ro<PageRx<#list_vo_name>>>, CtrlError> {
             let params = SearchParams::from_query(&query);
             let ro = #svc_name::search_page::<DatabaseConnection>(params, None).await?;
             Ok(Json(ro))
@@ -766,13 +795,13 @@ pub(crate) fn ctrl_macro(args: CtrlArgs, input: ItemStruct) -> TokenStream {
         #[utoipa::path(
             get,
             path = #search_list_ex_path,
-            responses((status = OK, body = Ro<Vec<#ex_vo_name>>))
+            responses((status = OK, body = Ro<Vec<#ex_list_vo_name>>))
         )]
         #[debug_handler]
         #[log_call]
         pub async fn search_list_ex(
             Query(query): Query<HashMap<String, String>>,
-        ) -> Result<Json<Ro<Vec<#ex_vo_name>>>, CtrlError> {
+        ) -> Result<Json<Ro<Vec<#ex_list_vo_name>>>, CtrlError> {
             let params = SearchParams::from_query(&query);
             let ro = #svc_name::search_list_ex::<DatabaseConnection>(params, None).await?;
             Ok(Json(ro))
@@ -796,13 +825,13 @@ pub(crate) fn ctrl_macro(args: CtrlArgs, input: ItemStruct) -> TokenStream {
         #[utoipa::path(
             get,
             path = #search_page_ex_path,
-            responses((status = OK, body = Ro<PageRx<#ex_vo_name>>))
+            responses((status = OK, body = Ro<PageRx<#ex_list_vo_name>>))
         )]
         #[debug_handler]
         #[log_call]
         pub async fn search_page_ex(
             Query(query): Query<HashMap<String, String>>,
-        ) -> Result<Json<Ro<PageRx<#ex_vo_name>>>, CtrlError> {
+        ) -> Result<Json<Ro<PageRx<#ex_list_vo_name>>>, CtrlError> {
             let params = SearchParams::from_query(&query);
             let ro = #svc_name::search_page_ex::<DatabaseConnection>(params, None).await?;
             Ok(Json(ro))
@@ -829,6 +858,7 @@ pub(crate) fn ctrl_macro(args: CtrlArgs, input: ItemStruct) -> TokenStream {
         use crate::dto::#dto_module::*;
         use crate::svc::#svc_name;
         use crate::vo::{#vo_name, #ex_vo_name};
+        #list_vo_import
 
         #(#generated_methods)*
     };

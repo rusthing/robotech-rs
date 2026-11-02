@@ -2,7 +2,7 @@
 //!
 //! 该模块提供数据访问层的公共工具与类型，包括数据库连接与事务操作（`dao_utils`）、
 //! 数据访问错误类型（`dao_error`）、唯一键/外键注册表（`unique_keys_utils`、
-//! `foreign_keys_utils`）、关联关系转 VO 工具（`belongs_to_utils`）、元数据实体（`eo`）
+//! `foreign_keys_utils`）、树编码生成（`tree_code_utils`）、关联关系转 VO 工具（`belongs_to_utils`）、元数据实体（`eo`）
 //! 以及检索参数工具（`bean_searcher_utils`，供 `search_*` 系列方法使用）。
 //!
 //! ## feature 说明
@@ -27,6 +27,8 @@ pub mod eo;
 #[cfg(feature = "db")]
 mod foreign_keys_utils;
 #[cfg(feature = "db")]
+mod tree_code_utils;
+#[cfg(feature = "db")]
 mod unique_keys_utils;
 
 pub use bean_searcher_utils::*;
@@ -38,5 +40,7 @@ pub use dao_error::*;
 pub use dao_utils::*;
 #[cfg(feature = "db")]
 pub use foreign_keys_utils::*;
+#[cfg(feature = "db")]
+pub use tree_code_utils::*;
 #[cfg(feature = "db")]
 pub use unique_keys_utils::*;

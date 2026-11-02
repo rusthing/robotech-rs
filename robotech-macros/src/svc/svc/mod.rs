@@ -20,6 +20,14 @@ const WRITE_METHODS: &[&str] = &["add", "modify", "del_by_id", "del_by_query_dto
 pub(crate) struct SvcArgs {
     /// 需要跳过的的方法名集合
     pub skip: HashSet<String>,
+    /// 批量查询（list / page / search 的全部列表形态）的返回类型
+    ///
+    /// 脱敏约定：批量脱敏、单条不脱敏，两条路各一个 VO。不传时沿用 `XxxVo`，
+    /// 传了（如 `list_vo = AdmUserListVo`）则 8 个批量方法全部返回它：
+    /// 敏感字段用 `robotech::api::mask` 的包装类型，出口遮蔽。
+    /// 注意：ex 批量也返回它，关联表字段不再包含——要「脱敏 + 关联」的，
+    /// 手写一个带关联字段的列表 VO 再传进来。
+    pub list_vo: Option<Ident>,
     /// 写操作前的回调（add / modify / del_by_id / del_by_query_dto）
     pub before_write: Option<syn::Path>,
     /// 写操作后的回调（add / modify / del_by_id / del_by_query_dto）
@@ -33,6 +41,7 @@ pub(crate) struct SvcArgs {
 impl Parse for SvcArgs {
     fn parse(input: ParseStream) -> syn::Result<Self> {
         let mut skip = HashSet::new();
+        let mut list_vo = None;
         let mut before_write = None;
         let mut after_write = None;
         let mut before = HashMap::new();
@@ -41,6 +50,7 @@ impl Parse for SvcArgs {
         if input.is_empty() {
             return Ok(SvcArgs {
                 skip,
+                list_vo,
                 before_write,
                 after_write,
                 before,
@@ -67,6 +77,10 @@ impl Parse for SvcArgs {
                     for method_name in method_names {
                         skip.insert(method_name.to_string());
                     }
+                }
+                "list_vo" => {
+                    let _: Token![=] = input.parse()?;
+                    list_vo = Some(input.parse()?);
                 }
                 "before_write" => {
                     let _: Token![=] = input.parse()?;
@@ -102,6 +116,7 @@ impl Parse for SvcArgs {
 
         Ok(SvcArgs {
             skip,
+            list_vo,
             before_write,
             after_write,
             before,
@@ -218,6 +233,20 @@ pub(crate) fn svc_macro(args: SvcArgs, input: ItemStruct) -> TokenStream {
     let dao_name = format_ident!("{}Dao", entity_name);
     let vo_name = format_ident!("{}Vo", entity_name);
     let ex_vo_name = format_ident!("{}ExVo", entity_name);
+    // 批量查询的返回类型：默认沿用 Vo；配了 list_vo（脱敏列表 VO）则批量全部走它
+    let list_vo_name = args.list_vo.clone().unwrap_or_else(|| vo_name.clone());
+    // ex 批量默认仍是 ExVo（带关联字段）；只有配了 list_vo 才替换成它，
+    // 否则「Vo 没有 From<ModelEx>」会当场编译失败
+    let ex_list_vo_name = args
+        .list_vo
+        .clone()
+        .unwrap_or_else(|| ex_vo_name.clone());
+    // 配了 list_vo 才额外引入它；放进 {vo, ex_vo} 列表会在未配置时与 vo 重名（E0252）
+    let list_vo_import = if args.list_vo.is_some() {
+        quote! { #[allow(unused_imports)] use crate::vo::#list_vo_name; }
+    } else {
+        quote! {}
+    };
     let add_dto_name = format_ident!("{}AddDto", entity_name);
     let modify_dto_name = format_ident!("{}ModifyDto", entity_name);
     let save_dto_name = format_ident!("{}SaveDto", entity_name);
@@ -639,7 +668,7 @@ pub(crate) fn svc_macro(args: SvcArgs, input: ItemStruct) -> TokenStream {
             dto: #query_dto_name,
             #[skip_log]
             db: Option<&C>
-        ) -> Result<Ro<Vec<#vo_name>>, SvcError>
+        ) -> Result<Ro<Vec<#list_vo_name>>, SvcError>
         where
             C: ConnectionTrait,
         {
@@ -651,7 +680,7 @@ pub(crate) fn svc_macro(args: SvcArgs, input: ItemStruct) -> TokenStream {
                 condition = condition.add(build_like_condition(keyword, #dao_name::LIKE_COLUMNS));
             }
 
-            let all = #dao_name::list_by_condition::<_, #vo_name>(condition, order_by, db).await?;
+            let all = #dao_name::list_by_condition::<_, #list_vo_name>(condition, order_by, db).await?;
             #after_call
             Ok(Ro::success("查询成功".to_string()).extra(Some(all)))
         }
@@ -679,7 +708,7 @@ pub(crate) fn svc_macro(args: SvcArgs, input: ItemStruct) -> TokenStream {
             dto: #query_dto_name,
             #[skip_log]
             db: Option<&C>
-        ) -> Result<Ro<PageRx<#vo_name>>, SvcError>
+        ) -> Result<Ro<PageRx<#list_vo_name>>, SvcError>
         where
             C: ConnectionTrait,
         {
@@ -694,7 +723,7 @@ pub(crate) fn svc_macro(args: SvcArgs, input: ItemStruct) -> TokenStream {
                 condition = condition.add(build_like_condition(keyword, #dao_name::LIKE_COLUMNS));
             }
 
-            let (page_num, total, models) = #dao_name::page_by_condition::<_, #vo_name>(
+            let (page_num, total, models) = #dao_name::page_by_condition::<_, #list_vo_name>(
                 condition,
                 order_by,
                 page_num,
@@ -809,7 +838,7 @@ pub(crate) fn svc_macro(args: SvcArgs, input: ItemStruct) -> TokenStream {
             dto: #query_dto_name,
             #[skip_log]
             db: Option<&C>
-        ) -> Result<Ro<Vec<#ex_vo_name>>, SvcError>
+        ) -> Result<Ro<Vec<#ex_list_vo_name>>, SvcError>
         where
             C: ConnectionTrait,
         {
@@ -821,7 +850,7 @@ pub(crate) fn svc_macro(args: SvcArgs, input: ItemStruct) -> TokenStream {
                 condition = condition.add(build_like_condition(keyword, #dao_name::LIKE_COLUMNS));
             }
 
-            let all: Vec<#ex_vo_name> = #dao_name::list_ex_by_condition(condition, order_by, db)
+            let all: Vec<#ex_list_vo_name> = #dao_name::list_ex_by_condition(condition, order_by, db)
                 .await?
                 .into_iter()
                 .map(|m| m.into())
@@ -853,7 +882,7 @@ pub(crate) fn svc_macro(args: SvcArgs, input: ItemStruct) -> TokenStream {
             dto: #query_dto_name,
             #[skip_log]
             db: Option<&C>
-        ) -> Result<Ro<PageRx<#ex_vo_name>>, SvcError>
+        ) -> Result<Ro<PageRx<#ex_list_vo_name>>, SvcError>
         where
             C: ConnectionTrait,
         {
@@ -875,7 +904,7 @@ pub(crate) fn svc_macro(args: SvcArgs, input: ItemStruct) -> TokenStream {
                 page_size,
                 db
             ).await?;
-            let list: Vec<#ex_vo_name> = models.into_iter().map(|m| m.into()).collect();
+            let list: Vec<#ex_list_vo_name> = models.into_iter().map(|m| m.into()).collect();
             #after_call
             Ok(Ro::success("查询成功".to_string()).extra(Some(PageRx::builder()
                 .total(total)
@@ -981,12 +1010,12 @@ pub(crate) fn svc_macro(args: SvcArgs, input: ItemStruct) -> TokenStream {
             params: SearchParams,
             #[skip_log]
             db: Option<&C>
-        ) -> Result<Ro<Vec<#vo_name>>, SvcError>
+        ) -> Result<Ro<Vec<#list_vo_name>>, SvcError>
         where
             C: ConnectionTrait,
         {
             #before_call
-            let all = #dao_name::search_list::<_, #vo_name>(&params, db).await?;
+            let all = #dao_name::search_list::<_, #list_vo_name>(&params, db).await?;
             #after_call
             Ok(Ro::success("查询成功".to_string()).extra(Some(all)))
         }
@@ -1015,13 +1044,13 @@ pub(crate) fn svc_macro(args: SvcArgs, input: ItemStruct) -> TokenStream {
             params: SearchParams,
             #[skip_log]
             db: Option<&C>
-        ) -> Result<Ro<PageRx<#vo_name>>, SvcError>
+        ) -> Result<Ro<PageRx<#list_vo_name>>, SvcError>
         where
             C: ConnectionTrait,
         {
             #before_call
             let (page_num, total, models) =
-                #dao_name::search_page::<_, #vo_name>(&params, db).await?;
+                #dao_name::search_page::<_, #list_vo_name>(&params, db).await?;
             #after_call
             Ok(Ro::success("查询成功".to_string()).extra(Some(PageRx::builder()
                 .total(total)
@@ -1129,12 +1158,12 @@ pub(crate) fn svc_macro(args: SvcArgs, input: ItemStruct) -> TokenStream {
             params: SearchParams,
             #[skip_log]
             db: Option<&C>
-        ) -> Result<Ro<Vec<#ex_vo_name>>, SvcError>
+        ) -> Result<Ro<Vec<#ex_list_vo_name>>, SvcError>
         where
             C: ConnectionTrait,
         {
             #before_call
-            let all: Vec<#ex_vo_name> = #dao_name::search_list_ex(&params, db)
+            let all: Vec<#ex_list_vo_name> = #dao_name::search_list_ex(&params, db)
                 .await?
                 .into_iter()
                 .map(|m| m.into())
@@ -1167,13 +1196,13 @@ pub(crate) fn svc_macro(args: SvcArgs, input: ItemStruct) -> TokenStream {
             params: SearchParams,
             #[skip_log]
             db: Option<&C>
-        ) -> Result<Ro<PageRx<#ex_vo_name>>, SvcError>
+        ) -> Result<Ro<PageRx<#ex_list_vo_name>>, SvcError>
         where
             C: ConnectionTrait,
         {
             #before_call
             let (page_num, total, models) = #dao_name::search_page_ex(&params, db).await?;
-            let list: Vec<#ex_vo_name> = models.into_iter().map(|m| m.into()).collect();
+            let list: Vec<#ex_list_vo_name> = models.into_iter().map(|m| m.into()).collect();
             #after_call
             Ok(Ro::success("查询成功".to_string()).extra(Some(PageRx::builder()
                 .total(total)
@@ -1211,6 +1240,7 @@ pub(crate) fn svc_macro(args: SvcArgs, input: ItemStruct) -> TokenStream {
         use crate::dao::#dao_name;
         use crate::mo::#module::ActiveModel;
         use crate::vo::{#vo_name, #ex_vo_name};
+        #list_vo_import
 
         #input
 

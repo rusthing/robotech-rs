@@ -361,3 +361,38 @@ python3 robotech-rs/tools/model_comment/sync.py --repo ../msg --write
 - `@len` 的上限与列长度没有交叉校验（`varchar(50)` 抄成 `@len 1..=500` 不会被发现），
   改列长时两处一起改，再跑一次 `--check`。
 - 模型里没有 DTO 的列（系统列、未暴露的列）不写标签——它们不参与参数校验。
+
+## 十一、字段属性标记
+
+标签之外，字段上还有三个**属性标记**（写在 `#[...]` 里，不是注释）。都不进生成代码，
+只影响 `#[crud_dto]` 的生成行为：
+
+| 标记 | 含义 | 对生成的影响 |
+| --- | --- | --- |
+| `#[db_default]` | 数据库列有默认值，客户端可以不传 | 只丢 `required`，`@len` / `@range` / `@check` 照常生成（传了值照样校验） |
+| `#[fill_by_svc]` | 列非空、但缺省值由服务端写库前补（如 tree_code 由钩子按 parentCode 生成） | 同上：只丢 `required`。库里**没有**默认值，钩子没补上会撞 NOT NULL，错误在请求里报得出来 |
+| `#[req_only]` | 请求专用字段，不对应模型列（如树表的 `parent_code`） | 不进 QueryDto（条件生成引用 `Column::Xxx`，非模型列编译不过）；进 Add/Modify/Save，o2o 转 ActiveModel 时按字段级 ghost 跳过 |
+
+示例（树表的编码生成约定）：
+
+```rust
+/// 树编码
+/// ...
+/// 新增可不传：服务端按 parentCode 生成下一个可用编码；显式传入（导入/预置数据）时以传入为准
+/// @len 3..=30
+/// @check is_tree_code
+#[fill_by_svc]
+pub tree_code: String,
+/// 父节点编码
+/// 生成 treeCode 的依据：根节点不传（或传 null），子节点传父节点的树编码
+/// 显式传了 treeCode 时本字段被忽略
+/// @check is_tree_code
+#[req_only]
+pub parent_code: Option<String>,
+```
+
+注意：
+
+- `#[req_only]` 字段不能再手写 `#[into]`（不映射模型，写映射语义矛盾，编译报错）。
+- 三个标记与标签是两套东西：标签写在 `///` 注释里、约束**值**；标记写在 `#[...]` 里、
+  约束**字段在请求与模型之间的位置**。

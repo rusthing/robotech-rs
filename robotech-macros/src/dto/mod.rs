@@ -90,6 +90,17 @@ pub fn crud_dto_macro(args: CrudDtoArgs, input: ItemStruct) -> TokenStream {
                     if field.ident.as_ref().unwrap() == "id" {
                         continue;
                     }
+                    // `#[req_only]`：请求专用字段（如树表的 parent_code），不进 QueryDto。
+                    // QueryDto 的条件生成直接引用 `Column::Xxx`，多一个非模型列就编译不过。
+                    // 进 Add/Modify/Save 没问题：Add/Modify 转 ActiveModel 时靠字段级
+                    // ghost 跳过，Save 转 Add/Modify 按名拷贝，三个 DTO 字段集一致，
+                    // o2o 的转换才成立（少一个字段 SaveDto→AddDto 就报 missing field）。
+                    if has_attr(&field.attrs, "req_only") {
+                        add_field_tokens.push(process_field(field, "add"));
+                        modify_field_tokens.push(process_field(field, "modify"));
+                        save_field_tokens.push(process_field(field, "save"));
+                        continue;
+                    }
                     add_field_tokens.push(process_field(field, "add"));
                     modify_field_tokens.push(process_field(field, "modify"));
                     save_field_tokens.push(process_field(field, "save"));
@@ -119,6 +130,13 @@ pub fn crud_dto_macro(args: CrudDtoArgs, input: ItemStruct) -> TokenStream {
 
                 for field in &named_fields.named {
                     if field.ident.as_ref().unwrap() == "id" {
+                        continue;
+                    }
+                    // 客户端模式与 server 同口径：req_only 不进 Query
+                    if has_attr(&field.attrs, "req_only") {
+                        add_field_tokens.push(process_field_client(field, "add"));
+                        modify_field_tokens.push(process_field_client(field, "modify"));
+                        save_field_tokens.push(process_field_client(field, "save"));
                         continue;
                     }
                     add_field_tokens.push(process_field_client(field, "add"));
@@ -384,7 +402,7 @@ fn process_field_client(field: &Field, _target: &str) -> TokenStream {
 
     let mut new_attrs: Vec<Attribute> = Vec::new();
 
-    // 保留原有属性（除了validate/into/owned_into/ghosts/db_default）
+    // 保留原有属性（除了validate/into/owned_into/ghosts/db_default/req_only/fill_by_svc）
     for attr in original_attrs {
         let path = attr.path();
         if !path.is_ident("validate")
@@ -392,6 +410,8 @@ fn process_field_client(field: &Field, _target: &str) -> TokenStream {
             && !path.is_ident("owned_into")
             && !path.is_ident("ghosts")
             && !path.is_ident("db_default")
+            && !path.is_ident("req_only")
+            && !path.is_ident("fill_by_svc")
         {
             new_attrs.push(attr.clone());
         }
@@ -430,36 +450,65 @@ fn process_field(field: &Field, target: &str) -> TokenStream {
     let has_builder = has_attr(original_attrs, "builder");
     let has_serde = has_attr(original_attrs, "serde");
     let has_db_default = has_attr(original_attrs, "db_default");
+    let has_req_only = has_attr(original_attrs, "req_only");
+    // `#[fill_by_svc]`：数据库列非空、但客户端可以不传——缺省值由服务端在
+    // 写库前补（如 tree_code 由钩子按 parentCode 生成）。与 db_default 一样
+    // 只丢 required，长度/区间/格式校验照常；区别在于数据库里没有默认值，
+    // 钩子没补上就落库会撞 NOT NULL，问题在请求里报得出来，不会悄悄进 NULL。
+    let has_fill_by_svc = has_attr(original_attrs, "fill_by_svc");
+    let drop_required = has_db_default || has_fill_by_svc;
+
+    // `#[req_only]` 字段不映射模型；再手写 `#[into]` 语义矛盾，直接编译报错，
+    // 别让两套指令打架后生成一个行为说不清的字段
+    if has_req_only && has_into {
+        return syn::Error::new_spanned(
+            field,
+            "#[req_only] 字段不映射到模型，不能再写 #[into]",
+        )
+        .to_compile_error()
+        .into();
+    }
 
     // 生成属性
     let mut new_attrs = Vec::new();
 
-    // 保留原有属性（除了validate和db_default，根据目标类型决定）
+    // 保留原有属性（除了validate、db_default、req_only、fill_by_svc，根据目标类型决定）
     for attr in original_attrs {
         if attr.path().is_ident("validate") {
             // ModifyDto和SaveDto移除validate属性
             if target == "add" {
                 new_attrs.push(attr.clone());
             }
-        } else if !attr.path().is_ident("db_default") {
-            // db_default只是标记，不保留到生成的代码中
+        } else if !attr.path().is_ident("db_default")
+            && !attr.path().is_ident("req_only")
+            && !attr.path().is_ident("fill_by_svc")
+        {
+            // db_default、req_only、fill_by_svc只是标记，不保留到生成的代码中
             new_attrs.push(attr.clone());
         }
     }
 
     // 如果是添加，且没有手动写validate，自动生成检验属性
     //
-    // `#[db_default]` 只影响「必填」这一条：有数据库默认值，客户端可以不传；
-    // 但一旦传了值，长度/区间/格式一样要校验——否则 `status` 传 999 也能落库。
+    // `#[db_default]` / `#[fill_by_svc]` 只影响「必填」这一条：有数据库默认值，
+    // 或缺省值由服务端补，客户端都可以不传；但一旦传了值，长度/区间/格式
+    // 一样要校验——否则 `status` 传 999 也能落库。
     if target == "add" && !has_validate {
-        if let Some(attr) = generate_validate_attr(field, has_db_default) {
+        if let Some(attr) = generate_validate_attr(field, drop_required) {
             new_attrs.push(attr);
         }
     }
 
     // 如果是添加和修改，且没有into，自动生成into属性
+    //
+    // `#[req_only]` 字段不映射到 ActiveModel：改用 o2o 的字段级 ghost，
+    // 转换时这一列被跳过（目标里没有这列，不标 ghost 会直接编译不过）
     if (target == "add" || target == "modify") && !has_into {
-        new_attrs.push(generate_into_attr(field));
+        if has_req_only {
+            new_attrs.push(syn::parse_quote! { #[ghost(Default::default())] });
+        } else {
+            new_attrs.push(generate_into_attr(field));
+        }
     }
 
     // 如果没有builder，自动生成builder属性
@@ -804,7 +853,7 @@ fn field_label(field: &Field) -> String {
 /// - 写了 `@len 0..=N` 才算允许空串：去掉最小长度，只留上限
 /// - 上限只认 `@len` 声明的值，没有就不限长（由数据库列类型兜底）
 /// - 数值只在写了 `@range` 时才校验区间
-fn generate_validate_attr(field: &Field, has_db_default: bool) -> Option<Attribute> {
+fn generate_validate_attr(field: &Field, drop_required: bool) -> Option<Attribute> {
     let (kind, optional) = field_kind(&field.ty);
     let label = field_label(field);
     let check = parse_check_tags(field).unwrap_or_default();
@@ -812,7 +861,7 @@ fn generate_validate_attr(field: &Field, has_db_default: bool) -> Option<Attribu
 
     // 有数据库默认值的列，客户端可以不传，所以不生成 required；
     // 传了值仍然要过长度/区间/格式校验
-    if !optional && !has_db_default {
+    if !optional && !drop_required {
         let required = format!("{label}不能为空");
         metas.push(syn::parse_quote!(required(message = #required)));
     }
@@ -1513,5 +1562,47 @@ mod tests {
             .unwrap_or_default();
         assert!(!attr.contains("required"), "不该要求必填: {attr}");
         assert!(attr.contains("range(min=1,max=3"), "区间校验要保留: {attr}");
+    }
+
+    // ---- #[req_only]：请求专用字段（不映射模型列）----
+
+    /// req_only 字段：生成字段级 ghost（o2o 转换时跳过），不生成 into，
+    /// 标记本身不能泄进生成代码（rustc 会报 unknown attribute）
+    #[test]
+    fn req_only_field_gets_ghost_without_into() {
+        let f = field_of(concat!(
+            "struct Dto { ",
+            "/// 父节点编码\n#[req_only] pub parent_code: Option<String>, }"
+        ));
+        let attr = process_field(&f, "add").to_token_stream().to_string().replace(' ', "");
+        assert!(attr.contains("#[ghost(Default::default())]"), "要有字段级ghost: {attr}");
+        assert!(!attr.contains("#[into("), "不该生成into映射: {attr}");
+        assert!(!attr.contains("req_only"), "标记不能泄进生成代码: {attr}");
+    }
+
+    /// req_only 字段的校验标签照常生成：请求里传了非法值照样要挡
+    #[test]
+    fn req_only_field_keeps_validation() {
+        let f = field_of(concat!(
+            "struct Dto { ",
+            "/// 父编码\n/// @check is_tree_code\n#[req_only] pub parent_code: Option<String>, }"
+        ));
+        let attr = validate_of(&f);
+        assert!(
+            attr.contains("custom(function=\"robotech::api::validators::tree_code\")"),
+            "{attr}"
+        );
+    }
+
+    /// req_only + 手写 into：语义矛盾，编译报错
+    #[test]
+    fn req_only_with_into_is_rejected() {
+        let f = field_of(concat!(
+            "struct Dto { ",
+            "/// 父编码\n#[req_only]\n#[into(xxx)] pub parent_code: Option<String>, }"
+        ));
+        let tokens = process_field(&f, "add");
+        let text = tokens.to_token_stream().to_string();
+        assert!(text.contains("不能再写 #[into]"), "{text}");
     }
 }

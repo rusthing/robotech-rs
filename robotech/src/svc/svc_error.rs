@@ -5,6 +5,8 @@ use crate::cfg;
 #[cfg(feature = "db")]
 use crate::dao::DaoError;
 #[cfg(feature = "db")]
+use crate::dao::TreeCodeError;
+#[cfg(feature = "db")]
 use crate::db::DbError;
 use crate::env::EnvError;
 #[cfg(feature = "web")]
@@ -52,6 +54,9 @@ pub enum SvcError {
     #[cfg(feature = "db")]
     #[error("数据访问层错误: {0}")]
     Dao(#[from] DaoError),
+    #[cfg(feature = "db")]
+    #[error("树编码生成错误: {0}")]
+    TreeCode(#[from] TreeCodeError),
     #[cfg(feature = "db")]
     #[error("数据库连接错误: {0}")]
     DbConn(#[from] DbError),
