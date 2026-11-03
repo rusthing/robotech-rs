@@ -477,6 +477,9 @@ pub(super) fn dao_macro(args: DaoArgs, input: ItemStruct) -> TokenStream {
                 // 锁死创建者信息，不能被同步改写
                 active_model.creater_id = ActiveValue::NotSet;
                 active_model.create_ms = ActiveValue::NotSet;
+                // 这两个 trait/类型只在本方法用到，函数级导入——
+                // 宏注入的 use 落在模块级，会跟用户手写的 `use sea_orm::ColumnTrait` 撞名（E0252）
+                use sea_orm::{ColumnTrait, Update};
                 // 原子条件更新：UPDATE ... SET <Set 字段> WHERE id = ? AND update_ms < ?
                 // `.set()` 只会把 ActiveValue::Set 的字段写进 SET 子句
                 let res = Update::many(Entity)
@@ -1117,7 +1120,7 @@ pub(super) fn dao_macro(args: DaoArgs, input: ItemStruct) -> TokenStream {
         use robotech::dao::{add_order_by, build_search_condition, DaoError, SearchParams};
         use robotech::api::U64;
         use sea_orm::{
-            ActiveModelTrait, ActiveValue, ColumnTrait, Condition, ConnectionTrait, EntityTrait, FromQueryResult, PaginatorTrait, QueryFilter, DeleteResult, Update
+            ActiveModelTrait, ActiveValue, Condition, ConnectionTrait, EntityTrait, FromQueryResult, PaginatorTrait, QueryFilter, DeleteResult
         };
         use sea_orm::entity::EntityLoaderTrait;
 
