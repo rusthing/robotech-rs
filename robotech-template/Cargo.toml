@@ -1,0 +1,17 @@
+[package]
+name = "robotech-template"
+version = "1.17.0"
+edition = "2024"
+authors = ["zbz"]
+keywords = ["template", "render", "microservice"]
+description = "RoboTech platform template rendering kernel: {{var}} placeholders, filter chains and structured diagnostics."
+categories = ["text-processing"]
+license = "MIT"
+homepage = "https://github.com/rusthing/robotech-rs"
+repository = "https://github.com/rusthing/robotech-rs"
+readme = "README.md"
+
+[dependencies]
+chrono = { workspace = true }
+regex = { workspace = true }
+serde_json = { workspace = true }
