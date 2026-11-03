@@ -9,7 +9,9 @@
 //! 1. [`wheel_rs::regex_utils`] 的 `is_*` 返回 `bool`，而 validator 的 `custom`
 //!    要求 `Result<(), ValidationError>`——总不能在业务 crate 里为每个字段手写包装
 //! 2. 同一个 `@check` 可能挂在 `String` 上，也可能挂在 `Option<String>` 上：
-//!    靠 [`CheckTarget`] 把两种形态收敛成一个签名，宏就不必区分字段是否可空
+//!    validator 的 `custom` 只认 `fn(&str)`，可空字段的 `None` 由 validator
+//!    在进函数**之前**跳过，所以函数本身只需处理 `&str`；[`CheckTarget`] 是给
+//!    业务侧自己判断「有没有值」用的，两种形态共用 `check_str`
 //!
 //! ## 与 `@len` / `@range` 的分工
 //!
@@ -24,12 +26,16 @@
 //! ```
 //! use robotech::api::validators::{email, id_card_cn};
 //!
-//! assert!(email(&"zhang.san@example.com".to_string()).is_ok());
-//! assert!(email(&"not-an-email".to_string()).is_err());
-//! // Option 的 None 表示「没填」，不报错——是否必填由 `required` 规则负责
-//! assert!(email(&None::<String>).is_ok());
-//! assert!(id_card_cn(&Some("11010519491231002X".to_string())).is_ok());
+//! assert!(email("zhang.san@example.com").is_ok());
+//! assert!(email("not-an-email").is_err());
+//! // 校验位错了要拦住：正则只认 18 位的形状
+//! assert!(id_card_cn("11010519491231002X").is_ok());
+//! assert!(id_card_cn("110105194912310021").is_err());
 //! ```
+//!
+//! 可空字段不必在这里演示：validator 对 `Option` 字段生成的是
+//! `if let Some(ref v) = self.field { ... }`，`None` 直接跳过（是否必填由
+//! `required` 规则负责），`Some` 解出的 `&String` 靠 deref coercion 落进 `&str` 形参。
 
 use std::borrow::Cow;
 
