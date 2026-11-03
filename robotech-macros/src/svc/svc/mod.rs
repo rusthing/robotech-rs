@@ -421,6 +421,65 @@ pub(crate) fn svc_macro(args: SvcArgs, input: ItemStruct) -> TokenStream {
         });
     }
 
+    // 生成upsert方法
+    if !skip.contains("upsert") {
+        let before_call = resolve_hook("upsert", false, &args.before, &args.before_write, Some(quote! { upsert_dto }), None, false);
+        let after_call = resolve_hook("upsert", false, &args.after, &args.after_write, None, None, false);
+        generated_methods.push(quote! {
+        /// # 插入或更新记录（更新没命中就插入）
+        ///
+        /// 与 `save` 的唯一区别在「传了 id 但记录不存在」这一步：
+        /// `save` 直接把 `modify` 的错误原样返回，本方法退化成插入。
+        ///
+        /// - 没传 id：直接 `add`（id 由 `idworker` 生成）；
+        /// - 传了 id：先 `modify`，只有「按 id 更新影响 0 行」（`SvcError::is_not_found`，
+        ///   只认 DAO 的 `RecordNotUpdated`）才改用 `add`——`AddDto` 带 id 时会按该 id
+        ///   落库，所以补建出来的是**同一个 id** 的那条记录，不是新 id；
+        /// - 其它错误（唯一键冲突、外键冲突、参数校验、钩子失败……）原样抛出：那些
+        ///   失败插入也救不了。业务层的 `SvcError::NotFound` 也在此列——它的含义比
+        ///   「本行不存在」宽（钩子里「父记录查不到」用的就是它），拿它当判据会把
+        ///   该报的错变成一次脏写入。
+        ///
+        /// ## 事务边界
+        /// 与 `save` 一致：调用方传了 `db` 就只写不提交，由调用方决定事务；没传则
+        /// `modify` / `add` 各开各的事务。也就是说「更新失败 + 补插入」不在同一个事务里，
+        /// 中间可能被别的请求插进同 id 的行（那时补插入会报重复键，语义仍然正确）。
+        ///
+        /// ## 参数
+        /// * `upsert_dto` - 包含要保存记录信息的传输对象（`SaveDto`：id 可选 + 全部业务列）
+        /// * `db` - 数据库连接或事务，如果未提供则使用全局数据库连接
+        ///
+        /// ## 返回值
+        /// * `Ok(Ro<Vo>)` - 成功，返回落库后的记录
+        /// * `Err(SvcError)` - 失败，见上面的错误说明
+        ///
+        /// 依赖 `add` 与 `modify`：`skip` 掉这两个方法时不要再生成 `upsert`。
+        pub async fn upsert<C>(
+            upsert_dto: #save_dto_name,
+            db: Option<&C>,
+        ) -> Result<Ro<#vo_name>, SvcError>
+        where
+            C: ConnectionTrait,
+        {
+            #before_call
+            let result = if upsert_dto.id.is_some() {
+                match Self::modify(upsert_dto.clone().into(), db).await {
+                    Ok(ro) => Ok(ro),
+                    // 只有 DAO 报「更新影响 0 行」才退化成插入；其余错误原样抛出
+                    Err(err) if err.is_not_found() => {
+                        Self::add(upsert_dto.clone().into(), db).await
+                    }
+                    Err(err) => Err(err),
+                }
+            } else {
+                Self::add(upsert_dto.clone().into(), db).await
+            };
+            #after_call
+            result
+        }
+        });
+    }
+
     // 生成del_by_id方法
     if !skip.contains("del_by_id") {
         let is_write = WRITE_METHODS.contains(&"del_by_id");

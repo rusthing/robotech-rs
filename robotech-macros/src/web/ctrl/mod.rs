@@ -91,6 +91,7 @@ pub(crate) fn ctrl_macro(args: CtrlArgs, input: ItemStruct) -> TokenStream {
     let module_path = struct_name_split.join("-").to_lowercase();
     let crud_path = format!("/{prefix}/{module_path}");
     let save_path = format!("{crud_path}/save");
+    let upsert_path = format!("{crud_path}/upsert");
     let del_by_id_path = format!("{crud_path}/{{id}}");
     let del_by_query_dto_path = crud_path.clone();
     let get_by_id_path = format!("{crud_path}/{{id}}");
@@ -264,6 +265,52 @@ pub(crate) fn ctrl_macro(args: CtrlArgs, input: ItemStruct) -> TokenStream {
             }
 
             let result = #svc_name::save::<DatabaseTransaction>(dto, None).await?;
+            Ok(Json(result))
+        }
+    });
+    }
+
+    // 生成upsert方法
+    if !skip.contains("upsert") {
+        generated_methods.push(quote! {
+        /// # 保存记录的信息（更新没命中就插入）
+        ///
+        /// 与 `save` 的区别只有一处：传了 id 但该 id 的记录不存在时，`save` 返回
+        /// 「未更新数据」，本接口直接按该 id 建一条新记录。
+        ///
+        /// ## 请求体
+        /// * `SaveDto` - 包含记录信息的结构体（id 可传可不传）
+        ///
+        /// ## 请求头
+        /// * `USER_ID_HEADER_NAME` - 当前用户ID，必需项，类型为u64
+        ///
+        /// ## 返回值
+        /// * 成功时返回落库后的信息的JSON格式数据
+        /// * 失败时返回相应的错误信息
+        ///
+        /// ## 错误处理
+        /// * 当缺少必要参数时，返回`ValidationError`错误
+        /// * 当参数格式不正确时，返回`ValidationError`错误
+        /// * 唯一键/外键冲突等失败照常返回（不会因为「更新没命中」而被插入掩盖）
+        #[utoipa::path(
+            post,
+            path = #upsert_path,
+            responses((status = OK, body = Ro<#vo_name>))
+        )]
+        #[debug_handler]
+        #[log_call]
+        pub async fn upsert(
+            headers: HeaderMap,
+            Json(mut dto): Json<#save_dto_name>,
+        ) -> Result<Json<Ro<#vo_name>>, CtrlError> {
+            // 从header中解析当前用户ID，如果没有或解析失败则抛出ValidationError
+            dto._current_user_id = get_current_user_id(&headers)?;
+            // 从header中解析当前时间戳（可选），未提供时由dao层自动填充
+            if let ::core::option::Option::Some(ms) = get_current_ms(&headers)? {
+                dto._current_ms = ::core::option::Option::Some(ms);
+            }
+
+            let result = #svc_name::upsert::<DatabaseTransaction>(dto, None).await?;
             Ok(Json(result))
         }
     });

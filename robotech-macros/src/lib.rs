@@ -240,7 +240,7 @@ pub fn db_unwrap(args: TokenStream, input: TokenStream) -> TokenStream {
 /// 属性宏：为以 `Svc` 结尾的结构体自动生成标准 CRUD 方法
 ///
 /// 该宏会解析结构体名称（必须是 `XxxSvc` 形式的大驼峰命名），为结构体生成
-/// `add`、`modify`、`save`、`del_by_id`、`del_by_query_dto`、`get_by_id`、
+/// `add`、`modify`、`save`、`upsert`、`del_by_id`、`del_by_query_dto`、`get_by_id`、
 /// `get_by_query_dto`、`list_by_query_dto`、`page_by_query_dto` 以及对应的
 /// Ex 版本（附带关联表信息）等方法。生成的方法内部调用对应的 `XxxDao`，
 /// 返回 `Ro<Vo>`、`Ro<ExVo>`、`Ro<PageRx<Vo>>` 等统一响应格式。
@@ -262,7 +262,7 @@ pub fn svc(args: TokenStream, input: TokenStream) -> TokenStream {
 /// 属性宏：为以 `Ctrl` 结尾的结构体自动生成标准 CRUD Web 处理器
 ///
 /// 该宏会解析结构体名称（必须是 `XxxCtrl` 形式的大驼峰命名），为结构体生成
-/// 一组 axum handler 方法（`add`、`modify`、`save`、`del_by_id`、`get_by_id`、
+/// 一组 axum handler 方法（`add`、`modify`、`save`、`upsert`、`del_by_id`、`get_by_id`、
 /// `get_by_query_dto`、`list_by_query_dto`、`page_by_query_dto` 及 Ex 版本），
 /// 每个方法带有 `#[utoipa::path]`、`#[debug_handler]`、`#[log_call]` 属性，
 /// 内部调用对应的 `XxxSvc` 并返回 `Json<Ro<...>>` 格式响应。

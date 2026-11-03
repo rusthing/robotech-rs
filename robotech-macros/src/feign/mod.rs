@@ -37,6 +37,7 @@ pub(crate) fn feign_macro(input: ItemStruct) -> TokenStream {
     let module_path = struct_name_split.join("-").to_lowercase();
     let crud_path = format!("/{prefix}/{module_path}");
     let save_path = format!("{crud_path}/save");
+    let upsert_path = format!("{crud_path}/upsert");
     let del_by_id_path = format!("{crud_path}/{{}}");
     let del_by_query_dto_path = crud_path.clone();
     let get_by_id_path = format!("{crud_path}/{{}}");
@@ -112,6 +113,26 @@ pub(crate) fn feign_macro(input: ItemStruct) -> TokenStream {
             dto: &#save_dto_name,
         ) -> ::core::result::Result<robotech::api::Ro<#vo_name>, robotech::api_client::ApiClientError> {
             let url = #save_path.to_string();
+            let headers = Self::build_headers(dto._current_user_id.value(), dto._current_ms.map(|m| m.value()))?;
+            self.client
+                .request::<#save_dto_name, #vo_name>(
+                    ::reqwest::Method::POST,
+                    &url,
+                    ::core::option::Option::None,
+                    ::core::option::Option::Some(dto),
+                    ::core::option::Option::Some(&headers),
+                )
+                .await
+        }
+    });
+
+    // upsert
+    generated_methods.push(quote! {
+        pub async fn upsert(
+            &self,
+            dto: &#save_dto_name,
+        ) -> ::core::result::Result<robotech::api::Ro<#vo_name>, robotech::api_client::ApiClientError> {
+            let url = #upsert_path.to_string();
             let headers = Self::build_headers(dto._current_user_id.value(), dto._current_ms.map(|m| m.value()))?;
             self.client
                 .request::<#save_dto_name, #vo_name>(

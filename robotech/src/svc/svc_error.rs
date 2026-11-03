@@ -64,3 +64,41 @@ pub enum SvcError {
     #[error("API客户端错误, {0}")]
     ApiClient(#[from] ApiClientError),
 }
+
+impl SvcError {
+    /// # 按 id 更新没有命中
+    ///
+    /// **只认 DAO 的事实**：`Dao(Db(RecordNotUpdated))`——`modify` 走的
+    /// `XxxDao::update` 在目标行不存在时报这个（SQL 本身没报错，是 sea-orm 发现
+    /// `rows_affected == 0` 后转成的错误）。
+    ///
+    /// ## 为什么不认 `SvcError::NotFound`
+    ///
+    /// `NotFound` 是**业务层自己**报的，含义比「本行不存在」宽得多：钩子里
+    /// 「父记录查不到」「关联的字典项没配」这类失败，用的也是它（本仓库推荐写法）。
+    /// 一旦把它也算成「没有这条记录」，`upsert` 就会转而插入，本该报错的地方
+    /// 变成写脏数据——错误被吞掉，还没有任何日志能说明它原本要报什么。
+    /// 宁可让 `upsert` 以 `NotFound` 失败（响亮），也不要静默写错。
+    ///
+    /// `upsert` 靠它决定「更新没命中，退化成插入」。同样的道理，唯一键/外键冲突、
+    /// 参数校验、钩子失败一律原样抛出：那些失败插入也救不了，`add` 只会再撞一次，
+    /// 把真实原因换成一条更难懂的报错。
+    pub fn is_not_found(&self) -> bool {
+        // 只有 DB 语义下才谈得上「更新影响 0 行」；纯客户端构建（`api-client`
+        // 不带 `db`）恒 false。拆成两个 cfg 块而不是写 `match`：只剩一个 `_` 臂时
+        // clippy 会报 `match_single_binding`，补个同样的臂又会报 `match_same_arms`。
+        #[cfg(feature = "db")]
+        {
+            matches!(
+                self,
+                SvcError::Dao(DaoError::Db(sea_orm::DbErr::RecordNotUpdated))
+            )
+        }
+        #[cfg(not(feature = "db"))]
+        {
+            // `self` 用掉，避免无 db 构建下触发 unused 告警
+            let _ = self;
+            false
+        }
+    }
+}
