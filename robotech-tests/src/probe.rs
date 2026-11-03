@@ -93,6 +93,29 @@ pub async fn item_id(code: &str) -> Result<Option<i64>, SvcError> {
     Ok(row.map(|r| r.try_get::<i64>("", "id").unwrap_or_default()))
 }
 
+/// 从独立连接取某编码行的 `update_ms`（版本号）与 `name`
+///
+/// sync 测试用它核对「写入后的版本」与「被拦下后未被动过的数据」。
+pub async fn item_version_and_name(code: &str) -> Result<Option<(i64, Option<String>)>, SvcError> {
+    let stmt = sea_orm::Statement::from_string(
+        sea_orm::DatabaseBackend::Postgres,
+        format!(
+            "select update_ms, name from tx_item where code = '{}'",
+            sql_escape(code)
+        ),
+    );
+    let row = probe()
+        .query_one_raw(stmt)
+        .await
+        .map_err(|e| SvcError::Runtime(anyhow::Error::new(e)))?;
+    Ok(row.map(|r| {
+        (
+            r.try_get::<i64>("", "update_ms").unwrap_or_default(),
+            r.try_get::<String>("", "name").ok(),
+        )
+    }))
+}
+
 async fn count(sql: &str) -> Result<i64, SvcError> {
     let stmt = sea_orm::Statement::from_string(sea_orm::DatabaseBackend::Postgres, sql.to_string());
     let row = probe()

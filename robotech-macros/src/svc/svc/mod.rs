@@ -251,6 +251,7 @@ pub(crate) fn svc_macro(args: SvcArgs, input: ItemStruct) -> TokenStream {
     let modify_dto_name = format_ident!("{}ModifyDto", entity_name);
     let save_dto_name = format_ident!("{}SaveDto", entity_name);
     let query_dto_name = format_ident!("{}QueryDto", entity_name);
+    let sync_dto_name = format_ident!("{}SyncDto", entity_name);
 
     let mut generated_methods = Vec::new();
 
@@ -476,6 +477,63 @@ pub(crate) fn svc_macro(args: SvcArgs, input: ItemStruct) -> TokenStream {
             };
             #after_call
             result
+        }
+        });
+    }
+
+    // 生成sync方法
+    if !skip.contains("sync") {
+        let before_call = resolve_hook("sync", false, &args.before, &args.before_write, Some(quote! { sync_dto }), None, false);
+        let after_call = resolve_hook("sync", false, &args.after, &args.after_write, None, None, false);
+        generated_methods.push(quote! {
+        /// # 带版本门槛的条件更新（用于多源同步）
+        ///
+        /// 按 id 更新，但只有在「存储的 `update_ms` < 传入 `update_ms`（即 `SyncDto.update_ms`）」
+        /// 时才真正改写；否则（本地更新或版本相同）影响 0 行、不报错。
+        ///
+        /// 用途：多节点/多设备把本地改动推给中心时，中心只接受比自己当前版本更新的写入，
+        /// 迟到/乱序/重复的重放被静默丢弃，不会把新数据覆盖成旧数据。
+        ///
+        /// - `update_ms` 必填（缺失由 DTO 校验拦截）；只更新 `SyncDto` 里提供的字段
+        ///   （`ActiveValue::Set` 的部分更新），创建者信息与创建时间不会被同步改写；
+        /// - 返回值为受影响行数：1=已应用，0=被版本门槛拦下（本地更新）——两者都算成功，
+        ///   调用方若要区分「到底改了没」就读这个值；
+        /// - 唯一键/外键冲突、参数校验失败、钩子失败等仍原样抛出，不受「0 行不报错」影响。
+        ///
+        /// ## 参数
+        /// * `sync_dto` - 包含 id、业务字段与版本号 `update_ms` 的传输对象
+        /// * `db` - 数据库连接或事务，如果未提供则使用全局数据库连接
+        ///
+        /// ## 返回值
+        /// * `Ok(Ro<u64>)` - 成功，返回受影响行数
+        /// * `Err(SvcError)` - 唯一键/外键冲突、参数校验失败、钩子失败等
+        pub async fn sync<C>(
+            sync_dto: #sync_dto_name,
+            db: Option<&C>,
+        ) -> Result<Ro<u64>, SvcError>
+        where
+            C: ConnectionTrait,
+        {
+            #before_call
+            let result = if let Some(db) = db {
+                sync_dto.validate()?;
+                let active_model: ActiveModel = sync_dto.into();
+                let rows = #dao_name::update_if_older(active_model, db).await?;
+                Ok(rows)
+            } else {
+                sync_dto.validate()?;
+                let db_conn = robotech::db::get_db_conn()?;
+                let tx = begin_transaction(db_conn.as_ref()).await?;
+                let rows = {
+                    let db = &tx;
+                    let active_model: ActiveModel = sync_dto.into();
+                    #dao_name::update_if_older(active_model, db).await?
+                };
+                commit_transaction(tx).await?;
+                Ok(rows)
+            };
+            #after_call
+            result.map(|rows| Ro::success("同步完成".to_string()).extra(Some(rows)))
         }
         });
     }

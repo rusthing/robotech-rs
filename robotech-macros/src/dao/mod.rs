@@ -440,6 +440,57 @@ pub(super) fn dao_macro(args: DaoArgs, input: ItemStruct) -> TokenStream {
     });
     }
 
+    // 生成update_if_older方法（带版本门槛的条件更新，用于 sync）
+    if !skip.contains("update_if_older") {
+        generated_members.push(quote! {
+            /// # 带版本门槛的条件更新
+            ///
+            /// 按主键更新，但只在「存储的 `update_ms` < 传入 `update_ms`」时才真正改写——
+            /// 否则（本地更新或版本相同）影响 0 行、不报错。用于多源同步时只接受
+            /// 比本地更新的写入，迟到/乱序/重复的重放被静默丢弃，不会把新数据覆盖成旧数据。
+            ///
+            /// - `update_ms` 必须显式传入（来自 SyncDto），缺失视为非法调用；
+            /// - 只写 `ActiveValue::Set` 的字段（天然部分更新），创建者信息与创建时间
+            ///   不会被同步改写；
+            /// - 返回受影响行数：1=已应用，0=被版本门槛拦下（本地更新）。
+            pub async fn update_if_older<C>(mut active_model: ActiveModel, db: &C) -> Result<u64, DaoError>
+            where
+                C: ConnectionTrait,
+            {
+                // 版本号必须带：来自调用方的 SyncDto.update_ms
+                let version = match active_model.update_ms {
+                    ActiveValue::Set(v) | ActiveValue::Unchanged(v) => v,
+                    ActiveValue::NotSet => {
+                        return Err(DaoError::Runtime(::anyhow::anyhow!(
+                            "update_if_older 需要 update_ms 版本号"
+                        )));
+                    }
+                };
+                let id_val = match active_model.id {
+                    ActiveValue::Set(v) | ActiveValue::Unchanged(v) => v,
+                    ActiveValue::NotSet => {
+                        return Err(DaoError::Runtime(::anyhow::anyhow!(
+                            "update_if_older 需要 id"
+                        )));
+                    }
+                };
+                // 锁死创建者信息，不能被同步改写
+                active_model.creater_id = ActiveValue::NotSet;
+                active_model.create_ms = ActiveValue::NotSet;
+                // 原子条件更新：UPDATE ... SET <Set 字段> WHERE id = ? AND update_ms < ?
+                // `.set()` 只会把 ActiveValue::Set 的字段写进 SET 子句
+                let res = Update::many(Entity)
+                    .set(active_model)
+                    .filter(Column::Id.eq(id_val))
+                    .filter(Column::UpdateMs.lt(version))
+                    .exec(db)
+                    .await
+                    .map_err(DaoError::parse_db_err)?;
+                Ok(res.rows_affected)
+            }
+        });
+    }
+
     // 生成delete_by_condition方法
     if !skip.contains("delete_by_condition") {
         generated_members.push(quote! {
@@ -1066,7 +1117,7 @@ pub(super) fn dao_macro(args: DaoArgs, input: ItemStruct) -> TokenStream {
         use robotech::dao::{add_order_by, build_search_condition, DaoError, SearchParams};
         use robotech::api::U64;
         use sea_orm::{
-            ActiveModelTrait, ActiveValue, Condition, ConnectionTrait, EntityTrait, FromQueryResult, PaginatorTrait, QueryFilter, DeleteResult
+            ActiveModelTrait, ActiveValue, ColumnTrait, Condition, ConnectionTrait, EntityTrait, FromQueryResult, PaginatorTrait, QueryFilter, DeleteResult, Update
         };
         use sea_orm::entity::EntityLoaderTrait;
 

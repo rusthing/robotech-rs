@@ -38,6 +38,7 @@ pub(crate) fn feign_macro(input: ItemStruct) -> TokenStream {
     let crud_path = format!("/{prefix}/{module_path}");
     let save_path = format!("{crud_path}/save");
     let upsert_path = format!("{crud_path}/upsert");
+    let sync_path = format!("{crud_path}/sync");
     let del_by_id_path = format!("{crud_path}/{{}}");
     let del_by_query_dto_path = crud_path.clone();
     let get_by_id_path = format!("{crud_path}/{{}}");
@@ -63,6 +64,7 @@ pub(crate) fn feign_macro(input: ItemStruct) -> TokenStream {
     let modify_dto_name = format_ident!("{}ModifyDto", entity_name);
     let save_dto_name = format_ident!("{}SaveDto", entity_name);
     let query_dto_name = format_ident!("{}QueryDto", entity_name);
+    let sync_dto_name = format_ident!("{}SyncDto", entity_name);
 
     let mut generated_methods = Vec::new();
 
@@ -136,6 +138,27 @@ pub(crate) fn feign_macro(input: ItemStruct) -> TokenStream {
             let headers = Self::build_headers(dto._current_user_id.value(), dto._current_ms.map(|m| m.value()))?;
             self.client
                 .request::<#save_dto_name, #vo_name>(
+                    ::reqwest::Method::POST,
+                    &url,
+                    ::core::option::Option::None,
+                    ::core::option::Option::Some(dto),
+                    ::core::option::Option::Some(&headers),
+                )
+                .await
+        }
+    });
+
+    // sync
+    generated_methods.push(quote! {
+        pub async fn sync(
+            &self,
+            dto: &#sync_dto_name,
+        ) -> ::core::result::Result<robotech::api::Ro<u64>, robotech::api_client::ApiClientError> {
+            let url = #sync_path.to_string();
+            // 版本号来自请求体（SyncDto.update_ms），不取请求头时间戳
+            let headers = Self::build_headers(dto._current_user_id.value(), ::core::option::Option::None)?;
+            self.client
+                .request::<#sync_dto_name, u64>(
                     ::reqwest::Method::POST,
                     &url,
                     ::core::option::Option::None,

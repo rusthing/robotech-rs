@@ -100,6 +100,7 @@ pub(crate) fn router_macro(args: RouterArgs, input: ItemStruct) -> TokenStream {
     let crud_path = format!("/{prefix}/{module_path}");
     let save_path = format!("{crud_path}/save");
     let upsert_path = format!("{crud_path}/upsert");
+    let sync_path = format!("{crud_path}/sync");
     let del_by_id_path = format!("{crud_path}/{{id}}");
     let del_by_query_dto_path = crud_path.clone();
     let get_by_id_path = format!("{crud_path}/{{id}}");
@@ -130,6 +131,7 @@ pub(crate) fn router_macro(args: RouterArgs, input: ItemStruct) -> TokenStream {
         routes.push(quote! {#crud_path, put(modify)});
         routes.push(quote! {#save_path, post(save)});
         routes.push(quote! {#upsert_path, post(upsert)});
+        routes.push(quote! {#sync_path, post(sync)});
         routes.push(quote! {#del_by_id_path, delete(del_by_id)});
         routes.push(quote! {#del_by_query_dto_path, delete(del_by_query_dto)});
         routes.push(quote! {#get_by_query_dto_path, get(get_by_query_dto)});

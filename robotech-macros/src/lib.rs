@@ -240,10 +240,14 @@ pub fn db_unwrap(args: TokenStream, input: TokenStream) -> TokenStream {
 /// 属性宏：为以 `Svc` 结尾的结构体自动生成标准 CRUD 方法
 ///
 /// 该宏会解析结构体名称（必须是 `XxxSvc` 形式的大驼峰命名），为结构体生成
-/// `add`、`modify`、`save`、`upsert`、`del_by_id`、`del_by_query_dto`、`get_by_id`、
+/// `add`、`modify`、`save`、`upsert`、`sync`、`del_by_id`、`del_by_query_dto`、`get_by_id`、
 /// `get_by_query_dto`、`list_by_query_dto`、`page_by_query_dto` 以及对应的
 /// Ex 版本（附带关联表信息）等方法。生成的方法内部调用对应的 `XxxDao`，
 /// 返回 `Ro<Vo>`、`Ro<ExVo>`、`Ro<PageRx<Vo>>` 等统一响应格式。
+///
+/// `sync` 是带版本门槛的条件更新：按 id 更新，但只在「存储的 `update_ms` < 传入
+/// `update_ms`」时才真正改写，否则（本地更新或版本相同）影响 0 行、不报错——用于
+/// 多源同步时只接受比本地更新的写入。返回 `Ro<u64>`（受影响行数）。
 ///
 /// 使用前提：项目中需存在与结构体名称对应的 `dto`、`dao`、`mo`、`vo` 模块。
 ///
@@ -262,7 +266,7 @@ pub fn svc(args: TokenStream, input: TokenStream) -> TokenStream {
 /// 属性宏：为以 `Ctrl` 结尾的结构体自动生成标准 CRUD Web 处理器
 ///
 /// 该宏会解析结构体名称（必须是 `XxxCtrl` 形式的大驼峰命名），为结构体生成
-/// 一组 axum handler 方法（`add`、`modify`、`save`、`upsert`、`del_by_id`、`get_by_id`、
+/// 一组 axum handler 方法（`add`、`modify`、`save`、`upsert`、`sync`、`del_by_id`、`get_by_id`、
 /// `get_by_query_dto`、`list_by_query_dto`、`page_by_query_dto` 及 Ex 版本），
 /// 每个方法带有 `#[utoipa::path]`、`#[debug_handler]`、`#[log_call]` 属性，
 /// 内部调用对应的 `XxxSvc` 并返回 `Json<Ro<...>>` 格式响应。
