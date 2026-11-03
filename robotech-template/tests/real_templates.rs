@@ -183,3 +183,24 @@ fn dbz_templates_render() {
         "上游连接器<c1>运行状态异常：RUNNING（1）；Debezium 连接器 c1；无上游连接器；所属 Kafka Connect<k1>：http://kafka-connect:8083"
     );
 }
+
+#[test]
+fn websocket_payload_accepts_mixed_delimiters() {
+    // 真实载荷里一半占位符改用 `${}`，渲染结果必须与全 `{{}}` 版本逐字一致
+    let mixed = r#"{"eventCode":${eventCode:json},"title":{{title:json}},"content":${content:json},"ext":{{ext:json}},"firstReceiveMs":${firstReceiveMs:default(null)},"businessTriggerMs":{{businessTriggerMs:default(null)}}}"#;
+    let vars = [
+        ("eventCode", "dtw.locator.sos"),
+        ("title", "定位卡 CARD-P-001 触发 SOS 报警"),
+        ("content", "定位卡 CARD-P-001 触发 SOS 报警；位置：3F 层（经度 113.9，纬度 22.5）；绑定目标：张三；上报时间 2025-01-01 08:00:00"),
+        ("ext", r#"{"alertId":"A-1","status":"active"}"#),
+        ("firstReceiveMs", "1735689600000"),
+        ("businessTriggerMs", "1735689600000"),
+    ];
+
+    let out = render(mixed, &vars);
+    assert_eq!(out, render(WEBSOCKET_PAYLOAD, &vars));
+    assert_json(&out, |v| {
+        assert_eq!(v["eventCode"], "dtw.locator.sos");
+        assert_eq!(v["firstReceiveMs"], 1735689600000_i64);
+    });
+}

@@ -349,6 +349,131 @@ fn mixed_legacy_and_new_syntax() {
 }
 
 #[test]
+fn alias_syntax_renders_like_braces() {
+    assert_eq!(
+        render("你好 ${name}，订单 ${order_id} 已发货", &[("name", "张三"), ("order_id", "ORD-001")]),
+        "你好 张三，订单 ORD-001 已发货"
+    );
+}
+
+#[test]
+fn alias_supports_filter_chain() {
+    assert_eq!(
+        render("${code:trim|upper}", &[("code", "  alarm-01  ")]),
+        "ALARM-01"
+    );
+    assert_eq!(
+        render(r#"{"time":${triggerMs:time(%F %T)|json}}"#, &[("triggerMs", "1735689600000")]),
+        r#"{"time":"2025-01-01 08:00:00"}"#
+    );
+}
+
+#[test]
+fn alias_default_null_then_json_is_quoted_null() {
+    // 与 `{{x:default(null)|json}}` 的边角语义完全相同
+    assert_eq!(render("${x:default(null)|json}", &[]), r#""null""#);
+}
+
+#[test]
+fn alias_missing_variable_keeps_placeholder() {
+    let empty: HashMap<String, String> = HashMap::new();
+    let outcome = render_template("你好 ${name}", &empty, &ctx());
+    assert_eq!(outcome.text, "你好 ${name}");
+    assert_eq!(outcome.diagnostics.len(), 1);
+    assert_eq!(outcome.diagnostics[0].severity, Severity::Warning);
+    assert_eq!(
+        outcome.diagnostics[0].code,
+        DiagnosticCode::MissingVariable {
+            key: "name".to_string()
+        }
+    );
+}
+
+#[test]
+fn alias_unknown_filter_keeps_placeholder() {
+    assert_eq!(
+        render("${t:times}", &[("t", "1735689600000")]),
+        "${t:times}"
+    );
+}
+
+#[test]
+fn braces_and_alias_mix_in_occurrence_order() {
+    assert_eq!(
+        render(
+            "{{a}}|${b}|{{c}}|${d:upper}",
+            &[("a", "A"), ("b", "B"), ("c", "C"), ("d", "d")]
+        ),
+        "A|B|C|D"
+    );
+    // 顺序交错时同样逐个替换
+    assert_eq!(
+        render("${a}-{{b}}-${c}-{{d}}", &[("a", "1"), ("b", "2"), ("c", "3"), ("d", "4")]),
+        "1-2-3-4"
+    );
+}
+
+#[test]
+fn alias_and_braces_values_are_not_rescanned() {
+    // 替换值里出现 ${...} 或 {{...}} 都不能被二次展开
+    let labels = vars(&[("v", "${name}"), ("name", "张三")]);
+    let all = PriorityVariables::new().layer(&labels);
+    assert_eq!(render_with("${v}", &all), "${name}");
+    assert_eq!(render_with("{{v}}", &all), "${name}");
+
+    let labels = vars(&[("v", "{{name}}"), ("name", "张三")]);
+    let all = PriorityVariables::new().layer(&labels);
+    assert_eq!(render_with("${v}", &all), "{{name}}");
+}
+
+#[test]
+fn validate_accepts_alias_syntax() {
+    let check = validate_template(
+        r#"{"code":${locatorCode:json},"time":${triggerMs:time(%F %T)|json}}"#,
+    );
+    assert!(!check.has_errors(), "{:?}", check.diagnostics);
+    assert_eq!(check.placeholders.len(), 2);
+    assert_eq!(check.placeholders[0].whole, "${locatorCode:json}");
+    assert_eq!(check.placeholders[1].filters.len(), 2);
+}
+
+#[test]
+fn validate_alias_is_not_legacy_syntax() {
+    let check = validate_template("你好 ${name}");
+    assert!(!check.has_errors(), "{:?}", check.diagnostics);
+    assert_eq!(check.placeholders.len(), 1);
+    assert_eq!(check.placeholders[0].key, "name");
+}
+
+#[test]
+fn validate_still_flags_legacy_next_to_alias() {
+    let check = validate_template("${name} / {name}");
+    assert!(check.has_errors());
+    assert_eq!(check.placeholders.len(), 1);
+    assert_eq!(check.diagnostics[0].code, DiagnosticCode::LegacySyntax);
+}
+
+#[test]
+fn validate_flags_unclosed_alias() {
+    let check = validate_template("你好 ${name");
+    assert!(check.has_errors());
+    assert_eq!(
+        check.diagnostics[0].code,
+        DiagnosticCode::UnclosedPlaceholder
+    );
+}
+
+#[test]
+fn validate_flags_unknown_filter_in_alias() {
+    let check = validate_template("${x:uppper}");
+    assert!(check.has_errors());
+    assert!(matches!(
+        check.diagnostics[0].code,
+        DiagnosticCode::UnknownFilter { .. }
+    ));
+}
+
+#[test]
 fn json_object_braces_are_untouched() {
     let labels = vars(&[("name", "张三")]);
     assert_eq!(

@@ -52,12 +52,13 @@ impl TemplateCheck {
 /// # 校验模板
 ///
 /// 检查项：
-/// 1. `{{` 是否闭合；
+/// 1. `{{` / `${` 是否闭合；
 /// 2. 是否残留旧语法 `{key}`；
 /// 3. 过滤器链语法是否正确；
 /// 4. 过滤器名是否已注册。
 ///
-/// 普通花括号（JSON 对象、正文里的 `{`）不会报错。
+/// `{{key}}` 与 `${key}` 是等价写法，都算合法占位符；普通花括号（JSON 对象、
+/// 正文里的 `{`）不会报错。
 pub fn validate_template(template: &str) -> TemplateCheck {
     let matches = find_all(template);
     let mut diagnostics = Vec::new();
@@ -127,7 +128,7 @@ pub fn validate_template(template: &str) -> TemplateCheck {
     }
 }
 
-/// 检查两个合法占位符之间的普通文本：未闭合的 `{{` 与旧语法
+/// 检查两个合法占位符之间的普通文本：未闭合的 `{{` / `${` 与旧语法
 fn diagnose_gap(segment: &str, base: usize, diagnostics: &mut Vec<Diagnostic>) {
     let mut cursor = 0;
 
@@ -149,6 +150,27 @@ fn diagnose_gap(segment: &str, base: usize, diagnostics: &mut Vec<Diagnostic>) {
                         DiagnosticCode::UnclosedPlaceholder,
                         base + start,
                         snippet(rest),
+                    ));
+                    return;
+                }
+            }
+        }
+
+        // `${...}` 里合法的部分已经被 find_all 消费；走到这里的要么是未闭合，
+        // 要么内容不是合法变量名/过滤器链。后者按普通文本跳过，不能误报成旧语法。
+        if start > 0 && segment.as_bytes()[start - 1] == b'$' {
+            let dollar = start - 1;
+            match rest[1..].find('}') {
+                Some(close) => {
+                    cursor = start + 1 + close + 1;
+                    continue;
+                }
+                None => {
+                    diagnostics.push(Diagnostic::new(
+                        Severity::Error,
+                        DiagnosticCode::UnclosedPlaceholder,
+                        base + dollar,
+                        snippet(&segment[dollar..]),
                     ));
                     return;
                 }

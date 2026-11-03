@@ -1,4 +1,4 @@
-//! 语法解析：`{{key}}` / `{{key:过滤器链}}`
+//! 语法解析：`{{key}}` / `{{key:过滤器链}}`，以及等价别名 `${key}`
 
 use regex::Regex;
 use std::sync::LazyLock;
@@ -10,14 +10,21 @@ static VAR_RE: LazyLock<Regex> = LazyLock::new(|| {
     Regex::new(r"\{\{(\w+)(?::([^{}]*))?\}\}").expect("模板正则表达式编译失败")
 });
 
+/// 匹配 `${key}` 与 `${key:<过滤器链>}`（与 `{{...}}` 完全等价）
+///
+/// 不做任何环境变量/默认值解释，`$` 只是占位符前缀的一部分。
+static ALIAS_RE: LazyLock<Regex> = LazyLock::new(|| {
+    Regex::new(r"\$\{(\w+)(?::([^{}]*))?\}").expect("别名正则表达式编译失败")
+});
+
 /// 模板里的一次占位符匹配
 #[derive(Debug, Clone, Copy)]
 pub(crate) struct VarMatch<'a> {
-    /// 整段占位符（含 `{{` / `}}`）
+    /// 整段占位符（含定界符：`{{` `}}` 或 `${` `}`）
     pub whole: &'a str,
     /// 变量名
     pub key: &'a str,
-    /// `:` 之后、`}}` 之前的过滤器链，空串表示没有过滤器
+    /// `:` 之后、右侧定界符之前的过滤器链，空串表示没有过滤器
     pub spec: &'a str,
     /// 在模板中的字节偏移
     pub offset: usize,
@@ -31,8 +38,21 @@ pub(crate) struct FilterCall<'a> {
 }
 
 /// 从 `from` 开始找下一个占位符
+///
+/// `{{x}}` 与 `${x}` 两种写法都算，取两者中更靠前的一个；同一模板混写时
+/// 按出现顺序逐个替换（同位置不可能同时命中，前缀不同）。
 pub(crate) fn next_match<'a>(text: &'a str, from: usize) -> Option<VarMatch<'a>> {
-    let caps = VAR_RE.captures_at(text, from)?;
+    let braces = VAR_RE.captures_at(text, from).and_then(|caps| build_match(&caps));
+    let alias = ALIAS_RE.captures_at(text, from).and_then(|caps| build_match(&caps));
+    match (braces, alias) {
+        (Some(a), Some(b)) => Some(if a.offset <= b.offset { a } else { b }),
+        (Some(found), None) | (None, Some(found)) => Some(found),
+        (None, None) => None,
+    }
+}
+
+/// 从正则捕获构造 [`VarMatch`]
+fn build_match<'a>(caps: &regex::Captures<'a>) -> Option<VarMatch<'a>> {
     let whole = caps.get(0)?;
     Some(VarMatch {
         whole: whole.as_str(),
@@ -136,6 +156,26 @@ mod tests {
     fn single_braces_are_not_placeholders() {
         assert!(find_all(r#"{"a":1,"b":{x}}"#).is_empty());
         assert!(find_all("系统通知").is_empty());
+    }
+
+    #[test]
+    fn finds_alias_placeholders() {
+        let found = find_all("${x} 与 ${y:upper}");
+        assert_eq!(found.len(), 2);
+        assert_eq!(found[0].key, "x");
+        assert_eq!(found[0].whole, "${x}");
+        assert_eq!(found[0].spec, "");
+        assert_eq!(found[1].key, "y");
+        assert_eq!(found[1].spec, "upper");
+    }
+
+    #[test]
+    fn mixed_forms_keep_occurrence_order() {
+        let found = find_all("{{a}}/${b}/{{c}}/${d:json}");
+        let keys: Vec<_> = found.iter().map(|found| found.key).collect();
+        assert_eq!(keys, ["a", "b", "c", "d"]);
+        assert_eq!(found[0].offset, 0);
+        assert_eq!(found[1].offset, 6);
     }
 
     #[test]
