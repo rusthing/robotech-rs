@@ -581,6 +581,12 @@ struct FieldCheck {
     /// 各不相同），写死一个范围只会误伤。宏认识它是为了**不报未知标签**——模型里
     /// 每个时间戳列都带这个标记。
     unit: Option<String>,
+    /// 是否密钥类字段，来自 `@secret`
+    ///
+    /// 只影响 `@check` 生成的提示语：密钥、令牌、盐这类值不进提示语（提示语会原样
+    /// 回给调用方，也会原样进日志）。判定放在注释里而不是校验函数里，是因为同一个
+    /// 规则（比如 `is_code`）既可能校验公开编码，也可能校验令牌。
+    secret: bool,
 }
 
 /// 一个区间声明：`a..=b`、`a..`、`..=b`；空的一侧表示不限
@@ -769,12 +775,16 @@ fn parse_check_tags(field: &Field) -> syn::Result<FieldCheck> {
                 // 只做标记，不生成校验：合法区间随业务而定，写死会误伤
                 check.unit = Some(spec.to_string());
             }
+            "secret" => {
+                // 只影响 `@check` 的提示语：把 `custom` 指向 `validators::hidden`
+                check.secret = true;
+            }
             other => {
                 return Err(syn::Error::new_spanned(
                     attr,
                     format!(
                         "字段 {field_name} 用了未知的校验标签 `@{other}`，\
-                         只支持 `@len`、`@range`、`@check`、`@unit`"
+                         只支持 `@len`、`@range`、`@check`、`@unit`、`@secret`"
                     ),
                 ));
             }
@@ -944,10 +954,18 @@ fn generate_validate_attr(field: &Field, drop_required: bool) -> Option<Attribut
     // 函数名去掉 `is_` 前缀后与本模块一一对应；适配层负责把 `bool` 包成
     // `Result<(), ValidationError>`，并让同一个函数同时支持 `String` 与 `Option<String>`
     // （`None` 直接放过，是否必填由 `required` 规则决定）。
+    //
+    // 标了 `@secret` 的字段改指 `validators::hidden::*`：那套函数与根上的同名同签名，
+    // 只是提示语里不带原值（密钥、令牌、盐不能进响应体和日志）。
     if let Some(fn_name) = &check.check {
         let validator = fn_name.trim_start_matches("is_");
+        let module = if check.secret {
+            "robotech::api::validators::hidden"
+        } else {
+            "robotech::api::validators"
+        };
         let path = syn::LitStr::new(
-            &format!("robotech::api::validators::{validator}"),
+            &format!("{module}::{validator}"),
             proc_macro2::Span::call_site(),
         );
         metas.push(syn::parse_quote!(custom(function = #path)));
@@ -1551,6 +1569,33 @@ mod tests {
         assert!(check_field_tags(&f).is_ok());
         let attr = validate_of(&f);
         assert!(!attr.contains("range"), "@unit 不该生成校验: {attr}");
+    }
+
+    /// `@secret` 把 `@check` 改指 `validators::hidden`：提示语里不带原值
+    #[test]
+    fn secret_tag_switches_to_hidden_validators() {
+        let f = field(
+            "login_token",
+            "登录令牌\n@len 1..=64\n@check is_code\n@secret",
+            "String",
+        );
+        let attr = validate_of(&f);
+        assert!(
+            attr.contains("custom(function=\"robotech::api::validators::hidden::code\")"),
+            "{attr}"
+        );
+        // 长度校验照旧：那几个提示语里本来就没有值
+        assert!(attr.contains("length("), "{attr}");
+    }
+
+    /// 没标 `@secret` 的字段仍走带值回显的版本
+    #[test]
+    fn without_secret_tag_the_visible_validator_is_used() {
+        let attr = validate_of(&field("nick", "昵称\n@check is_chinese_name", "String"));
+        assert!(
+            attr.contains("custom(function=\"robotech::api::validators::chinese_name\")"),
+            "{attr}"
+        );
     }
 
     /// 有 `#[db_default]` 的字段：不加 required，但传了值仍要过区间校验

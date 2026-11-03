@@ -55,10 +55,68 @@ pub enum CtrlError {
     Svc(#[from] SvcError),
 }
 
+/// # 收集校验错误里的规则名（`code`）
+///
+/// 只取 `code`，不重复 `message`：`Display` 已经把「哪一项、期望什么」打出来了，
+/// 这里补的是提示语里没有的那半截信息——到底哪条规则挂的
+/// （`invalid_email`、`invalid_len`、`invalid_header_format`…），提示语相近时靠它区分。
+///
+/// 嵌套结构按 `a.b` 展开，列表按 `a[0].b` 展开，与 `ValidationErrors` 的 `Display`
+/// 用同一套路径写法。
+fn collect_error_codes(errors: &validator::ValidationErrors, prefix: &str, out: &mut Vec<String>) {
+    for (field, kind) in errors.errors() {
+        let path = if prefix.is_empty() {
+            field.to_string()
+        } else {
+            format!("{prefix}.{field}")
+        };
+        match kind {
+            validator::ValidationErrorsKind::Field(list) => {
+                out.extend(list.iter().map(|error| format!("{path}: {}", error.code)));
+            }
+            validator::ValidationErrorsKind::Struct(inner) => {
+                collect_error_codes(inner, &path, out)
+            }
+            validator::ValidationErrorsKind::List(map) => {
+                for (idx, inner) in map {
+                    collect_error_codes(inner, &format!("{path}[{idx}]"), out);
+                }
+            }
+        }
+    }
+}
+
 /// # 为 CtrlError 实现错误转换方法
 ///
 /// 该实现定义了如何将不同类型的 控制器 错误转换为统一的 Ro 响应对象，以便在 HTTP 接口中返回标准化的错误信息格式
 impl CtrlError {
+    /// # 日志用的校验细节
+    ///
+    /// `Display` 只服务「回给调用方的那句话」，规则名（`code`）不在里面。
+    /// 一句「参数<X-User-Id>格式不正确」看不出是哪条规则判的，所以校验类错误额外带上码：
+    ///
+    /// * 单个 `ValidationError`：`invalid_header_format`
+    /// * `ValidationErrors`：`mobile: invalid_mobile_cn`（按字段路径逐条列出）
+    ///
+    /// 其它变体（数据库、IO…）的 `Display` 已经把关键信息说完了，不再额外展开。
+    fn validation_detail(&self) -> Option<String> {
+        match self {
+            CtrlError::Validation(error) => Some(error.code.to_string()),
+            CtrlError::Validations(errors) => {
+                let mut codes = Vec::new();
+                collect_error_codes(errors, "", &mut codes);
+                Some(codes.join(", "))
+            }
+            CtrlError::Svc(SvcError::Validation(error)) => Some(error.code.to_string()),
+            CtrlError::Svc(SvcError::Validations(errors)) => {
+                let mut codes = Vec::new();
+                collect_error_codes(errors, "", &mut codes);
+                Some(codes.join(", "))
+            }
+            _ => None,
+        }
+    }
+
     /// 将错误转换为Ro对象
     fn to_ro(&self) -> Ro<()> {
         match self {
@@ -124,7 +182,10 @@ impl CtrlError {
 // 为错误类型实现 IntoResponse
 impl IntoResponse for CtrlError {
     fn into_response(self) -> Response {
-        warn!("控制器层捕获错误: {}", self);
+        match self.validation_detail() {
+            Some(detail) => warn!("控制器层捕获错误: {} | 校验规则: {}", self, detail),
+            None => warn!("控制器层捕获错误: {}", self),
+        }
         let status = match &self {
             CtrlError::Runtime(_) => StatusCode::INTERNAL_SERVER_ERROR,
             CtrlError::Validation(_)
@@ -148,5 +209,44 @@ impl IntoResponse for CtrlError {
         };
 
         (status, Json(&self.to_ro())).into_response()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use validator::ValidationErrors;
+
+    #[test]
+    fn detail_lists_codes_per_field() {
+        let mut errors = ValidationErrors::new();
+        errors.add(
+            "mobile",
+            validator::ValidationError::new("invalid_mobile_cn"),
+        );
+        errors.add("email", validator::ValidationError::new("invalid_email"));
+
+        let detail = CtrlError::Validations(errors)
+            .validation_detail()
+            .expect("校验类错误应有规则名");
+        assert!(detail.contains("mobile: invalid_mobile_cn"), "{detail}");
+        assert!(detail.contains("email: invalid_email"), "{detail}");
+        // 提示语已经在 Display 里，日志里不再重复一遍
+        assert!(!detail.contains("格式不正确"), "{detail}");
+    }
+
+    #[test]
+    fn detail_is_just_the_code_for_single_error() {
+        let error = CtrlError::Validation(validator::ValidationError::new("invalid_header_format"));
+        assert_eq!(
+            error.validation_detail().as_deref(),
+            Some("invalid_header_format")
+        );
+    }
+
+    #[test]
+    fn other_errors_have_no_detail() {
+        let error = CtrlError::Io(std::io::Error::other("磁盘故障"));
+        assert!(error.validation_detail().is_none());
     }
 }
