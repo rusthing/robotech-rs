@@ -1,12 +1,28 @@
 # robotech-template
 
-跨服务共用的模板渲染内核：`{{变量}}` / `${变量}` 占位符、过滤器链、结构化诊断、可参数化的变量来源。
+跨服务共用的模板渲染内核，支持多引擎并存。内置 `robotech` 引擎（`{{变量}}` / `${变量}` 占位符、过滤器链），同时集成 `minijinja` 引擎（支持 if/for/switch 等控制流）。结构化诊断、可参数化的变量来源。
 
 本 crate 只提供机制，**不读配置、不写日志、不访问数据库**。时区与「当前时间」
 由调用方放进 `FilterContext`，变量优先级由调用方用 `PriorityVariables` 逐层组装，
 诊断以 `RenderOutcome` / `TemplateCheck` 返回，由调用方决定告警还是拒绝保存。
 
-## 语法
+## 多引擎与首行声明
+
+模板字段的首行可以用 `@engine: <name>` 声明使用哪个引擎：
+
+```text
+@engine: robotech       使用内置引擎（默认，向后兼容）
+@engine: minijinja      使用 minijinja 引擎（支持 if/for/switch 等控制流）
+```
+
+- 声明行必须是模板的第一行，以 `@engine:` 开头（允许前导空白），后面跟引擎名
+- 引擎名不区分大小写（`MiniJinja` / `minijinja` 等价）
+- **没有声明时默认使用 `robotech` 引擎**，保证向后兼容
+- 声明行之后的所有内容（包括空行）都是模板正文
+
+统一入口 `render()` / `validate()` 会自动解析首行声明并分派到对应引擎。
+
+## robotech 引擎语法
 
 ```text
 {{key}}                         原样代入
