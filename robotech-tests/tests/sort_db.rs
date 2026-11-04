@@ -9,8 +9,8 @@
 
 use robotech::dao::sort::{
     compact_flat_after_delete, compact_flat_gaps, compact_tree_after_delete, compact_tree_gaps,
-    flat_move_group, next_sort_order, reorder_flat, reorder_tree, tree_move_node, FlatSort,
-    TreeMoveArgs, TreeSort,
+    delete_tree_descendants, flat_move_group, next_child_code, next_sort_order, reorder_flat,
+    reorder_tree, tree_move_node, tree_subtree, FlatSort, TreeMoveArgs, TreeSort,
 };
 use sea_orm::{
     ConnectionTrait, Database, DatabaseBackend, DatabaseConnection, DbErr, QueryResult, Statement,
@@ -30,6 +30,13 @@ const TREE_CYCLE: TreeSort = TreeSort::new("rt_sort_probe_tree_cycle").with_scop
 const TREE_REORDER: TreeSort = TreeSort::new("rt_sort_probe_tree_reorder").with_scope("scope_id");
 const FLAT_REORDER: FlatSort = FlatSort::new("rt_sort_probe_flat_reorder").with_group("group_id");
 const FLAT_GLOBAL: FlatSort = FlatSort::new("rt_sort_probe_flat_global");
+const TREE_CASCADE: TreeSort = TreeSort::new("rt_sort_probe_tree_cascade").with_scope("scope_id");
+const TREE_CROSS_SCOPE: TreeSort =
+    TreeSort::new("rt_sort_probe_tree_cross_scope").with_scope("scope_id");
+const TREE_NULL_SCOPE: TreeSort =
+    TreeSort::new("rt_sort_probe_tree_null_scope").with_scope("scope_id");
+const TREE_ORPHAN_REORDER: TreeSort =
+    TreeSort::new("rt_sort_probe_tree_orphan_reorder").with_scope("scope_id");
 
 /// 连接测试库；连不上返回 `None`
 async fn connect() -> Option<DatabaseConnection> {
@@ -715,6 +722,289 @@ async fn tree_reorder_nested_siblings_cascades_subtrees() {
             .unwrap(),
         6,
         "两阶段各改一次，3 行 × 2；重复提交结果不变"
+    );
+    tx.rollback().await.unwrap();
+}
+
+#[tokio::test]
+async fn cascade_delete_removes_subtree_and_compacts_siblings() {
+    let Some(db) = connect().await else {
+        return;
+    };
+    let tx = db.begin().await.unwrap();
+    let table = TREE_CASCADE.table;
+    create_tree_table(&tx, table).await;
+    exec(
+        &tx,
+        &format!(
+            "INSERT INTO {table} (scope_id, tree_code) VALUES
+             (1,'001'),(1,'001001'),(1,'001001001'),
+             (1,'002'),(1,'002001'),
+             (2,'001'),(2,'001001')"
+        ),
+    )
+    .await
+    .unwrap();
+    let root_id: i64 = query(
+        &tx,
+        &format!("SELECT id FROM {table} WHERE scope_id = 1 AND tree_code = '001'"),
+    )
+    .await
+    .unwrap()[0]
+        .try_get("", "id")
+        .unwrap();
+
+    let subtree = tree_subtree(&tx, &TREE_CASCADE, root_id as u64)
+        .await
+        .unwrap()
+        .expect("节点应存在");
+    assert_eq!(
+        subtree.iter().map(|node| node.code.as_str()).collect::<Vec<_>>(),
+        vec!["001", "001001", "001001001"]
+    );
+
+    let deleted = delete_tree_descendants(&tx, &TREE_CASCADE, root_id as u64, None)
+        .await
+        .unwrap();
+    assert_eq!(deleted, 2, "只删子孙，不含节点自身");
+    exec(
+        &tx,
+        &format!("DELETE FROM {table} WHERE id = {root_id}"),
+    )
+    .await
+    .unwrap();
+    compact_tree_after_delete(&tx, &TREE_CASCADE, Some(1), "001", None)
+        .await
+        .unwrap();
+
+    assert_eq!(
+        tree_codes(&tx, table, 1).await,
+        vec!["001", "001001"],
+        "同父剩余兄弟 002 前移到 001，子树跟着改码"
+    );
+    assert_eq!(
+        tree_codes(&tx, table, 2).await,
+        vec!["001", "001001"],
+        "另一个 scope 不受影响"
+    );
+    tx.rollback().await.unwrap();
+}
+
+#[tokio::test]
+async fn cascade_delete_rolls_back_when_parent_delete_fails() {
+    let Some(db) = connect().await else {
+        return;
+    };
+    let table = TREE_CASCADE.table;
+    let ref_table = "rt_sort_probe_tree_cascade_ref";
+    exec(&db, &format!("DROP TABLE IF EXISTS {ref_table}"))
+        .await
+        .unwrap();
+    exec(&db, &format!("DROP TABLE IF EXISTS {table}"))
+        .await
+        .unwrap();
+    exec(
+        &db,
+        &format!(
+            "CREATE TABLE {table} (
+                id bigserial PRIMARY KEY,
+                scope_id bigint NOT NULL,
+                tree_code text NOT NULL,
+                updater_id bigint NOT NULL DEFAULT 0,
+                update_ms bigint NOT NULL DEFAULT 0,
+                CONSTRAINT {table}_code_unique UNIQUE (scope_id, tree_code)
+             )"
+        ),
+    )
+    .await
+    .unwrap();
+    exec(
+        &db,
+        &format!(
+            "CREATE TABLE {ref_table} (
+                id bigserial PRIMARY KEY,
+                tree_id bigint NOT NULL REFERENCES {table}(id) ON DELETE RESTRICT
+             )"
+        ),
+    )
+    .await
+    .unwrap();
+    exec(
+        &db,
+        &format!(
+            "INSERT INTO {table} (scope_id, tree_code) VALUES (1,'001'),(1,'001001')"
+        ),
+    )
+    .await
+    .unwrap();
+    let root_id: i64 = query(
+        &db,
+        &format!("SELECT id FROM {table} WHERE scope_id = 1 AND tree_code = '001'"),
+    )
+    .await
+    .unwrap()[0]
+        .try_get("", "id")
+        .unwrap();
+    exec(
+        &db,
+        &format!("INSERT INTO {ref_table} (tree_id) VALUES ({root_id})"),
+    )
+    .await
+    .unwrap();
+
+    let tx = db.begin().await.unwrap();
+    let deleted = delete_tree_descendants(&tx, &TREE_CASCADE, root_id as u64, None)
+        .await
+        .unwrap();
+    assert_eq!(deleted, 1, "先删掉了子节点");
+    let parent_delete = exec(
+        &tx,
+        &format!("DELETE FROM {table} WHERE id = {root_id}"),
+    )
+    .await;
+    assert!(parent_delete.is_err(), "父节点仍被引用，删除应失败");
+    tx.rollback().await.unwrap();
+
+    assert_eq!(
+        tree_codes(&db, table, 1).await,
+        vec!["001", "001001"],
+        "事务回滚后子孙恢复，不会留下半删状态"
+    );
+    exec(&db, &format!("DROP TABLE IF EXISTS {ref_table}"))
+        .await
+        .unwrap();
+    exec(&db, &format!("DROP TABLE IF EXISTS {table}"))
+        .await
+        .unwrap();
+}
+
+#[tokio::test]
+async fn cross_scope_move_does_not_treat_same_code_as_cycle() {
+    let Some(db) = connect().await else {
+        return;
+    };
+    let tx = db.begin().await.unwrap();
+    let table = TREE_CROSS_SCOPE.table;
+    create_tree_table(&tx, table).await;
+    exec(
+        &tx,
+        &format!(
+            "INSERT INTO {table} (scope_id, tree_code) VALUES (1,'001'),(2,'001')"
+        ),
+    )
+    .await
+    .unwrap();
+    let node_id: i64 = query(
+        &tx,
+        &format!("SELECT id FROM {table} WHERE scope_id = 1 AND tree_code = '001'"),
+    )
+    .await
+    .unwrap()[0]
+        .try_get("", "id")
+        .unwrap();
+
+    tree_move_node(
+        &tx,
+        TreeMoveArgs {
+            spec: &TREE_CROSS_SCOPE,
+            id: node_id as u64,
+            new_scope: Some(2),
+            new_parent: Some("001".to_string()),
+            operator_id: None,
+        },
+    )
+    .await
+    .expect("跨 scope 时新旧编码没有可比性，不应误判成环");
+
+    assert!(tree_codes(&tx, table, 1).await.is_empty());
+    assert_eq!(tree_codes(&tx, table, 2).await, vec!["001", "001001"]);
+    tx.rollback().await.unwrap();
+}
+
+#[tokio::test]
+async fn next_child_code_isolates_null_scope() {
+    let Some(db) = connect().await else {
+        return;
+    };
+    let tx = db.begin().await.unwrap();
+    let table = TREE_NULL_SCOPE.table;
+    exec(
+        &tx,
+        &format!(
+            "CREATE TEMP TABLE {table} (
+                id bigserial PRIMARY KEY,
+                scope_id bigint NULL,
+                tree_code text NOT NULL,
+                updater_id bigint NOT NULL DEFAULT 0,
+                update_ms bigint NOT NULL DEFAULT 0,
+                CONSTRAINT {table}_code_unique UNIQUE (scope_id, tree_code)
+             ) ON COMMIT DROP"
+        ),
+    )
+    .await
+    .unwrap();
+    exec(
+        &tx,
+        &format!(
+            "INSERT INTO {table} (scope_id, tree_code) VALUES
+             (NULL,'001'),(2,'001'),(2,'002')"
+        ),
+    )
+    .await
+    .unwrap();
+
+    assert_eq!(
+        next_child_code(&tx, &TREE_NULL_SCOPE, None, "")
+            .await
+            .unwrap(),
+        "002",
+        "NULL 分组只看 scope_id IS NULL 的记录"
+    );
+    assert_eq!(
+        next_child_code(&tx, &TREE_NULL_SCOPE, Some(2), "")
+            .await
+            .unwrap(),
+        "003"
+    );
+    tx.rollback().await.unwrap();
+}
+
+#[tokio::test]
+async fn reorder_rejects_when_orphan_descendants_exist() {
+    let Some(db) = connect().await else {
+        return;
+    };
+    let tx = db.begin().await.unwrap();
+    let table = TREE_ORPHAN_REORDER.table;
+    create_tree_table(&tx, table).await;
+    exec(
+        &tx,
+        &format!(
+            "INSERT INTO {table} (scope_id, tree_code) VALUES
+             (1,'001'),(1,'003'),(1,'002001')"
+        ),
+    )
+    .await
+    .unwrap();
+    let ids = query(
+        &tx,
+        &format!(
+            "SELECT id FROM {table} WHERE scope_id = 1 AND tree_code IN ('001','003')
+             ORDER BY tree_code"
+        ),
+    )
+    .await
+    .unwrap()
+    .iter()
+    .map(|row| row.try_get::<i64>("", "id").unwrap() as u64)
+    .collect::<Vec<_>>();
+
+    let err = reorder_tree(&tx, &TREE_ORPHAN_REORDER, &ids, None)
+        .await
+        .expect_err("存在 002001 孤儿时重排应拒绝");
+    assert!(
+        err.to_string().contains("孤立"),
+        "错误信息应说明孤儿节点，实际：{err}"
     );
     tx.rollback().await.unwrap();
 }

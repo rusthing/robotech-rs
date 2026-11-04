@@ -21,9 +21,12 @@
 //!
 //! ## 并发
 //!
-//! 两个请求同时挂到同一父节点下，可能算出同一个编码，其中一个会撞唯一约束
-//! （`ak_..._tree_code`），由 DAO 的重复键解析把错误翻译给调用方。这是
-//! 「读-算-写」的固有竞态，不做重试：撞了让调用方重试整个请求即可。
+//! 本函数只做「读-算-写」中的读与算，不做锁。走 `robotech::dao::sort` 的
+//! `#[sortable]` 实体由框架在新增钩子里先拿表级 advisory lock
+//! （`robotech_sort:tree:{table}`）再调用，因此不会并发生成重复编码。
+//! 直接调用本函数时，调用方必须自己保证同一父节点下的串行化（同事务内
+//! 先锁定该表/分组），否则两个请求可能算出同一个编码，其中一个会撞唯一
+//! 约束（`ak_..._tree_code`）。这是调用方责任，不是本函数的重试逻辑。
 //!
 //! ## 表名与列名
 //!
@@ -59,7 +62,8 @@ pub enum TreeCodeError {
 /// * `table` - 表名，代码常量
 /// * `tree_col` - 树编码列名，代码常量
 /// * `parent_code` - 父编码；空串表示根层
-/// * `scope` - 同层隔离条件（列名, 值）列表，代码常量；无隔离传 `&[]`
+/// * `scope` - 同层隔离条件（列名, 值）列表，代码常量；值为 `None` 表示该列
+///   为 `NULL` 的分组，无隔离传 `&[]`
 /// * `step` - 段值步长，见 `wheel_rs::tree_utils::DEFAULT_STEP`
 ///
 /// ## 返回值
@@ -77,7 +81,7 @@ pub async fn next_tree_code<C>(
     table: &str,
     tree_col: &str,
     parent_code: &str,
-    scope: &[(&str, Value)],
+    scope: &[(&str, Option<Value>)],
     step: u32,
 ) -> Result<String, TreeCodeError>
 where
@@ -96,9 +100,14 @@ where
         ))
         .to_owned();
     for (scope_col, scope_value) in scope {
-        select = select
-            .and_where(Expr::col(Alias::new(*scope_col)).eq(scope_value.clone()))
-            .to_owned();
+        select = match scope_value {
+            Some(value) => select
+                .and_where(Expr::col(Alias::new(*scope_col)).eq(value.clone()))
+                .to_owned(),
+            None => select
+                .and_where(Expr::col(Alias::new(*scope_col)).is_null())
+                .to_owned(),
+        };
     }
 
     let row = db.query_one(&select).await?;

@@ -24,18 +24,24 @@
 //!
 //! 使用路径枚举编码（默认 `tree_code`，每层 3 位数字），按「外层隔离列 +
 //! 父编码」形成兄弟组（如菜单的 `app_id`）。新增节点在父节点下追加末位编码
-//! （[`next_child_code`]，同样是 `max + 1`）；重排、删除压缩、改父节点都要
-//! 级联更新整棵子树，因此按表串行化：先 [`tree_lock`] 拿表级 advisory lock。
+//! （[`next_child_code`]，同样是 `max + 1`）；删除节点时同一事务内先由
+//! [`delete_tree_descendants`] 按编码前缀删除全部子孙，再由业务 `del_by_id`
+//! 删除节点、[`compact_tree_after_delete`] 前移同父兄弟；重排、删除压缩、
+//! 改父节点都要级联更新整棵子树，因此按表串行化：先 [`tree_lock`] 拿表级
+//! advisory lock。
 //!
 //! - **临时编码两阶段落位**：相邻兄弟互换时两个编码会同时占用对方位置，
 //!   先把每个兄弟子树挪到 `~xx`（base36 两位）临时编码，再落到最终
 //!   `父编码 + 001..n`，避免唯一键冲突。
 //! - **孤儿保护**：删除后若某个待前移编码下面还挂着「已删除节点留下的孤儿
-//!   后代」，压缩会把它挂到新的兄弟节点下，这种组保留空洞、不做压缩。
+//!   后代」，压缩会把它挂到新的兄弟节点下，这种组保留空洞、不做压缩；
+//!   重排遇到孤儿则直接拒绝，要求先清理。
 //! - **上限**：同一父节点最多 [`DEFAULT_TREE_MAX_SIBLINGS`] 个兄弟（三位子段
 //!   只到 999），编码总长不超过 [`DEFAULT_TREE_MAX_LENGTH`]（10 层 × 3）。
-//! - **防环**：改父时目标父编码不能等于自己，也不能以自己为前缀
-//!   （即不能挂到自己的后代下）。
+//! - **防环**：同一外层隔离域内改父时，目标父编码不能等于自己，也不能以
+//!   自己为前缀（即不能挂到自己的后代下）。跨 scope 时两边编码不在同一
+//!   命名空间，不做前缀防环。
+//! - **编码上限**：生成结果超过 [`TreeSort::max_length`] 时直接报错并回滚。
 //!
 //! ## 并发口径
 //!
@@ -52,8 +58,9 @@
 //! 并发改走，避免在错误的组上压缩。批量删除时组也按 key 字符串排序后逐组
 //! 加锁，消除不同方向的并发等待。
 //!
-//! 树形实体的新增、重排、删除压缩、改父共用同一把表级锁——临时编码只在
-//! 事务内可见，但仍要避免同表不同父节点的两次重排互相踩到对方的临时编码。
+//! 树形实体的新增、级联删除、重排、删除压缩、改父共用同一把表级锁——临时
+//! 编码只在事务内可见，但仍要避免同表不同父节点的两次重排互相踩到对方的
+//! 临时编码；级联删除也需要与并发的重排/压缩串行化。
 
 use crate::api::U64;
 use crate::dao::{next_tree_code, DaoError};
@@ -71,6 +78,8 @@ pub const DEFAULT_TREE_STEP: usize = 1;
 pub const DEFAULT_TREE_MAX_LENGTH: usize = 30;
 /// 同一父节点下默认的最大兄弟数（三位子段的上限）
 pub const DEFAULT_TREE_MAX_SIBLINGS: usize = 999;
+/// 重排时临时编码（`~` + base36 两位）能容纳的兄弟数量上限
+const TEMP_CODE_CAPACITY: usize = 36 * 36;
 
 /// # 从 DTO / VO 取平铺分组值
 ///
@@ -962,6 +971,15 @@ where
                 .ok_or_else(|| invalid("排序列表与当前树结构不一致，请刷新后重试"))
         })
         .collect::<Result<Vec<_>, SvcError>>()?;
+
+    // 复用旧编码前检查孤儿：重排会把旧槽位上的孤儿后代挂到新兄弟下。
+    let sibling_set: HashSet<&str> = codes.iter().map(|code| code.as_str()).collect();
+    if has_orphan_descendants(db, spec, scope_value, &parent, &sibling_set).await? {
+        return Err(invalid(
+            "该父节点下存在孤立的子节点（历史删除残留），请先清理后再重排",
+        ));
+    }
+
     rewrite_siblings(db, spec, scope_value, &parent, &codes, operator_id).await
 }
 
@@ -991,6 +1009,11 @@ where
         return Err(invalid(format!(
             "同一父节点的兄弟记录超过 {} 条，无法生成三位子段",
             spec.max_siblings
+        )));
+    }
+    if codes.len() > TEMP_CODE_CAPACITY {
+        return Err(invalid(format!(
+            "同一父节点的兄弟记录超过 {TEMP_CODE_CAPACITY} 条，临时编码容量不足，无法重排"
         )));
     }
 
@@ -1203,11 +1226,11 @@ pub async fn next_child_code<C>(
 where
     C: ConnectionTrait + Sync,
 {
-    let mut scope_values: Vec<(&str, Value)> = Vec::new();
-    if let (Some(col), Some(value)) = (spec.scope_col, scope) {
-        scope_values.push((col, Value::BigInt(Some(value))));
-    }
-    Ok(next_tree_code(
+    let scope_values: Vec<(&str, Option<Value>)> = match spec.scope_col {
+        Some(col) => vec![(col, scope.map(|value| Value::BigInt(Some(value))))],
+        None => Vec::new(),
+    };
+    let code = next_tree_code(
         db,
         spec.table,
         spec.code_col,
@@ -1215,7 +1238,14 @@ where
         &scope_values,
         spec.step as u32,
     )
-    .await?)
+    .await?;
+    if code.len() > spec.max_length {
+        return Err(invalid(format!(
+            "tree_code 超过 {} 位，无法在父节点 {parent:?} 下生成新编码",
+            spec.max_length
+        )));
+    }
+    Ok(code)
 }
 
 /// # 删除单条后压缩树形兄弟组
@@ -1237,6 +1267,138 @@ where
         .ok_or_else(|| invalid(format!("非法的 tree_code：{tree_code}")))?
         .to_string();
     compact_tree_group_in_tx(db, spec, scope, &parent, operator_id).await
+}
+
+/// # 子树节点（含自身）
+#[derive(Debug, Clone)]
+pub struct TreeSubtreeNode {
+    /// 主键
+    pub id: u64,
+    /// 树编码
+    pub code: String,
+}
+
+/// # 读取节点及其全部后代
+///
+/// 按路径枚举前缀 + 外层隔离列取整棵子树（含节点自身），结果按编码排序
+/// （字典序即前序：父节点紧跟子树）。节点不存在返回 `None`。
+///
+/// 只读，不加锁。需要「读到的子树」和后续写一致时，调用方应在同一事务内
+/// 调用，并先 [`tree_lock`]；删除级联由 [`delete_tree_descendants`] 负责。
+pub async fn tree_subtree<C>(
+    db: &C,
+    spec: &TreeSort,
+    id: u64,
+) -> Result<Option<Vec<TreeSubtreeNode>>, SvcError>
+where
+    C: ConnectionTrait + Sync,
+{
+    let select_sql = match spec.scope_col {
+        Some(col) => format!(
+            "SELECT {code_col} AS code_value, {col} AS scope_value FROM {table} WHERE {id_col} = $1",
+            code_col = spec.code_col,
+            table = spec.table,
+            id_col = spec.id_col,
+        ),
+        None => format!(
+            "SELECT {code_col} AS code_value, NULL::bigint AS scope_value FROM {table} WHERE {id_col} = $1",
+            code_col = spec.code_col,
+            table = spec.table,
+            id_col = spec.id_col,
+        ),
+    };
+    let rows = query_all(db, &select_sql, vec![Value::BigInt(Some(id as i64))]).await?;
+    let Some(row) = rows.first() else {
+        return Ok(None);
+    };
+    let code = row
+        .try_get::<String>("", "code_value")
+        .map_err(to_svc_error)?;
+    let scope = row
+        .try_get::<Option<i64>>("", "scope_value")
+        .map_err(to_svc_error)?;
+
+    let mut values = vec![Value::String(Some(code.clone()))];
+    let (clause, scope_values) = tree_scope_clause(spec.scope_col, scope, 2);
+    values.extend(scope_values);
+    let sql = format!(
+        "SELECT {id_col} AS id, {code_col} AS code_value FROM {table}
+         WHERE {code_col} LIKE $1 || '%' AND {clause}
+         ORDER BY {code_col}, {id_col}",
+        id_col = spec.id_col,
+        code_col = spec.code_col,
+        table = spec.table,
+    );
+    let mut subtree = Vec::new();
+    for row in query_all(db, &sql, values).await? {
+        subtree.push(TreeSubtreeNode {
+            id: row.try_get::<i64>("", "id").map_err(to_svc_error)? as u64,
+            code: row
+                .try_get::<String>("", "code_value")
+                .map_err(to_svc_error)?,
+        });
+    }
+    Ok(Some(subtree))
+}
+
+/// # 删除节点的全部子孙（不含节点自身）
+///
+/// 在调用方事务内先 [`tree_lock`]，锁住节点行后按「编码前缀 + 外层隔离列」
+/// 删除全部后代，返回删除条数。节点本身由调用方（`del_by_id`）删除，随后
+/// [`compact_tree_after_delete`] 负责同父兄弟前移；整组操作必须处于同一事务，
+/// 任一失败整体回滚。
+///
+/// 业务层的引用保护（如角色绑定了菜单）应在调用本函数前完成校验并抛错，
+/// 本函数只负责通用树结构，不感知任何业务关联。
+pub async fn delete_tree_descendants<C>(
+    db: &C,
+    spec: &TreeSort,
+    id: u64,
+    _operator_id: Option<u64>,
+) -> Result<u64, SvcError>
+where
+    C: ConnectionTrait + Sync,
+{
+    tree_lock(db, spec).await?;
+
+    let select_sql = match spec.scope_col {
+        Some(col) => format!(
+            "SELECT {code_col} AS code_value, {col} AS scope_value FROM {table} WHERE {id_col} = $1 FOR UPDATE",
+            code_col = spec.code_col,
+            table = spec.table,
+            id_col = spec.id_col,
+        ),
+        None => format!(
+            "SELECT {code_col} AS code_value, NULL::bigint AS scope_value FROM {table} WHERE {id_col} = $1 FOR UPDATE",
+            code_col = spec.code_col,
+            table = spec.table,
+            id_col = spec.id_col,
+        ),
+    };
+    let rows = query_all(db, &select_sql, vec![Value::BigInt(Some(id as i64))]).await?;
+    let Some(row) = rows.first() else {
+        return Ok(0);
+    };
+    let code = row
+        .try_get::<String>("", "code_value")
+        .map_err(to_svc_error)?;
+    let scope = row
+        .try_get::<Option<i64>>("", "scope_value")
+        .map_err(to_svc_error)?;
+
+    let mut values = vec![
+        Value::String(Some(code.clone())),
+        Value::Int(Some(code.len() as i32)),
+    ];
+    let (clause, scope_values) = tree_scope_clause(spec.scope_col, scope, 3);
+    values.extend(scope_values);
+    let sql = format!(
+        "DELETE FROM {table}
+         WHERE {code_col} LIKE $1 || '%' AND length({code_col}) > $2 AND {clause}",
+        table = spec.table,
+        code_col = spec.code_col,
+    );
+    execute(db, &sql, values).await
 }
 
 /// # 把某个父节点下的兄弟重排成连续段
@@ -1290,28 +1452,53 @@ where
     // 新编码若还压着「已删除节点的后代」（旧编码作为子树根），前移会把它挂到
     // 新的兄弟节点下。这种组保留空洞，不压缩。
     let existing_set: HashSet<&str> = existing.iter().map(|code| code.as_str()).collect();
-    let mut orphan_values = vec![Value::Int(Some((parent.len() + 3) as i32))];
+    if has_orphan_descendants(db, spec, scope_value, parent, &existing_set).await? {
+        return Ok(0);
+    }
+
+    rewrite_siblings(db, spec, scope_value, parent, &existing, operator_id).await
+}
+
+/// # 判断某个父节点下是否存在「根不在当前兄弟集合里」的后代
+///
+/// 路径枚举的删除不强制自引用外键，历史数据可能留下 `001001`（父 `001`
+/// 已删）这类孤儿。压缩或重排复用旧编码时会把孤儿挂到新兄弟下，因此两类
+/// 写操作都要先做这项检查：
+/// - 压缩：发现孤儿就保留空洞，不压缩；
+/// - 重排：直接报错，要求先清理孤儿。
+async fn has_orphan_descendants<C>(
+    db: &C,
+    spec: &TreeSort,
+    scope_value: Option<i64>,
+    parent: &str,
+    siblings: &HashSet<&str>,
+) -> Result<bool, SvcError>
+where
+    C: ConnectionTrait,
+{
+    let table = spec.table;
+    let code_col = spec.code_col;
+    let mut values = vec![Value::Int(Some((parent.len() + 3) as i32))];
     let (orphan_clause, orphan_scope_values) =
         tree_scope_clause(spec.scope_col, scope_value, 2);
     let mut orphan_sql = format!(
         "SELECT substr({code_col}, 1, $1) AS root FROM {table}
          WHERE length({code_col}) > $1 AND {orphan_clause}",
     );
-    orphan_values.extend(orphan_scope_values);
+    values.extend(orphan_scope_values);
     if !parent.is_empty() {
-        let parent_idx = orphan_values.len() + 1;
+        let parent_idx = values.len() + 1;
         orphan_sql.push_str(&format!(" AND {code_col} LIKE ${parent_idx} || '%'"));
-        orphan_values.push(Value::String(Some(parent.to_string())));
+        values.push(Value::String(Some(parent.to_string())));
     }
     orphan_sql.push_str(" GROUP BY 1");
-    for row in query_all(db, &orphan_sql, orphan_values).await? {
+    for row in query_all(db, &orphan_sql, values).await? {
         let root = row.try_get::<String>("", "root").map_err(to_svc_error)?;
-        if !existing_set.contains(root.as_str()) {
-            return Ok(0);
+        if !siblings.contains(root.as_str()) {
+            return Ok(true);
         }
     }
-
-    rewrite_siblings(db, spec, scope_value, parent, &existing, operator_id).await
+    Ok(false)
 }
 
 /// # 批量删除后压缩树形实体
@@ -1477,8 +1664,10 @@ where
     }
 
     // 防环：目标父不能是自己或自己的后代（编码前缀相同即后代）。
+    // 编码只在同一外层隔离域内唯一；跨 scope 时两边的编码没有可比性，
+    // 不能拿旧 scope 的编码前缀去判定新 scope 的父节点。
     if !target_parent.is_empty() {
-        if target_parent.starts_with(&old_code) {
+        if !scope_changed && target_parent.starts_with(&old_code) {
             return Err(invalid("不能把节点移动到它自己的子树下"));
         }
         let mut values = vec![Value::String(Some(target_parent.clone()))];

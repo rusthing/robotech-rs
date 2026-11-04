@@ -4,20 +4,31 @@
 //!
 //! - 新增：同组末尾 `max + 1`（树形按父编码追加 `001`）；
 //! - 修改：忽略客户端排序值；分组列变化时新组追加末尾、旧组后续前移；
-//! - 删除：同组后续记录前移 `−1`；
+//! - 删除：同组后续记录前移 `−1`；树形删除时同一事务内先级联删除全部子孙；
 //! - 批量删除：只对出现空洞或重复的组整组重算一次。
 //!
-//! 宏展开后会生成 4 个模块内钩子函数，并给结构体补上
-//! `#[svc(before_add = ..., before_modify = ..., after_del_by_id = ..., after_del_by_query_dto = ...)]`，
+//! 宏展开后会生成 4 个模块内钩子函数（树形为 5 个，多一个删除前级联钩子），
+//! 并给结构体补上 `#[svc(before_add = ..., before_modify = ...,
+//! before_del_by_id = ..., after_del_by_id = ..., after_del_by_query_dto = ...)]`，
 //! 因此业务代码只需要一行标注：
 //!
 //! ```ignore
 //! #[sortable(kind = "flat", table = "adm_role", group = "group_id")]
 //! pub struct AdmRoleSvc;
 //!
-//! #[sortable(kind = "tree", table = "adm_menu", scope = "app_id", parent = "parent_code")]
+//! #[sortable(
+//!     kind = "tree",
+//!     table = "adm_menu",
+//!     scope = "app_id",
+//!     parent = "parent_code",
+//!     guard = "crate::svc::menu_delete_guard",
+//! )]
 //! pub struct AdmMenuSvc;
 //! ```
+//!
+//! `guard` 只用于树形实体：删除前回调 `async fn(db, id) -> Result<(), SvcError>`，
+//! 业务层可在这里检查「节点或其子孙仍被其它实体引用」并拒绝删除；框架不感知
+//! 具体业务关联。
 //!
 //! 约定（与 `#[crud_dto]` 生成的结构体对齐）：
 //! - DTO 字段名与列名一致（`group = "group_id"` 对应 DTO 的 `group_id`）；
@@ -47,6 +58,8 @@ pub struct SortableArgs {
     parent: Option<String>,
     /// 树编码列名
     code: Option<String>,
+    /// 树形删除前的业务引用保护回调路径（`async fn(db, id) -> Result<(), SvcError>`）
+    guard: Option<String>,
     /// 平铺排序列名
     sort: Option<String>,
     /// 主键列名
@@ -70,6 +83,7 @@ impl Parse for SortableArgs {
             scope: None,
             parent: None,
             code: None,
+            guard: None,
             sort: None,
             id: None,
             spec: None,
@@ -88,6 +102,7 @@ impl Parse for SortableArgs {
                 "scope" => args.scope = Some(pair.value_string()?),
                 "parent" => args.parent = Some(pair.value_string()?),
                 "code" => args.code = Some(pair.value_string()?),
+                "guard" => args.guard = Some(pair.value_string()?),
                 "sort" => args.sort = Some(pair.value_string()?),
                 "id" => args.id = Some(pair.value_string()?),
                 "spec" => args.spec = Some(pair.value_string()?),
@@ -115,6 +130,12 @@ impl Parse for SortableArgs {
             return Err(syn::Error::new(
                 proc_macro2::Span::call_site(),
                 "sortable 的 kind 只能是 \"flat\" 或 \"tree\"",
+            ));
+        }
+        if args.guard.is_some() && args.kind != "tree" {
+            return Err(syn::Error::new(
+                proc_macro2::Span::call_site(),
+                "sortable 的 guard 只适用于 tree 实体（级联删除前的引用保护）",
             ));
         }
 
@@ -249,6 +270,20 @@ pub fn sortable_macro(args: SortableArgs, input: ItemStruct) -> TokenStream {
         }
     };
 
+    let guard_path = match &args.guard {
+        Some(path) => match syn::parse_str::<syn::Path>(path) {
+            Ok(path) => Some(path),
+            Err(err) => {
+                return syn::Error::new(
+                    proc_macro2::Span::call_site(),
+                    format!("sortable 的 guard 不是合法路径：{err}"),
+                )
+                .to_compile_error()
+            }
+        },
+        None => None,
+    };
+
     let hooks = match args.kind.as_str() {
         "flat" => flat_hooks(
             &add_dto,
@@ -267,18 +302,30 @@ pub fn sortable_macro(args: SortableArgs, input: ItemStruct) -> TokenStream {
             code_field,
             parent_field,
             scope_field,
+            guard_path.as_ref(),
             spec_path,
         ),
     };
 
-    // 生成 svc 主体：`#[svc]` 生成的 impl 里会按名字调用上面这 4 个钩子。
+    // 生成 svc 主体：`#[svc]` 生成的 impl 里会按名字调用上面这些钩子。
     // 注意属性宏无法再展开另一个属性宏，这里直接复用 svc 宏的代码生成。
-    let svc_args: crate::svc::SvcArgs = match syn::parse2(quote! {
-        before_add = sort_hooks_add,
-        before_modify = sort_hooks_modify,
-        after_del_by_id = sort_hooks_after_del_by_id,
-        after_del_by_query_dto = sort_hooks_after_del_by_query_dto
-    }) {
+    let svc_attrs = if args.kind == "tree" {
+        quote! {
+            before_add = sort_hooks_add,
+            before_modify = sort_hooks_modify,
+            before_del_by_id = sort_hooks_before_del_by_id,
+            after_del_by_id = sort_hooks_after_del_by_id,
+            after_del_by_query_dto = sort_hooks_after_del_by_query_dto
+        }
+    } else {
+        quote! {
+            before_add = sort_hooks_add,
+            before_modify = sort_hooks_modify,
+            after_del_by_id = sort_hooks_after_del_by_id,
+            after_del_by_query_dto = sort_hooks_after_del_by_query_dto
+        }
+    };
+    let svc_args: crate::svc::SvcArgs = match syn::parse2(svc_attrs) {
         Ok(args) => args,
         Err(err) => return err.to_compile_error(),
     };
@@ -409,7 +456,7 @@ fn flat_hooks(
     }
 }
 
-/// 树形实体的四个钩子
+/// 树形实体的五个钩子（新增、修改、删除前、删除后压缩、批量删除后压缩）
 fn tree_hooks(
     add_dto: &Ident,
     modify_dto: &Ident,
@@ -418,6 +465,7 @@ fn tree_hooks(
     code_field: Ident,
     parent_field: Ident,
     scope_field: Option<Ident>,
+    guard_path: Option<&syn::Path>,
     spec_path: TokenStream,
 ) -> TokenStream {
     let add_scope = match &scope_field {
@@ -446,7 +494,27 @@ fn tree_hooks(
         None => quote! { let scope: Option<i64> = None; },
     };
 
+    let guard_call = match guard_path {
+        Some(path) => quote! { #path(db, id.value()).await?; },
+        None => quote! {},
+    };
+
     quote! {
+        #[allow(clippy::result_large_err)]
+        async fn sort_hooks_before_del_by_id<C>(
+            id: ::robotech::api::U64,
+            db: &C,
+        ) -> Result<::robotech::api::U64, ::robotech::svc::SvcError>
+        where
+            C: ::sea_orm::ConnectionTrait + Sync,
+        {
+            // 业务引用保护：被其它实体引用时直接报错，不静默删除关联。
+            #guard_call
+            // 同一事务内先删全部子孙，节点本身由 svc 随后删除，删除后钩子做同父前移。
+            ::robotech::dao::sort::delete_tree_descendants(db, &#spec_path, id.value(), None).await?;
+            Ok(id)
+        }
+
         #[allow(clippy::result_large_err)]
         async fn sort_hooks_add<C>(
             mut dto: #add_dto,
