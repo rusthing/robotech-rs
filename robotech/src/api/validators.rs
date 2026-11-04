@@ -261,6 +261,10 @@ macro_rules! each_check {
             /// IPv6 地址
             ipv6 => wheel_rs::regex_utils::is_ipv6, "IPv6 地址", "IPv6 地址"
         );
+        $define!(
+            /// 区域轮廓 WKT（结构级：环闭合、每环 ≥4 点；数值范围/自相交不在文本校验内）
+            wkt_polygon => wheel_rs::regex_utils::is_wkt_polygon, "区域轮廓", "OGC WKT POLYGON/MULTIPOLYGON"
+        );
     };
 }
 
