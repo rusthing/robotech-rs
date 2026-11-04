@@ -10,17 +10,37 @@ use std::collections::HashMap;
 pub trait VariableLookup {
     /// 查一个变量；`None` 表示不存在
     fn lookup(&self, key: &str) -> Option<&str>;
+
+    /// 收集所有变量到 HashMap
+    ///
+    /// 用于需要枚举全部变量的场景（如 minijinja 引擎需要 `serde::Serialize`）。
+    /// 默认实现返回空 HashMap，适用于无法枚举的实现（如动态查询）。
+    ///
+    /// 优先级由调用方保证：先 layer 的 key 会覆盖后 layer 的同名 key。
+    fn collect_all(&self) -> HashMap<String, String> {
+        HashMap::new()
+    }
 }
 
 impl VariableLookup for HashMap<String, String> {
     fn lookup(&self, key: &str) -> Option<&str> {
         self.get(key).map(String::as_str)
     }
+
+    fn collect_all(&self) -> HashMap<String, String> {
+        self.clone()
+    }
 }
 
 impl VariableLookup for HashMap<&'static str, String> {
     fn lookup(&self, key: &str) -> Option<&str> {
         self.get(key).map(String::as_str)
+    }
+
+    fn collect_all(&self) -> HashMap<String, String> {
+        self.iter()
+            .map(|(k, v)| ((*k).to_owned(), v.clone()))
+            .collect()
     }
 }
 
@@ -54,6 +74,15 @@ impl Default for PriorityVariables<'_> {
 impl VariableLookup for PriorityVariables<'_> {
     fn lookup(&self, key: &str) -> Option<&str> {
         self.layers.iter().find_map(|layer| layer.lookup(key))
+    }
+
+    fn collect_all(&self) -> HashMap<String, String> {
+        // 从后往前合并，先 layer 的 key 覆盖后 layer 的同名 key
+        let mut result = HashMap::new();
+        for layer in self.layers.iter().rev() {
+            result.extend(layer.collect_all());
+        }
+        result
     }
 }
 

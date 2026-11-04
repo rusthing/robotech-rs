@@ -62,6 +62,7 @@ wheel-rs = "1.14.0"
 idworker = "1.4.0"
 robotech-macros = "1.17.0"
 robotech-template = { version = "1.17.0", path = "robotech-template" }
+minijinja = "2.9.0"
 
 # macro依赖
 proc-macro2 = "1.0.107"             # 提供与标准库 proc_macro 兼容但更易测试的接口

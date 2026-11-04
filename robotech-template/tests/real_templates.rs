@@ -124,7 +124,7 @@ fn position_content_floor_default() {
 
 const SOS_TITLE: &str = "定位卡 {{locatorCode}} 触发 SOS 报警";
 const SOS_CONTENT: &str = "定位卡 {{locatorCode}} 触发 SOS 报警；位置：{{floor}} 层（经度 {{lon}}，纬度 {{lat}}）；绑定目标：{{bindTarget}}；上报时间 {{triggerTimestamp}}";
-const SOS_EXT: &str = r#"{"alertId":{{alertId:json}},"eventCode":{{eventCode:json}},"locatorCode":{{locatorCode:json}},"status":{{alertStatus:json}},"lon":{{lon:json}},"lat":{{lat:json}},"floor":{{floor:json}},"unityX":{{unityX:json}},"unityY":{{unityY:json}},"unityZ":{{unityZ:json}},"bindTargetType":{{bindTargetType:json}},"bindTargetId":{{bindTargetId:json}},"triggerTimestamp":{{triggerTimestamp:json}},"positionTimestamp":{{positionTimestamp:json}}}"#;
+const SOS_EXT: &str = r#"{"alertId":{{alertId:json}},"eventCode":{{eventCode:json}},"locatorCode":{{locatorCode:json}},"lon":{{lon:json}},"lat":{{lat:json}},"floor":{{floor:json}},"unityX":{{unityX:json}},"unityY":{{unityY:json}},"unityZ":{{unityZ:json}},"bindTargetType":{{bindTargetType:json}},"bindTargetId":{{bindTargetId:json}},"triggerTimestamp":{{triggerTimestamp:json}},"positionTimestamp":{{positionTimestamp:json}}}"#;
 
 #[test]
 fn sos_templates_render() {

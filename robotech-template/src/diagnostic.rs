@@ -29,6 +29,10 @@ pub enum DiagnosticCode {
     MissingVariable { key: String },
     /// 某个过滤器执行失败，已跳过
     FilterFailed { filter: String, reason: String },
+    /// 首行声明的引擎名不在注册表里
+    UnknownEngine { name: String },
+    /// 引擎渲染失败
+    EngineRenderFailed { engine: String, reason: String },
 }
 
 /// 一条诊断
@@ -90,6 +94,15 @@ impl fmt::Display for Diagnostic {
                 f,
                 "模板变量 {} 的过滤器 {filter} 处理失败：{reason}，跳过",
                 self.placeholder
+            ),
+            DiagnosticCode::UnknownEngine { name } => write!(
+                f,
+                "模板首行声明了未知引擎 {name}（偏移 {}），可用引擎：robotech, minijinja",
+                self.offset
+            ),
+            DiagnosticCode::EngineRenderFailed { engine, reason } => write!(
+                f,
+                "模板引擎 {engine} 渲染失败：{reason}",
             ),
         }
     }

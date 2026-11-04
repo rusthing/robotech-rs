@@ -4,7 +4,18 @@
 //! 变量优先级由调用方通过 [`PriorityVariables`] 逐层传入，时区与「当前时间」
 //! 由调用方放进 [`FilterContext`]，本 crate 不读配置、不写日志、不访问数据库。
 //!
-//! ## 语法
+//! ## 多引擎支持
+//!
+//! 本 crate 支持多种模板引擎并存，通过模板首行的 `@engine: <name>` 声明选择：
+//!
+//! ```text
+//! @engine: robotech       使用内置的 robotech-template 引擎（默认）
+//! @engine: minijinja      使用 minijinja 引擎（支持 if/for/switch 等控制流）
+//! ```
+//!
+//! 没有声明时默认使用 `robotech` 引擎（向后兼容）。
+//!
+//! ### robotech 引擎语法
 //!
 //! ```text
 //! {{key}}                        原样代入
@@ -24,7 +35,25 @@
 //! `}}` 结尾（或 `${` 开头、`}` 结尾）且中间是合法变量名/过滤器链的片段才会被
 //! 识别为占位符。
 //!
-//! ## 内置过滤器
+//! ### minijinja 引擎语法
+//!
+//! minijinja 引擎支持 Jinja2 风格的控制流语法：
+//!
+//! ```text
+//! {% if status == "critical" %}
+//!   🚨 严重告警：{{name}}
+//! {% else %}
+//!   ℹ️ 通知：{{name}}
+//! {% endif %}
+//!
+//! {% for item in items %}
+//!   {{loop.index}}. {{item.name}}
+//! {% endfor %}
+//! ```
+//!
+//! 变量通过 `{{var}}` 访问，过滤器用 `|` 管道语法（如 `{{name|upper}}`）。
+//!
+//! ## 内置过滤器（robotech 引擎）
 //!
 //! | 过滤器 | 参数 | 作用 |
 //! |---|---|---|
@@ -51,14 +80,20 @@
 //! 诊断以结构化结果返回，是否告警、是否拒绝保存由调用方决定。
 
 mod diagnostic;
+mod engine;
 mod filter;
+mod header;
 mod render;
 mod source;
 mod syntax;
 mod validate;
 
 pub use diagnostic::{Diagnostic, DiagnosticCode, Severity};
+pub use engine::{
+    EngineRegistry, MinijinjaEngine, RobotechEngine, TemplateEngine, registry, render, validate,
+};
 pub use filter::{FilterContext, FilterFn, filter_names, is_known_filter};
+pub use header::{DEFAULT_ENGINE, detect_engine, parse_engine_header, split_engine_and_body};
 pub use render::{RenderOutcome, render_template};
 pub use source::{PriorityVariables, VariableLookup};
 pub use validate::{PlaceholderInfo, TemplateCheck, validate_template};

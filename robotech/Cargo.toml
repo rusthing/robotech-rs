@@ -109,4 +109,5 @@ idworker = { workspace = true, optional = true }
 wheel-rs = { workspace = true }
 
 robotech-macros = { workspace = true, optional = true }
+robotech-template = { workspace = true }
 ulid = "1.2.1"

@@ -21,6 +21,7 @@
 //! - `ro`：统一响应对象
 //! - `signal`：进程信号与 PID 文件管理（需启用 feature `app`）
 //! - `svc`：服务层基础设施（需启用 feature `app`）
+//! - `template`：模板渲染（多引擎支持：robotech / minijinja）
 //! - `tsdb`：时序数据库
 //! - `web`：Web 服务（需启用 feature `web`）
 //!
@@ -78,6 +79,7 @@ pub mod redis;
 pub mod signal;
 #[cfg(feature = "app")]
 pub mod svc;
+pub mod template;
 pub mod tsdb;
 #[cfg(feature = "web")]
 pub mod web;
