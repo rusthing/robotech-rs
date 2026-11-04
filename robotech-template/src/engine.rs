@@ -113,7 +113,7 @@ impl TemplateEngine for MinijinjaEngine {
         vars: &dyn VariableLookup,
         ctx: &FilterContext,
     ) -> RenderOutcome {
-        let mut env = minijinja::Environment::new();
+        let env = minijinja::Environment::new();
 
         // 注入全局变量
         let mut globals = HashMap::new();
@@ -132,8 +132,8 @@ impl TemplateEngine for MinijinjaEngine {
             globals.insert(k, minijinja::Value::from(v));
         }
 
-        // 添加模板并渲染
-        match env.add_template("template", template) {
+        // 编译并渲染
+        match env.template_from_str(template) {
             Ok(tmpl) => match tmpl.render(&globals) {
                 Ok(text) => RenderOutcome {
                     text,
@@ -168,9 +168,9 @@ impl TemplateEngine for MinijinjaEngine {
     }
 
     fn validate(&self, template: &str) -> TemplateCheck {
-        let mut env = minijinja::Environment::new();
+        let env = minijinja::Environment::new();
         // 尝试编译模板，检查语法错误
-        match env.compile("template", template) {
+        match env.template_from_str(template) {
             Ok(_) => TemplateCheck {
                 placeholders: Vec::new(),
                 diagnostics: Vec::new(),
