@@ -6,6 +6,7 @@ mod dic;
 mod dto;
 mod feign;
 mod log;
+mod sort;
 mod svc;
 mod vo;
 mod web;
@@ -18,6 +19,7 @@ use crate::dic::dic_macro;
 use crate::dto::{crud_dto_macro, CrudDtoArgs};
 use crate::feign::feign_macro;
 use crate::log::{log_call_macro, LogCallArgs};
+use crate::sort::{sortable_macro, SortableArgs};
 use crate::svc::{db_unwrap_macro, svc_macro, DbUnwrapArgs, SvcArgs};
 use crate::vo::{vo_macro, VoArgs};
 use crate::web::{api_doc_macro, ctrl_macro, router_macro, ApiDocArgs, CtrlArgs, RouterArgs};
@@ -261,6 +263,35 @@ pub fn svc(args: TokenStream, input: TokenStream) -> TokenStream {
     let args = parse_macro_input!(args as SvcArgs);
     let input = parse_macro_input!(input as ItemStruct);
     svc_macro(args, input).into()
+}
+
+/// 属性宏：为 `XxxSvc` 自动接上「排序值由服务端维护」的全部钩子
+///
+/// 生成 4 个模块内钩子（新增取组内末尾、修改忽略客户端排序值并按需重算新旧两组、
+/// 删除后同组前移、批量删除整组重算），并给结构体补上对应的 `#[svc(...)]`。
+/// 业务侧只需要一行标注；排序算法与 SQL 由 `robotech::dao::sort` 统一提供。
+///
+/// 支持参数：
+/// - `kind = "flat" | "tree"`（默认 `flat`）
+/// - `table = "表名"`（必填）
+/// - 平铺：`group = "分组列"`、`sort = "排序列"`、`max = 上限`
+/// - 树形：`scope = "外层隔离列"`、`parent = "父编码字段"`、`code = "树编码列"`、
+///   `max_length = 最大长度`、`max_siblings = 同父最大兄弟数`
+/// - 通用：`id = "主键列"`
+///
+/// # 使用示例
+/// ```
+/// #[sortable(kind = "flat", table = "adm_role", group = "group_id")]
+/// pub struct AdmRoleSvc;
+///
+/// #[sortable(kind = "tree", table = "adm_menu", scope = "app_id")]
+/// pub struct AdmMenuSvc;
+/// ```
+#[proc_macro_attribute]
+pub fn sortable(args: TokenStream, input: TokenStream) -> TokenStream {
+    let args = parse_macro_input!(args as SortableArgs);
+    let input = parse_macro_input!(input as ItemStruct);
+    sortable_macro(args, input).into()
 }
 
 /// 属性宏：为以 `Ctrl` 结尾的结构体自动生成标准 CRUD Web 处理器

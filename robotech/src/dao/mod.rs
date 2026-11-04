@@ -27,6 +27,8 @@ pub mod eo;
 #[cfg(feature = "db")]
 mod foreign_keys_utils;
 #[cfg(feature = "db")]
+pub mod sort;
+#[cfg(feature = "db")]
 mod tree_code_utils;
 #[cfg(feature = "db")]
 mod unique_keys_utils;
