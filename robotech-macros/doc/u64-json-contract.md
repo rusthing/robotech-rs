@@ -3,7 +3,7 @@
 对外 JSON 里的 `u64`（主键、关联 id、毫秒时间戳、计数）统一输出字符串。原因是浏览器
 `JSON.parse` 会把超过 `2^53-1` 的数字静默舍入；现网 idworker 的 19 位 id 已超过该上限。
 
-## 一、宏结构体的写法
+## 一、有 mo 实体的 VO / DTO：走宏
 
 `#[vo]` / `#[crud_dto]` 结构体的字段写裸 `u64` / `Option<u64>`：
 
@@ -24,7 +24,8 @@ pub struct DtwRegionVo {
 
 映射范围（HEAD）：`u8` / `u16` / `u32` / `u64` / `u128` 以及 `Option<同名类型>`。
 `Vec<u64>`、`Option<Vec<u64>>`、`i64` 不在 `map_unsigned_type` 内，宏不会改写这些字段的
-类型；宏结构体里的这类字段仍按原类型序列化。需要字符串数组时，当前没有框架级通道。
+类型；宏结构体里的这类字段仍按原类型序列化。非实体结构里的 ID 列表用 `Vec<U64>`
+（`wheel_rs::serde` 只有单值 helper，没有 u64 向量 helper）。
 
 ## 二、`U64` 的行为
 
@@ -38,15 +39,19 @@ pub struct DtwRegionVo {
 
 分页信封 `PageRx` 的 `page_num` / `total` 也是 `U64`，输出字符串。
 
-## 三、手写结构体
+## 三、非实体结构：手挂 wheel helper
 
 不套宏的结构体（实时计算结果、聚合结果、跨服务载荷、导入结果等）没有 mo 实体，
 `#[vo]` / `#[crud_dto]` 无法生成，按仓库既有写法给字段挂
-`wheel_rs::serde::{u64_serde, u64_option_serde}`：
+`wheel_rs::serde::{u64_serde, u64_option_serde}`，ID 列表用 `Vec<U64>`：
 
 - `robotech/src/api/ro/ro.rs` 的 `timestamp`；
 - `adm-api/src/vo/adm_auth_vo.rs` 的 `login_log_id`；
-- `adm-api/src/vo/adm_dashboard_vo.rs`。
+- `adm-api/src/vo/adm_dashboard_vo.rs`；
+- `dtw-api/src/vo/dtw_region_import_vo.rs`、`dtw_region_occupancy_vo.rs`、
+  `dtw-api/src/dto/dtw_region_occupancy_query_dto.rs`。
+
+这类文件头部要注明不套宏的原因（照 `dtw_region_locate_vo`、`adm_auth_vo` 的写法）。
 
 优先用宏的原因：宏一次管住请求与响应两个方向，不需要逐字段加属性；`#[vo]` 展开后本身也
 `use wheel_rs::serde::{u64_serde, u64_option_serde}`，两条通道行为一致。
