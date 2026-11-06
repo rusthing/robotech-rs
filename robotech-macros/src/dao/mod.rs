@@ -212,6 +212,8 @@ pub(super) fn dao_macro(args: DaoArgs, input: ItemStruct) -> TokenStream {
     struct_name_split.pop();
     let module_name = struct_name_split.join("_").to_lowercase();
     let module = format_ident!("{module_name}");
+    // 数据范围注入要用的表名字面量：单独留一份，避免后面 table_name 被移动
+    let scope_table_name = module_name.clone();
     let table_name = module_name;
 
     // 生成 use 导入
@@ -298,6 +300,26 @@ pub(super) fn dao_macro(args: DaoArgs, input: ItemStruct) -> TokenStream {
 
     // 生成成员变量
     let mut generated_members = Vec::new();
+
+    // 数据范围注入：机制在框架、语义在业务。未注册策略时全部透明。
+    generated_members.push(quote! {
+        /// # 把业务注册的数据范围条件叠加到查询条件
+        ///
+        /// 由 `#[dao]` 宏生成，表名按实体模块名推导，业务侧无需声明。
+        fn __data_scope_condition(condition: Condition) -> Condition {
+            robotech::dao::data_scope_condition(#scope_table_name, condition)
+        }
+
+        /// # 只取数据范围条件（按主键查询等没有原条件的路径）
+        fn __data_scope_only() -> Condition {
+            robotech::dao::data_scope_only(#scope_table_name)
+        }
+
+        /// # 当前表是否启用了数据范围
+        fn __has_data_scope() -> bool {
+            robotech::dao::has_data_scope(#scope_table_name)
+        }
+    });
 
     // 生成 LIKE_COLUMNS
     generated_members.push(quote! {
@@ -391,6 +413,27 @@ pub(super) fn dao_macro(args: DaoArgs, input: ItemStruct) -> TokenStream {
             where
                 C: ConnectionTrait,
             {
+                // 数据范围：目标行不在可见范围内时直接拒绝，避免绕过列表过滤改数据
+                let __scope_id = match &active_model.id {
+                    ActiveValue::Set(v) | ActiveValue::Unchanged(v) => *v,
+                    ActiveValue::NotSet => {
+                        return Err(DaoError::Runtime(::anyhow::anyhow!(
+                            "数据范围校验需要 id"
+                        )));
+                    }
+                };
+                if Self::__has_data_scope() {
+                    let __allowed = Entity::find_by_id(__scope_id)
+                        .filter(Self::__data_scope_only())
+                        .one(db)
+                        .await
+                        .map_err(DaoError::parse_db_err)?;
+                    if __allowed.is_none() {
+                        return Err(DaoError::Runtime(::anyhow::anyhow!(
+                            "目标记录不在数据范围内，禁止修改"
+                        )));
+                    }
+                }
                 // 保护创建者信息不能被修改
                 active_model.creater_id = ActiveValue::NotSet;
                 active_model.create_ms = ActiveValue::NotSet;
@@ -432,6 +475,27 @@ pub(super) fn dao_macro(args: DaoArgs, input: ItemStruct) -> TokenStream {
         where
             C: ConnectionTrait,
         {
+            // 数据范围：与 update 同口径，越权删除直接拒绝
+            let __scope_id = match &active_model.id {
+                ActiveValue::Set(v) | ActiveValue::Unchanged(v) => *v,
+                ActiveValue::NotSet => {
+                    return Err(DaoError::Runtime(::anyhow::anyhow!(
+                        "数据范围校验需要 id"
+                    )));
+                }
+            };
+            if Self::__has_data_scope() {
+                let __allowed = Entity::find_by_id(__scope_id)
+                    .filter(Self::__data_scope_only())
+                    .one(db)
+                    .await
+                    .map_err(DaoError::parse_db_err)?;
+                if __allowed.is_none() {
+                    return Err(DaoError::Runtime(::anyhow::anyhow!(
+                        "目标记录不在数据范围内，禁止删除"
+                    )));
+                }
+            }
             active_model
                 .delete(db)
                 .await
@@ -482,10 +546,14 @@ pub(super) fn dao_macro(args: DaoArgs, input: ItemStruct) -> TokenStream {
                 use sea_orm::{ColumnTrait, Update};
                 // 原子条件更新：UPDATE ... SET <Set 字段> WHERE id = ? AND update_ms < ?
                 // `.set()` 只会把 ActiveValue::Set 的字段写进 SET 子句
-                let res = Update::many(Entity)
+                let mut __update = Update::many(Entity)
                     .set(active_model)
                     .filter(Column::Id.eq(id_val))
-                    .filter(Column::UpdateMs.lt(version))
+                    .filter(Column::UpdateMs.lt(version));
+                if Self::__has_data_scope() {
+                    __update = __update.filter(Self::__data_scope_only());
+                }
+                let res = __update
                     .exec(db)
                     .await
                     .map_err(DaoError::parse_db_err)?;
@@ -515,7 +583,7 @@ pub(super) fn dao_macro(args: DaoArgs, input: ItemStruct) -> TokenStream {
                 C: ConnectionTrait,
             {
                 Entity::delete_many()
-                    .filter(condition)
+                    .filter(Self::__data_scope_condition(condition))
                     .exec(db)
                     .await
                     .map_err(|e| DaoError::parse_db_err(e))
@@ -541,7 +609,11 @@ pub(super) fn dao_macro(args: DaoArgs, input: ItemStruct) -> TokenStream {
                 C: ConnectionTrait,
                 M: FromQueryResult,
             {
-                Entity::find_by_id(id.value() as i64)
+                let mut __query = Entity::find_by_id(id.value() as i64);
+                if Self::__has_data_scope() {
+                    __query = __query.filter(Self::__data_scope_only());
+                }
+                __query
                     .into_model::<M>()
                     .one(db)
                     .await
@@ -569,7 +641,7 @@ pub(super) fn dao_macro(args: DaoArgs, input: ItemStruct) -> TokenStream {
             M: FromQueryResult,
         {
             Entity::find()
-                .filter(condition)
+                .filter(Self::__data_scope_condition(condition))
                 .into_model::<M>()
                 .one(db)
                 .await
@@ -597,7 +669,7 @@ pub(super) fn dao_macro(args: DaoArgs, input: ItemStruct) -> TokenStream {
             C: ConnectionTrait,
             M: FromQueryResult,
         {
-            add_order_by(Entity::find().filter(condition), order_by)?
+            add_order_by(Entity::find().filter(Self::__data_scope_condition(condition)), order_by)?
                 .into_model::<M>()
                 .all(db)
                 .await
@@ -637,7 +709,7 @@ pub(super) fn dao_macro(args: DaoArgs, input: ItemStruct) -> TokenStream {
                 page_num = U64(1);
             }
             if page_size.value() < 1 { page_size = U64(1); }
-            let paginator = add_order_by(Entity::find().filter(condition), order_by)?
+            let paginator = add_order_by(Entity::find().filter(Self::__data_scope_condition(condition)), order_by)?
                 .into_model::<M>()
                 .paginate(db, page_size.value());
             let total  = paginator.num_items().await.map_err(DaoError::from)?;
@@ -707,8 +779,11 @@ pub(super) fn dao_macro(args: DaoArgs, input: ItemStruct) -> TokenStream {
             where
                 C: ConnectionTrait,
             {
-                Entity::load()
-                    .filter_by_id(id.value() as i64)
+                let mut __query = Entity::load().filter_by_id(id.value() as i64);
+                if Self::__has_data_scope() {
+                    __query = __query.filter(Self::__data_scope_only());
+                }
+                __query
                     #(#find_with_related_calls)*
                     .one(db)
                     .await
@@ -735,7 +810,7 @@ pub(super) fn dao_macro(args: DaoArgs, input: ItemStruct) -> TokenStream {
             C: ConnectionTrait,
         {
             Entity::load()
-                .filter(condition)
+                .filter(Self::__data_scope_condition(condition))
                 #(#find_with_related_calls)*
                 .one(db)
                 .await
@@ -762,7 +837,7 @@ pub(super) fn dao_macro(args: DaoArgs, input: ItemStruct) -> TokenStream {
         where
             C: ConnectionTrait,
         {
-            add_order_by(Entity::load().filter(condition), order_by)?
+            add_order_by(Entity::load().filter(Self::__data_scope_condition(condition)), order_by)?
                 #(#find_with_related_calls)*
                 .all(db)
                 .await
@@ -801,7 +876,7 @@ pub(super) fn dao_macro(args: DaoArgs, input: ItemStruct) -> TokenStream {
                 page_num = U64(1);
             }
             if page_size.value() < 1 { page_size = U64(1); }
-            let paginator = add_order_by(Entity::load().filter(condition), order_by)?
+            let paginator = add_order_by(Entity::load().filter(Self::__data_scope_condition(condition)), order_by)?
                 #(#find_with_related_calls)*
                 .paginate(db, page_size.value());
             let total  = paginator.num_items().await.map_err(DaoError::from)?;
@@ -848,7 +923,7 @@ pub(super) fn dao_macro(args: DaoArgs, input: ItemStruct) -> TokenStream {
             {
                 let condition = build_search_condition(params, Self::LIKE_COLUMNS);
                 Entity::find_by_id(id.value() as i64)
-                    .filter(condition)
+                    .filter(Self::__data_scope_condition(condition))
                     .into_model::<M>()
                     .one(db)
                     .await
@@ -880,7 +955,7 @@ pub(super) fn dao_macro(args: DaoArgs, input: ItemStruct) -> TokenStream {
             {
                 let condition = build_search_condition(params, Self::LIKE_COLUMNS);
                 Entity::find()
-                    .filter(condition)
+                    .filter(Self::__data_scope_condition(condition))
                     .into_model::<M>()
                     .one(db)
                     .await
@@ -912,7 +987,7 @@ pub(super) fn dao_macro(args: DaoArgs, input: ItemStruct) -> TokenStream {
             {
                 let condition = build_search_condition(params, Self::LIKE_COLUMNS);
                 params
-                    .apply_order_by::<Column, _>(Entity::find().filter(condition))
+                    .apply_order_by::<Column, _>(Entity::find().filter(Self::__data_scope_condition(condition)))
                     .into_model::<M>()
                     .all(db)
                     .await
@@ -946,7 +1021,7 @@ pub(super) fn dao_macro(args: DaoArgs, input: ItemStruct) -> TokenStream {
                 let page_num = params.page();
                 let page_size = params.size();
                 let paginator = params
-                    .apply_order_by::<Column, _>(Entity::find().filter(condition))
+                    .apply_order_by::<Column, _>(Entity::find().filter(Self::__data_scope_condition(condition)))
                     .into_model::<M>()
                     .paginate(db, page_size.value());
                 let total = paginator.num_items().await.map_err(DaoError::from)?;
@@ -994,7 +1069,7 @@ pub(super) fn dao_macro(args: DaoArgs, input: ItemStruct) -> TokenStream {
                 let condition = build_search_condition(params, Self::LIKE_COLUMNS);
                 Entity::load()
                     .filter_by_id(id.value() as i64)
-                    .filter(condition)
+                    .filter(Self::__data_scope_condition(condition))
                     #(#find_with_related_calls)*
                     .one(db)
                     .await
@@ -1025,7 +1100,7 @@ pub(super) fn dao_macro(args: DaoArgs, input: ItemStruct) -> TokenStream {
             {
                 let condition = build_search_condition(params, Self::LIKE_COLUMNS);
                 Entity::load()
-                    .filter(condition)
+                    .filter(Self::__data_scope_condition(condition))
                     #(#find_with_related_calls)*
                     .one(db)
                     .await
@@ -1056,7 +1131,7 @@ pub(super) fn dao_macro(args: DaoArgs, input: ItemStruct) -> TokenStream {
             {
                 let condition = build_search_condition(params, Self::LIKE_COLUMNS);
                 params
-                    .apply_order_by::<Column, _>(Entity::load().filter(condition))
+                    .apply_order_by::<Column, _>(Entity::load().filter(Self::__data_scope_condition(condition)))
                     #(#find_with_related_calls)*
                     .all(db)
                     .await
@@ -1089,7 +1164,7 @@ pub(super) fn dao_macro(args: DaoArgs, input: ItemStruct) -> TokenStream {
                 let page_num = params.page();
                 let page_size = params.size();
                 let paginator = params
-                    .apply_order_by::<Column, _>(Entity::load().filter(condition))
+                    .apply_order_by::<Column, _>(Entity::load().filter(Self::__data_scope_condition(condition)))
                     #(#find_with_related_calls)*
                     .paginate(db, page_size.value());
                 let total = paginator.num_items().await.map_err(DaoError::from)?;
