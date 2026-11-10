@@ -6,12 +6,15 @@
 //! [refresh]
 //! # 订阅探活间隔，支持 humantime 写法（15s / 1m / 500ms）
 //! probe-interval = "15s"
+//! # 兜底全量重建间隔：即使没收到任何刷新信号，也按这个间隔执行一次动作。
+//! # 0s 表示关闭兜底（只靠信号驱动）。
+//! rebuild-interval = "60s"
 //! ```
 //!
 //! 配置在应用配置加载与热更新时由 [`load_config`] 写入全局，
 //! 订阅守护任务每轮读取一次，因此改配置后下一轮探活即生效，无需重启进程。
 //!
-//! 未配置该段时使用默认值（15 秒）。
+//! 未配置该段时使用默认值（探活 15 秒、兜底重建 60 秒）。
 
 use arc_swap::ArcSwapOption;
 use serde::{Deserialize, Serialize};
@@ -28,6 +31,13 @@ pub const LEGACY_LOCAL_CACHE_CONFIG_KEY: &str = "local-cache";
 
 /// 默认探活间隔
 const DEFAULT_PROBE_INTERVAL: Duration = Duration::from_secs(15);
+
+/// 默认兜底全量重建间隔
+///
+/// 刷新信号允许丢，但「发布侧漏发」「信号被别的 Stream 吞掉」「写入根本没
+/// 走通知」这类问题不会触发 consumer 重建，探活看到的仍是一切正常。周期性
+/// 执行一次全量重建，把这类静默不一致限制在一个间隔内。
+const DEFAULT_REBUILD_INTERVAL: Duration = Duration::from_secs(60);
 
 /// 探活间隔下限
 ///
@@ -46,12 +56,19 @@ pub struct RefreshConfig {
     /// 并立即执行一次刷新动作。
     #[serde(with = "duration_serde")]
     pub probe_interval: Duration,
+    /// 兜底全量重建间隔
+    ///
+    /// 订阅正常但始终没收到刷新信号时，也按这个间隔执行一次动作，防止缓存
+    /// 长期停在旧快照。`0s` 关闭兜底，只靠信号驱动。
+    #[serde(with = "duration_serde")]
+    pub rebuild_interval: Duration,
 }
 
 impl Default for RefreshConfig {
     fn default() -> Self {
         Self {
             probe_interval: DEFAULT_PROBE_INTERVAL,
+            rebuild_interval: DEFAULT_REBUILD_INTERVAL,
         }
     }
 }
@@ -60,6 +77,18 @@ impl RefreshConfig {
     /// 实际生效的探活间隔（低于下限时按下限返回）
     pub fn effective_probe_interval(&self) -> Duration {
         self.probe_interval.max(MIN_PROBE_INTERVAL)
+    }
+
+    /// 实际生效的兜底重建间隔
+    ///
+    /// `0s` 表示关闭；其余值与探活间隔共用下限，避免配成 1ms 让守护任务
+    /// 反复全量查库。
+    pub fn effective_rebuild_interval(&self) -> Option<Duration> {
+        if self.rebuild_interval.is_zero() {
+            None
+        } else {
+            Some(self.rebuild_interval.max(MIN_PROBE_INTERVAL))
+        }
     }
 }
 
@@ -162,5 +191,32 @@ mod tests {
     fn probe_interval_has_lower_bound() {
         let cfg = parse("[refresh]\nprobe-interval = \"0s\"\n");
         assert_eq!(cfg.effective_probe_interval(), MIN_PROBE_INTERVAL);
+    }
+
+    #[test]
+    fn rebuild_interval_defaults_to_60s() {
+        assert_eq!(
+            RefreshConfig::default().rebuild_interval,
+            Duration::from_secs(60)
+        );
+        assert_eq!(parse("[refresh]").rebuild_interval, Duration::from_secs(60));
+    }
+
+    #[test]
+    fn rebuild_interval_can_be_disabled_or_clamped() {
+        let disabled = parse("[refresh]\nrebuild-interval = \"0s\"\n");
+        assert_eq!(disabled.effective_rebuild_interval(), None);
+
+        let clamped = parse("[refresh]\nrebuild-interval = \"200ms\"\n");
+        assert_eq!(
+            clamped.effective_rebuild_interval(),
+            Some(MIN_PROBE_INTERVAL)
+        );
+
+        let configured = parse("[refresh]\nrebuild-interval = \"5m\"\n");
+        assert_eq!(
+            configured.effective_rebuild_interval(),
+            Some(Duration::from_secs(300))
+        );
     }
 }

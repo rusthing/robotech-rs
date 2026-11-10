@@ -181,13 +181,19 @@ where
 
 /// # 订阅守护任务
 ///
-/// 每轮做两件事：
+/// 每轮做三件事：
 /// 1. 检查客户端订阅任务是否已退出（`handle.is_finished()`）；
-/// 2. 探活服务端 consumer 是否还在。
+/// 2. 探活服务端 consumer 是否还在；
+/// 3. 即便订阅健全，也按 `[refresh] rebuild-interval` 周期性执行一次 `handler`。
 ///
-/// 任一不成立就重建订阅并立即执行一次 `handler`。两个检查缺一不可：
+/// 前两项任一不成立就重建订阅并立即执行一次 `handler`，两个检查缺一不可：
 /// consumer 还在但消费任务已退出时，只看服务端会误判为「一切正常」，
 /// 而实际上已经没有人在收消息了。
+///
+/// 第三项兜的是「订阅一切正常、但根本没有信号」的情况：发布侧漏发通知、
+/// 信号被别的 Stream 吞掉、数据由外部写入等，都不会让 consumer 消失，
+/// 光靠探活永远发现不了，缓存会一直停在旧快照。动作是全量重建，重复执行
+/// 幂等；`rebuild-interval = "0s"` 可关闭。
 fn spawn_watchdog<H, Fut>(
     subject: RefreshSubject,
     stream_config: jetstream::stream::Config,
@@ -203,19 +209,25 @@ where
 
     tokio::spawn(async move {
         let mut handle = initial_handle;
+        let mut last_rebuild = tokio::time::Instant::now();
 
         loop {
             // 每轮取一次，配置热更新后下一轮即生效
-            let probe_interval = get_refresh_config().effective_probe_interval();
+            let config = get_refresh_config();
+            let probe_interval = config.effective_probe_interval();
+            let rebuild_interval = config.effective_rebuild_interval();
             tokio::time::sleep(probe_interval).await;
 
+            let mut needs_resubscribe = false;
             if handle.is_finished() {
                 warn!("刷新订阅任务已退出，重建订阅 (consumer={consumer_name})");
+                needs_resubscribe = true;
             } else {
                 match consumer_alive(&stream_config, &consumer_name).await {
-                    Ok(true) => continue,
+                    Ok(true) => {}
                     Ok(false) => {
                         warn!("刷新消费者 {consumer_name} 已丢失，重建订阅");
+                        needs_resubscribe = true;
                     }
                     Err(e) => {
                         warn!("刷新消费者探活失败，稍后重试: {e}");
@@ -224,26 +236,41 @@ where
                 }
             }
 
-            handle.abort();
+            if needs_resubscribe {
+                handle.abort();
 
-            match open_subscription(
-                &subject,
-                stream_config.clone(),
-                consumer_config.clone(),
-                Arc::clone(&handler),
-            )
-            .await
-            {
-                Ok(new_handle) => {
-                    handle = new_handle;
-                    info!("刷新订阅已重建 (consumer={consumer_name})");
+                match open_subscription(
+                    &subject,
+                    stream_config.clone(),
+                    consumer_config.clone(),
+                    Arc::clone(&handler),
+                )
+                .await
+                {
+                    Ok(new_handle) => {
+                        handle = new_handle;
+                        info!("刷新订阅已重建 (consumer={consumer_name})");
 
-                    // 中断期间发出的信号已经丢了，直接补一次刷新
-                    if let Err(e) = handler().await {
-                        error!("重建后补刷新失败: {e}");
+                        // 中断期间发出的信号已经丢了，直接补一次刷新
+                        if let Err(e) = handler().await {
+                            error!("重建后补刷新失败: {e}");
+                        }
+                        last_rebuild = tokio::time::Instant::now();
                     }
+                    Err(e) => error!("重建刷新订阅失败，下一轮重试: {e}"),
                 }
-                Err(e) => error!("重建刷新订阅失败，下一轮重试: {e}"),
+                continue;
+            }
+
+            // 订阅健全但长期没有信号：周期性全量重建，把「发布侧漏发」这类
+            // 静默不一致限制在一个间隔内。重建是幂等的，与信号重复执行无副作用。
+            if let Some(interval) = rebuild_interval
+                && last_rebuild.elapsed() >= interval
+            {
+                if let Err(e) = handler().await {
+                    error!("刷新订阅兜底重建失败: {e}");
+                }
+                last_rebuild = tokio::time::Instant::now();
             }
         }
     })

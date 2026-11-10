@@ -189,15 +189,19 @@ fn resolve_hook(
 
 /// `after_write` 快捷方式的通知调用
 ///
-/// 只在方法没有自己的 `after_<method>` 时生成，与 [`resolve_hook`] 的
-/// 「单方法钩子优先于快捷方式」保持一致，避免两者叠加触发两次。
+/// 与事务内的 `after_<method>` 业务钩子是**两件独立的事**：后者参与事务、
+/// 可以改写返回值（如区域新增后重算父子关系），前者是提交后的一次无参副作用
+/// 通知（如发布缓存刷新信号）。两者并不互斥，不能因为某个方法配了 `after_add`
+/// 就把 `after_write` 吞掉——否则像 `DtwRegionSvc` 这样同时需要「重算区域树」
+/// 和「广播刷新」的服务，`add` / `modify`（以及由它们支撑的 `upsert`）会永远
+/// 不发信号，各节点缓存一直停在启动时的快照上。
+///
+/// `resolve_hook` 对 `after_` 调用固定传 `is_write = false`，不会生成
+/// `after_write` fallback，因此这里无条件生成也**不会重复触发**。
 ///
 /// 这段代码放在写方法的**事务提交之后**：刷新信号若在提交前发出，收到信号的
 /// 节点会读到未提交的旧数据并缓存下来，而信号已经消费掉，缓存就永久是旧的。
-fn write_notify(args: &SvcArgs, method_name: &str) -> TokenStream {
-    if args.after.contains_key(method_name) {
-        return quote! {};
-    }
+fn write_notify(args: &SvcArgs) -> TokenStream {
     match &args.after_write {
         Some(f) => quote! { let _ = #f().await; },
         None => quote! {},
@@ -261,7 +265,7 @@ pub(crate) fn svc_macro(args: SvcArgs, input: ItemStruct) -> TokenStream {
         let before_call = resolve_hook("add", is_write, &args.before, &args.before_write, Some(quote! { add_dto }), None, true);
         // 事务内的钩子只走单方法 after_add；after_write 快捷方式改在提交后调用
         let after_call = resolve_hook("add", false, &args.after, &args.after_write, Some(quote! { one }), Some(quote! { add_dto }), true);
-        let after_commit = write_notify(&args, "add");
+        let after_commit = write_notify(&args);
         generated_methods.push(quote! {
         /// # 添加新记录
         ///
@@ -328,7 +332,7 @@ pub(crate) fn svc_macro(args: SvcArgs, input: ItemStruct) -> TokenStream {
         let is_write = WRITE_METHODS.contains(&"modify");
         let before_call = resolve_hook("modify", is_write, &args.before, &args.before_write, Some(quote! { modify_dto }), None, true);
         let after_call = resolve_hook("modify", false, &args.after, &args.after_write, Some(quote! { one }), Some(quote! { modify_dto }), true);
-        let after_commit = write_notify(&args, "modify");
+        let after_commit = write_notify(&args);
         generated_methods.push(quote! {
         /// # 修改记录
         ///
@@ -543,7 +547,7 @@ pub(crate) fn svc_macro(args: SvcArgs, input: ItemStruct) -> TokenStream {
         let is_write = WRITE_METHODS.contains(&"del_by_id");
         let before_call = resolve_hook("del_by_id", is_write, &args.before, &args.before_write, Some(quote! { id }), None, true);
         let after_call = resolve_hook("del_by_id", false, &args.after, &args.after_write, Some(quote! { one }), Some(quote! { id }), true);
-        let after_commit = write_notify(&args, "del_by_id");
+        let after_commit = write_notify(&args);
         generated_methods.push(quote! {
         /// # 删除记录
         ///
@@ -627,7 +631,7 @@ pub(crate) fn svc_macro(args: SvcArgs, input: ItemStruct) -> TokenStream {
         let is_write = WRITE_METHODS.contains(&"del_by_query_dto");
         let before_call = resolve_hook("del_by_query_dto", is_write, &args.before, &args.before_write, Some(quote! { dto }), None, true);
         let after_call = resolve_hook("del_by_query_dto", false, &args.after, &args.after_write, Some(quote! { rows_affected }), Some(quote! { dto }), true);
-        let after_commit = write_notify(&args, "del_by_query_dto");
+        let after_commit = write_notify(&args);
         generated_methods.push(quote! {
         /// # 删除记录
         ///
@@ -1370,4 +1374,57 @@ pub(crate) fn svc_macro(args: SvcArgs, input: ItemStruct) -> TokenStream {
     // println!("Full expanded code:\n{expanded}");
 
     TokenStream::from(expanded)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn svc_args(after_write: Option<&str>, after_methods: &[&str]) -> SvcArgs {
+        SvcArgs {
+            skip: HashSet::new(),
+            list_vo: None,
+            before_write: None,
+            after_write: after_write.map(|p| syn::parse_str(p).unwrap()),
+            before: HashMap::new(),
+            after: after_methods
+                .iter()
+                .map(|m| {
+                    (
+                        (*m).to_string(),
+                        syn::parse_str::<syn::Path>("transaction_hook").unwrap(),
+                    )
+                })
+                .collect(),
+        }
+    }
+
+    /// 回归：`DtwRegionSvc` 同时挂 `after_add` / `after_modify` / `after_write`，
+    /// 过去 `write_notify` 会因单方法钩子存在而返回空，区域写入后永远不发刷新
+    /// 信号，各节点缓存停在启动快照，报警模拟的区域下拉因此为空。
+    #[test]
+    fn after_write_is_not_shadowed_by_per_method_hooks() {
+        let args = svc_args(
+            Some("crate::cache::on_region_cache_refresh"),
+            &["add", "modify"],
+        );
+        let code = write_notify(&args).to_string();
+        assert!(code.contains("on_region_cache_refresh"), "{code}");
+        assert!(code.contains("await"), "{code}");
+        // 事务内的单方法钩子仍由 resolve_hook 生成，这里不能顺带调它
+        assert!(!code.contains("transaction_hook"), "{code}");
+    }
+
+    #[test]
+    fn after_write_without_per_method_hooks_still_notifies() {
+        let args = svc_args(Some("on_message_cache_refresh"), &[]);
+        let code = write_notify(&args).to_string();
+        assert!(code.contains("on_message_cache_refresh"), "{code}");
+    }
+
+    #[test]
+    fn no_after_write_generates_no_notification() {
+        let args = svc_args(None, &["add"]);
+        assert!(write_notify(&args).is_empty());
+    }
 }
