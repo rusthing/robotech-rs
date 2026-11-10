@@ -1,7 +1,7 @@
 use crate::micro_svc::hub_client::discover_service;
 use crate::micro_svc::ServiceInstance;
 use arc_swap::ArcSwap;
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Mutex, Weak};
 use std::time::Duration;
 use tokio::task::JoinHandle;
 use tracing::{info, warn};
@@ -52,11 +52,14 @@ impl ServiceDiscovery {
         }
     }
 
-    /// 首次加载实例列表；失败时返回错误。
+    /// 立即重新拉取一次实例列表，原子替换缓存并返回新快照。
+    ///
+    /// 供 `init`、后台刷新循环，以及「缓存为空时来了真实请求」三条路径共用；
+    /// 失败时保留旧列表（不清空），避免一次注册中心抖动把好实例全抹掉。
     ///
     /// ## 错误
     /// 后端注册中心不可用或未配置时返回 `CfgError`。
-    pub async fn init(&self) -> Result<(), crate::cfg::CfgError> {
+    pub async fn refresh(&self) -> Result<Arc<Vec<ServiceInstance>>, crate::cfg::CfgError> {
         let instances =
             discover_service(&self.svc_name, self.namespace.clone(), self.group.clone()).await?;
         info!(
@@ -64,8 +67,22 @@ impl ServiceDiscovery {
             self.svc_name,
             instances.len()
         );
-        self.instances.store(Arc::new(instances));
-        Ok(())
+        let snapshot = Arc::new(instances);
+        self.instances.store(Arc::clone(&snapshot));
+        Ok(snapshot)
+    }
+
+    /// 首次加载实例列表；失败时返回错误。
+    ///
+    /// ## 错误
+    /// 后端注册中心不可用或未配置时返回 `CfgError`。
+    pub async fn init(&self) -> Result<(), crate::cfg::CfgError> {
+        self.refresh().await.map(|_| ())
+    }
+
+    /// 注册中心里查询用的服务名（不含 namespace/group 前缀），仅用于日志与错误信息。
+    pub fn svc_name(&self) -> &str {
+        &self.svc_name
     }
 
     /// 返回当前缓存的实例列表快照。
@@ -75,29 +92,30 @@ impl ServiceDiscovery {
 
     /// 启动后台刷新任务，按 `refresh_interval` 周期重新拉取实例列表。
     ///
+    /// 只持有 [`Weak`]：配置热更新重建 API 客户端后，旧客户端一旦被释放，
+    /// 任务在下个周期自行退出。用 `Arc` 的话任务会自己把 `ServiceDiscovery`
+    /// 撑住，`Drop` 里的 `abort()` 永远没机会执行——生产上表现为改对了服务名，
+    /// 日志里旧名字的「refreshed 0 instances」还每 30 秒刷一次，永不停止。
+    ///
     /// 刷新失败仅记录告警，不中断循环；任务句柄保存在内部，
     /// `ServiceDiscovery` 被 drop 时自动终止。
     pub fn start_refresh_loop(self: &Arc<Self>) {
-        let this = Arc::clone(self);
+        let weak: Weak<Self> = Arc::downgrade(self);
         let svc_name = self.svc_name.clone();
-        let namespace = self.namespace.clone();
-        let group = self.group.clone();
         let interval = self.refresh_interval;
         let join_handle = tokio::spawn(async move {
             loop {
                 tokio::time::sleep(interval).await;
-                match discover_service(&svc_name, namespace.clone(), group.clone()).await {
-                    Ok(instances) => {
-                        info!(
-                            "service discovery: {} refreshed {} instances",
-                            svc_name,
-                            instances.len()
-                        );
-                        this.instances.store(Arc::new(instances));
-                    }
-                    Err(e) => {
-                        warn!("service discovery: {} refresh failed: {:?}", svc_name, e);
-                    }
+                // 每轮只在 refresh 期间短暂持有强引用，睡眠期间不占着客户端
+                let Some(this) = weak.upgrade() else {
+                    info!(
+                        "service discovery: {} client released, refresh loop stopped",
+                        svc_name
+                    );
+                    break;
+                };
+                if let Err(e) = this.refresh().await {
+                    warn!("service discovery: {} refresh failed: {:?}", svc_name, e);
                 }
             }
         });

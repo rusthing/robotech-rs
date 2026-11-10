@@ -14,19 +14,7 @@ use std::collections::HashMap;
 use std::fmt::Debug;
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
-use thiserror::Error;
-use tracing::warn;
-
-/// Feign 调用过程中的错误。
-#[derive(Debug, Error)]
-pub enum FeignError {
-    /// 服务发现成功但没有可用实例（实例列表为空或全部处于冷却期）
-    #[error("no available service instance")]
-    NoAvailableInstance,
-    /// 服务发现失败
-    #[error("service discovery failed: {0}")]
-    Discovery(String),
-}
+use tracing::{info, warn};
 
 #[derive(Debug, Clone)]
 struct FailureRecord {
@@ -118,6 +106,25 @@ impl FailureTracker {
 
     fn record_success(&mut self, instance_id: &str) {
         self.records.remove(instance_id);
+    }
+
+    /// 只读判断：实例是否仍在冷却期（不触发 half-open 探针）
+    ///
+    /// `is_available` 会在冷却到期时顺手把 `probe_in_flight` 置位，
+    /// 那是「准备发请求」时才该有的副作用；拼错误信息时只需要读，不能改状态。
+    fn is_cooling(&self, instance_id: &str, now: Instant) -> bool {
+        self.records
+            .get(instance_id)
+            .and_then(|record| record.cooldown_until)
+            .is_some_and(|until| now < until)
+    }
+
+    /// 给定实例里有多少个还在冷却
+    fn cooling_count(&self, instances: &[ServiceInstance], now: Instant) -> usize {
+        instances
+            .iter()
+            .filter(|instance| self.is_cooling(&instance.instance_id, now))
+            .count()
     }
 }
 
@@ -258,6 +265,79 @@ impl FeignApiClient {
         }
     }
 
+    /// 取本次请求用的实例快照；缓存为空时立即补一次服务发现
+    ///
+    /// `init()` 失败只记告警，正常情况下靠 30s 刷新循环恢复。但启动瞬间注册中心
+    /// 抖一下、或刷新恰好连续失败时，实例列表会一直是空的，所有请求都白等一个
+    /// 刷新周期。真实请求来了就顺手重查一次，代价只发生在「反正也要失败」的路径上。
+    async fn instances_for_request(
+        service_discovery: &ServiceDiscovery,
+    ) -> Arc<Vec<ServiceInstance>> {
+        let instances = service_discovery.get_instances();
+        if !instances.is_empty() {
+            return instances;
+        }
+        match service_discovery.refresh().await {
+            Ok(fresh) if !fresh.is_empty() => {
+                info!(
+                    "service discovery: {} 请求时补发现到 {} 个实例",
+                    service_discovery.svc_name(),
+                    fresh.len()
+                );
+                fresh
+            }
+            Ok(_) => instances,
+            Err(e) => {
+                warn!(
+                    "service discovery: {} 请求时补发现失败: {:?}",
+                    service_discovery.svc_name(),
+                    e
+                );
+                instances
+            }
+        }
+    }
+
+    /// 这个错误要不要换实例重试、并计入实例熔断
+    ///
+    /// HTTP 4xx 是**对方正常处理了请求**（登录失效、口令错、参数不合法……），
+    /// 实例并没有坏。旧实现把它和连接失败一起计数，连打几次就把整组实例打进
+    /// 冷却，下一次即便请求完全合法也直接「无可用实例」——生产上表现为
+    /// 「认证服务不可用」，而 Consul 里实例其实全是 passing。
+    ///
+    /// 5xx / 超时 / 连接失败保留原行为：换实例重试并按连续失败次数冷却。
+    fn is_retryable_instance_error(error: &ApiClientError) -> bool {
+        match error {
+            ApiClientError::NonSuccessStatus(_, status, _) => {
+                // `StatusCode::to_string()` 形如 "401 Unauthorized"，取第一段判断
+                let code = status.split_whitespace().next().unwrap_or_default();
+                !code.starts_with('4')
+            }
+            _ => true,
+        }
+    }
+
+    /// 构造「无可用实例」错误，带齐排查所需的上下文
+    ///
+    /// 旧实现返回 `ApiClientError::NotInit("no available service instance")`，
+    /// 既说成「客户端未初始化」，又不说是哪个服务、发现几个、是不是被熔断了。
+    fn no_available_instance(
+        service_discovery: &ServiceDiscovery,
+        instances: &[ServiceInstance],
+        failure_tracker: &Mutex<FailureTracker>,
+    ) -> ApiClientError {
+        let cooling = failure_tracker
+            .lock()
+            .unwrap()
+            .cooling_count(instances, Instant::now());
+        ApiClientError::NoAvailableInstance(format!(
+            "svc={}，发现 {} 个实例，冷却中 {} 个（发现 0 个查注册中心；全部冷却查下游失败日志）",
+            service_discovery.svc_name(),
+            instances.len(),
+            cooling
+        ))
+    }
+
     fn get_available_instances(
         instances: &[ServiceInstance],
         failure_tracker: &Mutex<FailureTracker>,
@@ -345,7 +425,7 @@ impl FeignApiClient {
                 max_cooldown,
                 timeout,
             } => {
-                let instances = service_discovery.get_instances();
+                let instances = Self::instances_for_request(service_discovery).await;
                 let max_retries = instances.len().max(1);
                 let mut tried_ids = Vec::new();
                 // 最后一个真实错误：全部实例都试过之后要把它抛出去。
@@ -385,6 +465,11 @@ impl FeignApiClient {
                             return Ok(resp);
                         }
                         Err(e) => {
+                            // 4xx 是对方给的明确答复，实例是健康的：原样交给上层，
+                            // 既不换实例重试，也不记失败（见 is_retryable_instance_error）
+                            if !Self::is_retryable_instance_error(&e) {
+                                return Err(e);
+                            }
                             warn!(
                                 "feign call failed for instance {} ({}) on {}: {:?}",
                                 instance_id, base_url, uri, e
@@ -402,7 +487,7 @@ impl FeignApiClient {
                 }
 
                 Err(last_error.unwrap_or_else(|| {
-                    ApiClientError::NotInit(FeignError::NoAvailableInstance.to_string())
+                    Self::no_available_instance(service_discovery, &instances, failure_tracker)
                 }))
             }
         }
@@ -418,7 +503,8 @@ impl FeignApiClient {
     /// - `headers`：附加请求头（可选）
     ///
     /// ## 错误
-    /// 微服务模式下无可用实例时返回 `ApiClientError::NotInit(FeignError::NoAvailableInstance)`。
+    /// 微服务模式下无可用实例时返回 `ApiClientError::NoAvailableInstance`，
+    /// 消息里带服务名、发现的实例数与冷却中的实例数。
     pub async fn request<D, E>(
         &self,
         method: Method,
@@ -495,9 +581,10 @@ impl FeignApiClient {
                 max_cooldown,
                 timeout,
             } => {
-                let instances = service_discovery.get_instances();
+                let instances = Self::instances_for_request(service_discovery).await;
                 let max_retries = instances.len().max(1);
                 let mut tried_ids = Vec::new();
+                let mut last_error: Option<ApiClientError> = None;
 
                 for _ in 0..max_retries {
                     let (base_url, instance_id) = match Self::try_select_instance(
@@ -520,6 +607,9 @@ impl FeignApiClient {
                             return Ok(bytes);
                         }
                         Err(e) => {
+                            if !Self::is_retryable_instance_error(&e) {
+                                return Err(e);
+                            }
                             warn!(
                                 "feign get_bytes failed for instance {} ({}): {:?}",
                                 instance_id, base_url, e
@@ -531,13 +621,14 @@ impl FeignApiClient {
                                 *cooldown_duration,
                                 *max_cooldown,
                             );
+                            last_error = Some(e);
                         }
                     }
                 }
 
-                Err(ApiClientError::NotInit(
-                    FeignError::NoAvailableInstance.to_string(),
-                ))
+                Err(last_error.unwrap_or_else(|| {
+                    Self::no_available_instance(service_discovery, &instances, failure_tracker)
+                }))
             }
         }
     }
@@ -600,7 +691,7 @@ impl FeignApiClient {
                 max_cooldown,
                 timeout,
             } => {
-                let instances = service_discovery.get_instances();
+                let instances = Self::instances_for_request(service_discovery).await;
                 let mut tried_ids = Vec::new();
                 let (base_url, instance_id) = match Self::try_select_instance(
                     &instances,
@@ -610,8 +701,10 @@ impl FeignApiClient {
                 ) {
                     Some(x) => x,
                     None => {
-                        return Err(ApiClientError::NotInit(
-                            FeignError::NoAvailableInstance.to_string(),
+                        return Err(Self::no_available_instance(
+                            service_discovery,
+                            &instances,
+                            failure_tracker,
                         ));
                     }
                 };
@@ -625,6 +718,11 @@ impl FeignApiClient {
                         Ok(resp)
                     }
                     Err(e) => {
+                        // 4xx 不能算实例故障：multipart 只试一个实例，误记冷却
+                        // 会让后续所有请求都选不到这个实例
+                        if !Self::is_retryable_instance_error(&e) {
+                            return Err(e);
+                        }
                         warn!(
                             "feign multipart failed for instance {} ({}): {:?}",
                             instance_id, base_url, e
@@ -641,5 +739,111 @@ impl FeignApiClient {
                 }
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn status_error(status: &str) -> ApiClientError {
+        ApiClientError::NonSuccessStatus("/auth/verify".into(), status.into(), "{}".into())
+    }
+
+    fn instance(id: &str) -> ServiceInstance {
+        ServiceInstance {
+            namespace: None,
+            group: None,
+            svc_name: "adm-svr".into(),
+            instance_id: id.into(),
+            ip: "10.0.1.14".into(),
+            port: 9007,
+            metadata: HashMap::new(),
+            health_check_url: None,
+        }
+    }
+
+    #[test]
+    fn http_4xx_is_not_an_instance_failure() {
+        for status in [
+            "400 Bad Request",
+            "401 Unauthorized",
+            "404 Not Found",
+            "409 Conflict",
+        ] {
+            assert!(
+                !FeignApiClient::is_retryable_instance_error(&status_error(status)),
+                "4xx 不该触发换实例重试与冷却: {status}"
+            );
+        }
+        for status in ["500 Internal Server Error", "503 Service Unavailable"] {
+            assert!(
+                FeignApiClient::is_retryable_instance_error(&status_error(status)),
+                "5xx 仍应换实例重试: {status}"
+            );
+        }
+        assert!(FeignApiClient::is_retryable_instance_error(
+            &ApiClientError::NotInit("network".into())
+        ));
+    }
+
+    /// 回归：线上 adm 三个实例因为连续的 401 被全部冷却，
+    /// 之后合法请求也变成「no available service instance」。
+    #[test]
+    fn repeated_auth_failures_do_not_freeze_all_instances() {
+        let instances = vec![instance("a"), instance("b"), instance("c")];
+        let mut tracker = FailureTracker::new();
+        for id in ["a", "b", "c"] {
+            for _ in 0..3 {
+                let error = status_error("401 Unauthorized");
+                if !FeignApiClient::is_retryable_instance_error(&error) {
+                    continue;
+                }
+                tracker.record_failure(id, 3, Duration::from_secs(1), Duration::from_secs(30));
+            }
+        }
+        assert_eq!(tracker.cooling_count(&instances, Instant::now()), 0);
+        assert!(tracker.records.is_empty());
+    }
+
+    #[test]
+    fn no_available_instance_error_carries_diagnostic_context() {
+        let discovery = ServiceDiscovery::new("adm-svr", Duration::from_secs(30));
+        let instances = vec![instance("a"), instance("b"), instance("c")];
+        let mut tracker = FailureTracker::new();
+        for id in ["a", "b", "c"] {
+            for _ in 0..3 {
+                tracker.record_failure(id, 3, Duration::from_secs(1), Duration::from_secs(30));
+            }
+        }
+        let error =
+            FeignApiClient::no_available_instance(&discovery, &instances, &Mutex::new(tracker));
+        assert!(matches!(
+            &error,
+            ApiClientError::NoAvailableInstance(_)
+        ));
+        let msg = error.to_string();
+        assert!(msg.contains("adm-svr"), "{msg}");
+        assert!(msg.contains("发现 3 个"), "{msg}");
+        assert!(msg.contains("冷却中 3 个"), "{msg}");
+        assert!(!msg.contains("未初始化"), "{msg}");
+    }
+
+    #[test]
+    fn cooling_count_is_read_only() {
+        let instances = vec![instance("a")];
+        let mut tracker = FailureTracker::new();
+        for _ in 0..3 {
+            tracker.record_failure("a", 3, Duration::from_secs(1), Duration::from_secs(30));
+        }
+        assert_eq!(tracker.cooling_count(&instances, Instant::now()), 1);
+
+        // 冷却到期后只读判断应为 false，且不会顺手放出 half-open 探针
+        let expired = Instant::now()
+            .checked_sub(Duration::from_secs(2))
+            .unwrap();
+        tracker.records.get_mut("a").unwrap().cooldown_until = Some(expired);
+        assert_eq!(tracker.cooling_count(&instances, Instant::now()), 0);
+        assert!(!tracker.records["a"].probe_in_flight);
     }
 }

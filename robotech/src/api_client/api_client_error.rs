@@ -18,6 +18,7 @@ use thiserror::Error;
 /// - `ParseJson`: JSON 格式响应解析失败
 /// - `ParseBytes`: 字节流格式响应读取失败
 /// - `SetApiClient` / `GetApiClient` / `NotInit`: API 客户端设置、获取或未初始化错误
+/// - `NoAvailableInstance`: 微服务模式下列表为空或实例全在冷却期（不是「未初始化」）
 #[derive(Error, Debug)]
 pub enum ApiClientError {
     #[error("运行时错误: {0}")]
@@ -57,4 +58,10 @@ pub enum ApiClientError {
     GetApiClient(String),
     #[error("API客户端未初始化: {0}")]
     NotInit(String),
+    /// 微服务模式下没有可用实例：注册中心里没有健康实例，或实例全被熔断冷却
+    ///
+    /// 之前这种情况被塞进 `NotInit`，前端显示成「API客户端未初始化」，
+    /// 把排查方向从「服务发现 / 熔断」带偏到「客户端没配置」。
+    #[error("无可用服务实例: {0}")]
+    NoAvailableInstance(String),
 }
