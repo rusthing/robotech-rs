@@ -15,14 +15,17 @@
 //! ```text
 //! 写操作成功
 //!   → refresh::publish(subject)
-//!     → 各节点收到信号
-//!       → refresh::subscribe 的 handler
-//!         → rebuild_fn() 全量查库
-//!         → ArcSwapOption::store 原子替换
+//!     → 各节点收到信号（只登记「有变更」，立即 ACK）
+//!       → 合并窗口静默（debounce-window，最长 max-wait）
+//!         → refresh::subscribe 的 handler
+//!           → rebuild_fn() 全量查库
+//!           → ArcSwapOption::store 原子替换
 //! ```
 //!
 //! 探活间隔由配置文件中的 `[refresh] probe-interval` 控制（默认 15 秒，
-//! 历史段名 `[local-cache]` 仍兼容），见 [`crate::refresh::RefreshConfig`]。
+//! 历史段名 `[local-cache]` 仍兼容）；合并窗口由 `debounce-window`
+//! （默认 3 秒）与 `max-wait`（默认 15 秒）控制，`debounce-window = "0s"`
+//! 关闭合并。见 [`crate::refresh::RefreshConfig`]。
 
 mod event;
 pub use event::*;

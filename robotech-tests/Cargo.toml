@@ -6,12 +6,12 @@ publish = false
 description = "robotech 的集成测试：事务与钩子语义（需要真实 PostgreSQL）"
 
 [dependencies]
-robotech = { path = "../robotech", features = ["macros", "db", "openapi"] }
+robotech = { path = "../robotech", features = ["macros", "db", "openapi", "refresh"] }
 sea-orm = { workspace = true, features = ["sqlx-postgres", "runtime-tokio-rustls"] }
 serde = { workspace = true, features = ["derive"] }
 serde_json = { workspace = true }
 anyhow = { workspace = true }
-tokio = { workspace = true, features = ["macros", "rt-multi-thread"] }
+tokio = { workspace = true, features = ["macros", "rt-multi-thread", "time"] }
 derive_setters = { workspace = true }
 typed-builder = { workspace = true }
 utoipa = { workspace = true }
