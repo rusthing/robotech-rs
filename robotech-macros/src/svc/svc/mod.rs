@@ -14,7 +14,10 @@ use syn::{
 use wheel_rs::str_utils::{split_camel_case, CamelFormat};
 
 /// 写操作方法名集合（before_write / after_write 快捷方式生效范围）
-const WRITE_METHODS: &[&str] = &["add", "modify", "del_by_id", "del_by_query_dto"];
+///
+/// `sync` 也是写方法（带版本门槛的条件更新），但它不像 `save` / `upsert` 那样
+/// 委托给 `add` / `modify`，因此必须显式列进来，before_write 快捷方式才会对它生效。
+const WRITE_METHODS: &[&str] = &["add", "modify", "del_by_id", "del_by_query_dto", "sync"];
 
 /// `#[svc]` 宏参数
 pub(crate) struct SvcArgs {
@@ -28,9 +31,9 @@ pub(crate) struct SvcArgs {
     /// 注意：ex 批量也返回它，关联表字段不再包含——要「脱敏 + 关联」的，
     /// 手写一个带关联字段的列表 VO 再传进来。
     pub list_vo: Option<Ident>,
-    /// 写操作前的回调（add / modify / del_by_id / del_by_query_dto）
+    /// 写操作前的回调（add / modify / del_by_id / del_by_query_dto / sync）
     pub before_write: Option<syn::Path>,
-    /// 写操作后的回调（add / modify / del_by_id / del_by_query_dto）
+    /// 写操作后的回调（add / modify / del_by_id / del_by_query_dto / sync）
     pub after_write: Option<syn::Path>,
     /// 每个方法单独的前置回调：方法名 → 函数路径
     pub before: HashMap<String, syn::Path>,
@@ -487,8 +490,10 @@ pub(crate) fn svc_macro(args: SvcArgs, input: ItemStruct) -> TokenStream {
 
     // 生成sync方法
     if !skip.contains("sync") {
-        let before_call = resolve_hook("sync", false, &args.before, &args.before_write, Some(quote! { sync_dto }), None, false);
-        let after_call = resolve_hook("sync", false, &args.after, &args.after_write, None, None, false);
+        let is_write = WRITE_METHODS.contains(&"sync");
+        let before_call = resolve_hook("sync", is_write, &args.before, &args.before_write, Some(quote! { sync_dto }), None, true);
+        let after_call = resolve_hook("sync", false, &args.after, &args.after_write, Some(quote! { rows }), Some(quote! { sync_dto }), true);
+        let after_commit = write_notify(&args);
         generated_methods.push(quote! {
         /// # 带版本门槛的条件更新（用于多源同步）
         ///
@@ -504,6 +509,9 @@ pub(crate) fn svc_macro(args: SvcArgs, input: ItemStruct) -> TokenStream {
         ///   调用方若要区分「到底改了没」就读这个值；
         /// - 唯一键/外键冲突、参数校验失败、钩子失败等仍原样抛出，不受「0 行不报错」影响。
         ///
+        /// 未传 `db` 时会自开事务：`before_sync` / `after_sync` 钩子与本次更新
+        /// 同属一个事务，提交成功后才执行 `after_write` 通知。
+        ///
         /// ## 参数
         /// * `sync_dto` - 包含 id、业务字段与版本号 `update_ms` 的传输对象
         /// * `db` - 数据库连接或事务，如果未提供则使用全局数据库连接
@@ -518,26 +526,34 @@ pub(crate) fn svc_macro(args: SvcArgs, input: ItemStruct) -> TokenStream {
         where
             C: ConnectionTrait,
         {
-            #before_call
-            let result = if let Some(db) = db {
+            // 调用方带了连接：事务归调用方，这里只写不提交
+            if let Some(db) = db {
+                #before_call
                 sync_dto.validate()?;
-                let active_model: ActiveModel = sync_dto.into();
+
+                let active_model: ActiveModel = sync_dto.clone().into();
                 let rows = #dao_name::update_if_older(active_model, db).await?;
-                Ok(rows)
-            } else {
+                #after_call
+                #after_commit
+                return Ok(Ro::success("同步完成".to_string()).extra(Some(rows)));
+            }
+
+            // 没带连接：自己开事务，块内 `?` / `return` 会让 tx drop 回滚
+            let db_conn = robotech::db::get_db_conn()?;
+            let tx = begin_transaction(db_conn.as_ref()).await?;
+            let rows = {
+                let db = &tx;
+                #before_call
                 sync_dto.validate()?;
-                let db_conn = robotech::db::get_db_conn()?;
-                let tx = begin_transaction(db_conn.as_ref()).await?;
-                let rows = {
-                    let db = &tx;
-                    let active_model: ActiveModel = sync_dto.into();
-                    #dao_name::update_if_older(active_model, db).await?
-                };
-                commit_transaction(tx).await?;
-                Ok(rows)
+
+                let active_model: ActiveModel = sync_dto.clone().into();
+                let rows = #dao_name::update_if_older(active_model, db).await?;
+                #after_call
+                rows
             };
-            #after_call
-            result.map(|rows| Ro::success("同步完成".to_string()).extra(Some(rows)))
+            commit_transaction(tx).await?;
+            #after_commit
+            Ok(Ro::success("同步完成".to_string()).extra(Some(rows)))
         }
         });
     }
