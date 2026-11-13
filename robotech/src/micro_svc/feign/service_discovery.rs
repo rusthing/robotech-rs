@@ -1,6 +1,7 @@
 use crate::micro_svc::hub_client::discover_service;
 use crate::micro_svc::ServiceInstance;
 use arc_swap::ArcSwap;
+use std::future::Future;
 use std::sync::{Arc, Mutex, Weak};
 use std::time::Duration;
 use tokio::task::JoinHandle;
@@ -52,16 +53,17 @@ impl ServiceDiscovery {
         }
     }
 
-    /// 立即重新拉取一次实例列表，原子替换缓存并返回新快照。
+    /// 用**调用方提供的发现结果**原子替换缓存并返回新快照。
     ///
-    /// 供 `init`、后台刷新循环，以及「缓存为空时来了真实请求」三条路径共用；
-    /// 失败时保留旧列表（不清空），避免一次注册中心抖动把好实例全抹掉。
-    ///
-    /// ## 错误
-    /// 后端注册中心不可用或未配置时返回 `CfgError`。
-    pub async fn refresh(&self) -> Result<Arc<Vec<ServiceInstance>>, crate::cfg::CfgError> {
-        let instances =
-            discover_service(&self.svc_name, self.namespace.clone(), self.group.clone()).await?;
+    /// `refresh` 与共享选址层 `instance_resolver` 共用这一条写入路径：谁负责「什么时候查、
+    /// 查不到怎么办」由调用方决定，本类型只负责「持有一份可被无锁并发读的快照」。
+    /// 失败时返回原始错误且**不清空旧快照**，避免一次注册中心抖动把好实例全抹掉。
+    pub async fn refresh_with<F, Fut, E>(&self, fetch: F) -> Result<Arc<Vec<ServiceInstance>>, E>
+    where
+        F: FnOnce() -> Fut,
+        Fut: Future<Output = Result<Vec<ServiceInstance>, E>>,
+    {
+        let instances = fetch().await?;
         info!(
             "service discovery: {} found {} instances",
             self.svc_name,
@@ -70,6 +72,20 @@ impl ServiceDiscovery {
         let snapshot = Arc::new(instances);
         self.instances.store(Arc::clone(&snapshot));
         Ok(snapshot)
+    }
+
+    /// 立即重新拉取一次实例列表，原子替换缓存并返回新快照。
+    ///
+    /// 供 `init`、后台刷新循环，以及直接使用本类型的调用方使用；失败时保留旧列表。
+    ///
+    /// ## 错误
+    /// 后端注册中心不可用或未配置时返回 `CfgError`。
+    pub async fn refresh(&self) -> Result<Arc<Vec<ServiceInstance>>, crate::cfg::CfgError> {
+        let svc_name = self.svc_name.clone();
+        let namespace = self.namespace.clone();
+        let group = self.group.clone();
+        self.refresh_with(|| async move { discover_service(&svc_name, namespace, group).await })
+            .await
     }
 
     /// 首次加载实例列表；失败时返回错误。

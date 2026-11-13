@@ -1,6 +1,6 @@
 use crate::micro_svc::hub_client_config::HubClientConfig;
 use crate::micro_svc::ConfigCenterConfig;
-#[cfg(feature = "registry-center")]
+#[cfg(feature = "micro-svc-client")]
 use crate::micro_svc::RegistryCenterConfig;
 use serde::{Deserialize, Serialize};
 
@@ -16,7 +16,7 @@ pub struct NacosConfig {
     #[serde(default)]
     pub config: Option<ConfigCenterConfig>,
     /// 注册中心
-    #[cfg(feature = "registry-center")]
+    #[cfg(feature = "micro-svc-client")]
     #[serde(default)]
     pub registry: Option<RegistryCenterConfig>,
 }

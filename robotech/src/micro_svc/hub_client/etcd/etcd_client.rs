@@ -214,7 +214,7 @@ impl ConfigCenterClient for EtcdClient {
     }
 }
 
-#[cfg(feature = "registry-center")]
+#[cfg(feature = "micro-svc-client")]
 #[async_trait]
 impl RegistryCenterClient for EtcdClient {
     fn name(&self) -> &'static str {

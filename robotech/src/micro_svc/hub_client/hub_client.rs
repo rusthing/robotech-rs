@@ -8,6 +8,7 @@ use crate::micro_svc::{ConsulClient, EtcdClient, MicroSvcConfig, NacosClient};
 use crate::micro_svc::{
     RegistryCenterClient, RegistryCenterConfig, RegistryCenterError, RegistryKey, ServiceInstance,
 };
+#[cfg(feature = "web")]
 use crate::web::{get_health_check_uri, get_health_check_url_http_protocol, get_web_listen_port};
 use arc_swap::ArcSwapOption;
 use config::FileFormat;
@@ -705,6 +706,9 @@ fn build_service_instance(
     let svc_name = registry_key.svc_name.clone();
     let ip = get_local_ip(sub_net)?;
 
+    // 只有启用 web 的进程才上报监听端口与健康检查 URL；网关、MQ 消费者等
+    // 非 axum 进程注册时端口记为 0，不生成健康检查地址。
+    #[cfg(feature = "web")]
     let (instance_id, port, health_check_url) = if let Some(port) = get_web_listen_port() {
         let id = get_app_instance_id();
         let health_check_url = get_health_check_url_http_protocol()
@@ -713,6 +717,8 @@ fn build_service_instance(
     } else {
         (get_app_instance_id(), 0u16, None)
     };
+    #[cfg(not(feature = "web"))]
+    let (instance_id, port, health_check_url) = (get_app_instance_id(), 0u16, None);
 
     Ok(ServiceInstance {
         namespace,

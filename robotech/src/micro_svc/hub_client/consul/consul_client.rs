@@ -258,7 +258,7 @@ impl ConfigCenterClient for ConsulClient {
     }
 }
 
-#[cfg(feature = "registry-center")]
+#[cfg(feature = "micro-svc-client")]
 #[async_trait]
 impl RegistryCenterClient for ConsulClient {
     fn name(&self) -> &'static str {

@@ -2,7 +2,7 @@
 //!
 //! 定义微服务全局配置结构体（`MicroSvcConfig`）及其在配置文件中的键名。
 
-#[cfg(any(feature = "config-center", feature = "registry-center"))]
+#[cfg(feature = "micro-svc-client")]
 use crate::micro_svc::{ConsulConfig, EtcdConfig, NacosConfig};
 use serde::{Deserialize, Serialize};
 
@@ -23,22 +23,22 @@ pub struct MicroSvcConfig {
     #[serde(default)]
     pub profile: Option<String>,
     /// Consul 后端配置（需启用 `config-center` 或 `registry-center` feature）
-    #[cfg(any(feature = "config-center", feature = "registry-center"))]
+    #[cfg(feature = "micro-svc-client")]
     #[serde(default)]
     pub consul: Option<ConsulConfig>,
     /// Etcd 后端配置（需启用 `config-center` 或 `registry-center` feature）
-    #[cfg(any(feature = "config-center", feature = "registry-center"))]
+    #[cfg(feature = "micro-svc-client")]
     #[serde(default)]
     pub etcd: Option<EtcdConfig>,
     /// Nacos 后端配置（需启用 `config-center` 或 `registry-center` feature）
-    #[cfg(any(feature = "config-center", feature = "registry-center"))]
+    #[cfg(feature = "micro-svc-client")]
     #[serde(default)]
     pub nacos: Option<NacosConfig>,
     /// 刷新作用域在配置中心使用的 data_id。
     ///
     /// 默认值为 `"refresh-scope.toml"`。该 key 会自动纳入配置中心的监听与拉取列表。
     /// 业务层通过 [`set_refresh_scope`] 精确更新某个字段的值，不冲掉其它字段。
-    #[cfg(any(feature = "config-center", feature = "registry-center"))]
+    #[cfg(feature = "micro-svc-client")]
     #[serde(default = "refresh_scope_data_id_default")]
     pub refresh_scope: String,
 }
@@ -48,20 +48,20 @@ impl Default for MicroSvcConfig {
         Self {
             svc_name: None,
             profile: None,
-            #[cfg(any(feature = "config-center", feature = "registry-center"))]
+            #[cfg(feature = "micro-svc-client")]
             consul: None,
-            #[cfg(any(feature = "config-center", feature = "registry-center"))]
+            #[cfg(feature = "micro-svc-client")]
             etcd: None,
-            #[cfg(any(feature = "config-center", feature = "registry-center"))]
+            #[cfg(feature = "micro-svc-client")]
             nacos: None,
-            #[cfg(any(feature = "config-center", feature = "registry-center"))]
+            #[cfg(feature = "micro-svc-client")]
             refresh_scope: refresh_scope_data_id_default(),
         }
     }
 }
 
 /// 刷新作用域 data_id 的默认值。
-#[cfg(any(feature = "config-center", feature = "registry-center"))]
+#[cfg(feature = "micro-svc-client")]
 fn refresh_scope_data_id_default() -> String {
     "refresh-scope.toml".to_string()
 }

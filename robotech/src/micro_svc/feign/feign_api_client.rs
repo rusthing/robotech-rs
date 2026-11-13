@@ -5,6 +5,7 @@ use crate::api_client::ApiClientUtils;
 use crate::micro_svc::feign::load_balancer::{LoadBalancer, RoundRobinBalancer};
 use crate::micro_svc::feign::service_discovery::ServiceDiscovery;
 use crate::micro_svc::ServiceInstance;
+use crate::micro_svc::{ResolverEntry, resolver};
 use crate::api::Ro;
 use http::Method;
 use reqwest::header::HeaderMap;
@@ -14,7 +15,7 @@ use std::collections::HashMap;
 use std::fmt::Debug;
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
-use tracing::{info, warn};
+use tracing::warn;
 
 #[derive(Debug, Clone)]
 struct FailureRecord {
@@ -131,6 +132,10 @@ impl FailureTracker {
 enum FeignMode {
     MicroSvc {
         service_discovery: Arc<ServiceDiscovery>,
+        /// 与其它调用方共享的选址状态（同一服务名进程内一份快照）
+        entry: Arc<ResolverEntry>,
+        /// 实例快照的有效期，取自 `ApiClientConfig::refresh_interval`
+        snapshot_ttl: Duration,
         load_balancer: Box<dyn LoadBalancer>,
         failure_tracker: Arc<Mutex<FailureTracker>>,
         max_failures: usize,
@@ -157,8 +162,9 @@ pub struct FeignApiClient {
 impl FeignApiClient {
     /// 根据配置创建 Feign 客户端。
     ///
-    /// 微服务模式下会初始化服务发现并启动后台刷新任务；初始化失败不会报错，
-    /// 而是记录告警并在首次请求时重试发现。
+    /// 微服务模式复用 `instance_resolver` 里按服务名共享的选址状态（启动预热一次，
+    /// 之后按 `refresh-interval` 懒刷新），不再每个客户端各起一个后台刷新任务。
+    /// 预热失败不会报错，只记告警，后续请求按 TTL 重试发现。
     pub async fn new(config: ApiClientConfig) -> Self {
         match config {
             ApiClientConfig::MicroSvc {
@@ -172,23 +178,20 @@ impl FeignApiClient {
                 refresh_interval,
                 timeout,
             } => {
-                let service_discovery = Arc::new(ServiceDiscovery::with_namespace_and_group(
-                    &svc_name,
-                    refresh_interval,
-                    namespace,
-                    group,
-                ));
-                if let Err(e) = service_discovery.init().await {
+                // 选址状态按服务名共享：不再每个客户端各建一份快照、各起一个后台刷新任务。
+                let entry = resolver().entry(&svc_name, namespace, group, refresh_interval);
+                // 启动预热一次；失败只告警，后续请求按 TTL 重试，不阻断启动。
+                if let Some(e) = entry.snapshot(refresh_interval).await.last_error {
                     warn!(
-                        "service discovery init failed for '{}': {:?}, will retry on first request",
+                        "service discovery init failed for '{}': {}, will retry on first request",
                         svc_name, e
                     );
                 }
-                let sd_clone = Arc::clone(&service_discovery);
-                sd_clone.start_refresh_loop();
                 Self {
                     mode: FeignMode::MicroSvc {
-                        service_discovery,
+                        service_discovery: entry.discovery().clone(),
+                        entry,
+                        snapshot_ttl: refresh_interval,
                         load_balancer: Box::new(RoundRobinBalancer::new()),
                         failure_tracker: Arc::new(Mutex::new(FailureTracker::new())),
                         max_failures,
@@ -265,37 +268,17 @@ impl FeignApiClient {
         }
     }
 
-    /// 取本次请求用的实例快照；缓存为空时立即补一次服务发现
+    /// 取本次请求用的实例快照。
     ///
-    /// `init()` 失败只记告警，正常情况下靠 30s 刷新循环恢复。但启动瞬间注册中心
-    /// 抖一下、或刷新恰好连续失败时，实例列表会一直是空的，所有请求都白等一个
-    /// 刷新周期。真实请求来了就顺手重查一次，代价只发生在「反正也要失败」的路径上。
+    /// 刷新节奏交给共享选址层：缓存在 `ttl` 内（**含空结果**）直接复用，过期才查注册中心，
+    /// 查询失败保留旧快照并按更短的间隔重试。这样既不会因为启动瞬间的一次抖动让所有请求
+    /// 白等，也不会在下游整体下线时每条请求都打一次注册中心。
     async fn instances_for_request(
-        service_discovery: &ServiceDiscovery,
+        entry: &ResolverEntry,
+        ttl: Duration,
     ) -> Arc<Vec<ServiceInstance>> {
-        let instances = service_discovery.get_instances();
-        if !instances.is_empty() {
-            return instances;
-        }
-        match service_discovery.refresh().await {
-            Ok(fresh) if !fresh.is_empty() => {
-                info!(
-                    "service discovery: {} 请求时补发现到 {} 个实例",
-                    service_discovery.svc_name(),
-                    fresh.len()
-                );
-                fresh
-            }
-            Ok(_) => instances,
-            Err(e) => {
-                warn!(
-                    "service discovery: {} 请求时补发现失败: {:?}",
-                    service_discovery.svc_name(),
-                    e
-                );
-                instances
-            }
-        }
+        let snapshot = entry.snapshot(ttl).await;
+        snapshot.instances
     }
 
     /// 这个错误要不要换实例重试、并计入实例熔断
@@ -418,6 +401,8 @@ impl FeignApiClient {
             }
             FeignMode::MicroSvc {
                 service_discovery,
+                entry,
+                snapshot_ttl,
                 load_balancer,
                 failure_tracker,
                 max_failures,
@@ -425,7 +410,7 @@ impl FeignApiClient {
                 max_cooldown,
                 timeout,
             } => {
-                let instances = Self::instances_for_request(service_discovery).await;
+                let instances = Self::instances_for_request(entry, *snapshot_ttl).await;
                 let max_retries = instances.len().max(1);
                 let mut tried_ids = Vec::new();
                 // 最后一个真实错误：全部实例都试过之后要把它抛出去。
@@ -574,6 +559,8 @@ impl FeignApiClient {
             }
             FeignMode::MicroSvc {
                 service_discovery,
+                entry,
+                snapshot_ttl,
                 load_balancer,
                 failure_tracker,
                 max_failures,
@@ -581,7 +568,7 @@ impl FeignApiClient {
                 max_cooldown,
                 timeout,
             } => {
-                let instances = Self::instances_for_request(service_discovery).await;
+                let instances = Self::instances_for_request(entry, *snapshot_ttl).await;
                 let max_retries = instances.len().max(1);
                 let mut tried_ids = Vec::new();
                 let mut last_error: Option<ApiClientError> = None;
@@ -684,6 +671,8 @@ impl FeignApiClient {
             }
             FeignMode::MicroSvc {
                 service_discovery,
+                entry,
+                snapshot_ttl,
                 load_balancer,
                 failure_tracker,
                 max_failures,
@@ -691,7 +680,7 @@ impl FeignApiClient {
                 max_cooldown,
                 timeout,
             } => {
-                let instances = Self::instances_for_request(service_discovery).await;
+                let instances = Self::instances_for_request(entry, *snapshot_ttl).await;
                 let mut tried_ids = Vec::new();
                 let (base_url, instance_id) = match Self::try_select_instance(
                     &instances,

@@ -35,8 +35,11 @@ db = ["app", "orm", "dep:sqlx", "dep:regex", "dep:once_cell", "dep:linkme"]
 
 # ============ Web / 微服务 ============
 web = ["app", "openapi", "dep:axum", "dep:utoipa-swagger-ui", "dep:linkme", "dep:ipnet", "dep:tower", "dep:tower-http", "dep:tokio-rustls", "dep:hyper", "dep:hyper-util", "dep:rustls-pemfile", "dep:socket2", "dep:reqwest"]
-config-center = ["dep:base64", "dep:etcd-client", "dep:nacos-sdk", "dep:toml"]
-registry-center = ["web", "dep:base64", "dep:etcd-client", "dep:nacos-sdk"]
+# 服务治理客户端：配置中心与注册中心的统一契约 + Consul/Etcd/Nacos 实现。
+# 不依赖 web/axum，供网关、MQ 消费者等非 axum 进程复用。
+micro-svc-client = ["dep:base64", "dep:etcd-client", "dep:nacos-sdk", "dep:reqwest", "dep:ipnet"]
+config-center = ["micro-svc-client", "dep:toml"]
+registry-center = ["micro-svc-client", "web"]
 feign = ["api-client", "registry-center"]
 api-client = ["openapi", "dep:reqwest", "dep:http", "dep:jsonwebtoken"]
 

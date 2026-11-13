@@ -191,7 +191,7 @@ impl ConfigCenterClient for NacosClient {
     }
 }
 
-#[cfg(feature = "registry-center")]
+#[cfg(feature = "micro-svc-client")]
 #[async_trait]
 impl RegistryCenterClient for NacosClient {
     fn name(&self) -> &'static str {
