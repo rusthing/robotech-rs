@@ -57,8 +57,12 @@ This project organizes functional modules through Rust's feature flags mechanism
 - **`db`**: Database operations based on SeaORM (depends on `app`), provides DAO pattern encapsulation
 - **`macros`**: Macro definitions for development simplification
 - **`api-client`**: HTTP client wrapper for inter-service communication
+- **`micro-svc-client`**: Service-governance clients (unified traits for config center / registry center / hub, plus Consul / Etcd / Nacos implementations) **without axum**, so gateways and MQ consumers can reuse them
+- **`config-center`**: Config-center capability (built on `micro-svc-client`), usable standalone
+- **`registry-center`**: Registry-center capability (built on `micro-svc-client` + `web`, since instance registration reads the listen port and health-check URL from the web layer)
+- **`feign`**: Declarative inter-service calls (built on `api-client` + `registry-center`)
 
-Note: Both `web` and `db` depend on `app` feature, meaning enabling them automatically includes `app` functionality.
+Note: Both `web` and `db` depend on `app` feature, meaning enabling them automatically includes `app` functionality. Both `config-center` and `registry-center` are composed from `micro-svc-client`, so "I only need the config center, without dragging in axum" just enables `config-center`; without `web`, registered instances report `port = 0` and no `health_check_url`.
 
 ## Tech Stack
 

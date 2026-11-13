@@ -57,8 +57,12 @@ src/
 - **`db`**：基于 SeaORM 实现数据库操作功能（依赖 `app`），提供 DAO 模式封装
 - **`macros`**：宏定义，简化开发和代码生成
 - **`api-client`**：HTTP 客户端封装，用于微服务间通信
+- **`micro-svc-client`**：服务治理客户端（配置中心 / 注册中心 / Hub 的统一契约 + Consul / Etcd / Nacos 实现），**不依赖 axum**，供网关、MQ 消费者等非 Web 进程复用
+- **`config-center`**：配置中心能力（依赖 `micro-svc-client`），可单独启用
+- **`registry-center`**：注册中心能力（依赖 `micro-svc-client` + `web`，实例注册需要 web 层的监听端口与健康检查 URL）
+- **`feign`**：声明式服务间调用（依赖 `api-client` + `registry-center`）
 
-注意：`web` 和 `db` 都依赖 `app` feature，即启用它们时会自动包含 `app` 功能。
+注意：`web` 和 `db` 都依赖 `app` feature，即启用它们时会自动包含 `app` 功能。`config-center` 与 `registry-center` 都由 `micro-svc-client` 组合而来，因此「只想用配置中心、不想拖 axum」的场景直接启用 `config-center` 即可；无 `web` 时注册实例的 `port` 记 `0`、不上报 `health_check_url`。
 
 ## 技术栈
 

@@ -15,7 +15,8 @@
 //! - `env`：环境信息
 //! - `log`：日志初始化与热更新
 //! - `macros`：过程宏导出（需启用 feature `macros`）
-//! - `micro_svc`：微服务能力（注册中心、配置中心、Feign 客户端等）
+//! - `micro_svc`：微服务能力（注册中心、配置中心、Feign 客户端等；服务治理客户端的
+//!   门控是 `micro-svc-client`，不依赖 web）
 //! - `mq`：消息队列（MQTT、NATS、RabbitMQ）
 //! - `refresh`：刷新信号（基于 JetStream 的变更广播 + 订阅自愈，需启用 feature `refresh`）
 //! - `ro`：统一响应对象
@@ -36,10 +37,21 @@
 //! | 仅需 sea-orm 类型互操作（`U64` / `Duration`） | `app,macros,orm` | sea-orm |
 //! | 数据访问服务 | `app,macros,db` | sea-orm + sqlx |
 //! | Web 服务 | `app,macros,web` | axum + utoipa + Swagger UI |
+//! | 只接配置中心 / 注册中心（**非 axum 进程**，如网关、MQ 消费者） | `app,macros,config-center` | reqwest + 各注册中心 SDK，**无 axum** |
+//! | 只用注册中心客户端（自行管理生命周期） | `app,macros,micro-svc-client` | reqwest + 各注册中心 SDK，**无 axum** |
 //! | Feign 客户端（`*-api-client`） | `app,macros,api-client`（`feign` 会再带上注册中心） | reqwest + utoipa，**无 sea-orm / sqlx** |
 //! | 完整微服务 | `app,macros,db,web,config-center,registry-center` | 全量 |
 //!
 //! 说明：
+//! - `micro-svc-client`：服务治理客户端的**契约与实现层**，包含 `HubClient` /
+//!   `ConfigCenterClient` / `RegistryCenterClient` 三个 trait、`MicroSvcConfig`
+//!   配置结构，以及 Consul / Etcd / Nacos 三套实现。**不含 web**，因此网关、
+//!   MQ 消费者这类不用 axum 的进程可以只拿治理能力。
+//!   `config-center` 与 `registry-center` 都基于它组合：
+//!   `config-center = ["micro-svc-client", "dep:toml"]`，
+//!   `registry-center = ["micro-svc-client", "web"]`（保留 `web` 是为了向后兼容，
+//!   实例注册需要从 web 层取监听端口与健康检查 URL）。
+//!   无 `web` 时注册实例的 `port` 记 `0`、不上报 `health_check_url`，需要自行填充。
 //! - `openapi`：`U8`/`U16`/`U32`/`U64`/`U128`、`Duration`、`Ro`、`RoResult`、
 //!   `PageRx` 的 `ToSchema` 实现；`#[vo]` / `#[crud_dto]` / `#[dic]` 生成代码依赖它。
 //!   `web` 与 `api-client` 会隐含开启。
