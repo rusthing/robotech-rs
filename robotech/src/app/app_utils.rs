@@ -1,9 +1,9 @@
 use crate::app::AppError;
-use crate::cfg::{build_cfg, deserialize_config, BaseConfig, CfgError};
-use crate::env::{AppEnv, EnvError, APP_ENV};
+use crate::cfg::{BaseConfig, CfgError, build_cfg, deserialize_config};
+use crate::env::{APP_ENV, AppEnv, EnvError};
 use crate::log::LogConfig;
 #[cfg(feature = "config-center")]
-use crate::micro_svc::watch_config_changed;
+use crate::micro_svc::{get_hub_client, watch_config_changed};
 use arc_swap::ArcSwap;
 use config::{Config, Value};
 use std::collections::HashMap;
@@ -15,7 +15,7 @@ use std::time::Duration;
 use tokio::sync::{broadcast, watch};
 use tracing::{debug, error, info, warn};
 use wheel_rs::config_utils::diff_config;
-use wheel_rs::file_utils::{watch_file_changed, FileWatcher};
+use wheel_rs::file_utils::{FileWatcher, watch_file_changed};
 use wheel_rs::process::{get_current_pid, send_signal_by_instruction};
 
 /// 应用层操作结果类型
@@ -238,6 +238,11 @@ fn register_config_center_watch(
     reload: Arc<dyn Fn() -> Pin<Box<dyn Future<Output = ()> + Send>> + Send + Sync>,
 ) -> Pin<Box<dyn Future<Output = ()> + Send>> {
     Box::pin(async move {
+        // 没配 `[micro-svc]`（hub client 未初始化）时不必挂 watch，
+        // 否则每次都会拿到 NotInit 并打一条无意义的 warn
+        if get_hub_client().is_err() {
+            return;
+        }
         let reload_clone = Arc::clone(&reload);
         if let Err(e) = watch_config_changed(move || {
             let reload = Arc::clone(&reload_clone);
@@ -273,6 +278,10 @@ fn spawn_config_fallback(
     reload: Arc<dyn Fn() -> Pin<Box<dyn Future<Output = ()> + Send>> + Send + Sync>,
 ) {
     tokio::spawn(async move {
+        // 没有配置中心时兜底刷新没有意义，直接结束任务，避免空转
+        if get_hub_client().is_err() {
+            return;
+        }
         loop {
             tokio::time::sleep(CONFIG_FALLBACK_INTERVAL).await;
             reload().await;

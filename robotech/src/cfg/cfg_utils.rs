@@ -3,12 +3,12 @@ use crate::cfg::cfg_error::CfgError;
 #[cfg(feature = "config-center")]
 use crate::micro_svc::get_configs;
 #[cfg(any(feature = "config-center", feature = "registry-center"))]
-use crate::micro_svc::{get_hub_client, setup_hub_client, MicroSvcConfig, MICRO_SVC_CONFIG_KEY};
+use crate::micro_svc::{MICRO_SVC_CONFIG_KEY, MicroSvcConfig, get_hub_client, setup_hub_client};
 use config::builder::DefaultState;
 use config::{Config, ConfigBuilder};
 use std::path::Path;
 #[cfg(any(feature = "config-center", feature = "registry-center"))]
-use tracing::warn;
+use tracing::{debug, warn};
 
 /// # 配置模块的 Result 别名
 ///
@@ -98,27 +98,34 @@ pub async fn build_cfg(
             &profile,
         )
         .await?;
-        // 从配置中心获取配置文件内容并加载到config中
+        // 从配置中心获取配置文件内容并加载到config中。
+        // 只有 hub client 初始化成功（即真的配了 `[micro-svc]` 并连上）才拉取，
+        // 否则每次都会拿到 NotInit 错误并打一条无意义的 warn。
         #[cfg(feature = "config-center")]
-        match get_configs().await {
-            Ok(config_keys) => {
-                for item in config_keys {
-                    // 如果是 refresh-scope key，直接以 TOML 格式注入到 [refresh-scope] 段落下
-                    if let Ok(hub_client) = get_hub_client() {
-                        if hub_client.is_refresh_scope_key(&item.key.data_id) {
-                            let wrapped = format!("[refresh-scope]\n{}", item.content);
-                            config_builder = config_builder.add_source(
-                                config::File::from_str(&wrapped, config::FileFormat::Toml),
-                            );
-                            continue;
+        if get_hub_client().is_err() {
+            // 没配配置中心，跳过
+        } else {
+            match get_configs().await {
+                Ok(config_keys) => {
+                    for item in config_keys {
+                        // 如果是 refresh-scope key，直接以 TOML 格式注入到 [refresh-scope] 段落下
+                        if let Ok(hub_client) = get_hub_client() {
+                            if hub_client.is_refresh_scope_key(&item.key.data_id) {
+                                let wrapped = format!("[refresh-scope]\n{}", item.content);
+                                config_builder = config_builder.add_source(config::File::from_str(
+                                    &wrapped,
+                                    config::FileFormat::Toml,
+                                ));
+                                continue;
+                            }
                         }
+                        config_builder = config_builder
+                            .add_source(config::File::from_str(&item.content, item.format));
                     }
-                    config_builder = config_builder
-                        .add_source(config::File::from_str(&item.content, item.format));
                 }
-            }
-            Err(e) => {
-                warn!("Failed to get configs from config center: {:?}", e);
+                Err(e) => {
+                    warn!("Failed to get configs from config center: {:?}", e);
+                }
             }
         }
     }
@@ -166,8 +173,15 @@ async fn init_hub_client(
         .get(MICRO_SVC_CONFIG_KEY)
     {
         Ok(value) => value,
+        // 没配 `[micro-svc]` 是常态（网关、纯本地服务都不需要服务治理），
+        // 不是错误。用 debug 级别，否则每次启动和每次热更新都会刷一条 WARN。
+        Err(config::ConfigError::NotFound(_)) => {
+            debug!("未配置 [{MICRO_SVC_CONFIG_KEY}]，跳过服务治理客户端初始化");
+            return Ok(());
+        }
+        // 配了但写错才是真问题，保持 warn
         Err(e) => {
-            warn!("micro-svc config not found or deserialize failed: {:?}", e);
+            warn!("[{MICRO_SVC_CONFIG_KEY}] 解析失败: {:?}", e);
             return Ok(());
         }
     };
