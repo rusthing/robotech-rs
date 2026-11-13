@@ -138,6 +138,27 @@ pub async fn discover_service(
         .map_err(|e| CfgError::NotInit(format!("discover service failed: {e:?}",)))
 }
 
+/// 列出注册中心里指定 namespace / group 下的全部服务名。
+///
+/// 不支持枚举的后端返回空列表（调用方可降级为手输服务名）。
+///
+/// `namespace` / `group` 用于覆盖 HubClient 自身的 namespace/group：
+/// - 传入 `Some(v)` 使用指定值
+/// - 传入 `None` 回退到 HubClient 自身的配置
+///
+/// ## 错误
+/// 注册中心未配置或后端请求失败时返回 `CfgError::NotInit`。
+pub async fn list_services(
+    namespace: Option<String>,
+    group: Option<String>,
+) -> Result<Vec<String>, CfgError> {
+    let hub_client = get_hub_client()?;
+    hub_client
+        .list_services(namespace, group)
+        .await
+        .map_err(|e| CfgError::NotInit(format!("list services failed: {e:?}")))
+}
+
 /// 向配置中心写入（创建或更新）一个配置项。
 ///
 /// 写入后，所有 watch 该 key 的实例会自动感知变更，触发热更新链路。
@@ -677,6 +698,33 @@ impl HubClient {
         });
         registry
             .discover(effective_namespace, effective_group, svc_name)
+            .await
+    }
+
+    /// 列出注册中心里指定 namespace / group 下的全部服务名。
+    ///
+    /// `namespace` / `group` 传入 `None` 时使用 HubClient 自身的配置，
+    /// 传入 `Some(v)` 时覆盖自身配置。不支持枚举的后端返回空列表。
+    ///
+    /// ## 错误
+    /// 注册中心未配置时返回 `RegistryCenterError::BackendNotEnabled`。
+    pub async fn list_services(
+        &self,
+        namespace: Option<String>,
+        group: Option<String>,
+    ) -> Result<Vec<String>, RegistryCenterError> {
+        let registry = self
+            .registry
+            .as_ref()
+            .ok_or(RegistryCenterError::BackendNotEnabled(
+                "registry center not configured".to_string(),
+            ))?;
+        let effective_namespace =
+            namespace.or_else(|| self.registry_key.as_ref().and_then(|k| k.namespace.clone()));
+        let effective_group =
+            group.or_else(|| self.registry_key.as_ref().and_then(|k| k.group.clone()));
+        registry
+            .list_services(effective_namespace, effective_group)
             .await
     }
 

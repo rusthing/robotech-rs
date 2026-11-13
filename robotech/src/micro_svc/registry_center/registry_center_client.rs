@@ -28,4 +28,17 @@ pub trait RegistryCenterClient: Send + Sync {
         group: Option<String>,
         svc_name: &str,
     ) -> Result<Vec<ServiceInstance>, RegistryCenterError>;
+
+    /// 列出指定 namespace / group 下的全部服务名。
+    ///
+    /// 后端不支持枚举时返回空列表，调用方降级为手输（默认实现即返回 `Ok(vec![])`，
+    /// 仅支持枚举的后端——目前是 Consul——需要 override 此方法）。
+    async fn list_services(
+        &self,
+        namespace: Option<String>,
+        group: Option<String>,
+    ) -> Result<Vec<String>, RegistryCenterError> {
+        let _ = (namespace, group);
+        Ok(vec![])
+    }
 }

@@ -15,7 +15,7 @@ use crate::micro_svc::{
 use async_trait::async_trait;
 use base64::Engine;
 use serde::Deserialize;
-use std::collections::HashMap;
+use std::collections::{BTreeSet, HashMap};
 use std::time::Duration;
 use tokio::sync::watch;
 use tokio::task::JoinHandle;
@@ -258,6 +258,27 @@ impl ConfigCenterClient for ConsulClient {
     }
 }
 
+/// 按 `discover` 相同的前缀规则过滤服务名并排序去重。
+///
+/// `discover` 用 `{namespace}-{group}-{svc_name}` 作为注册名；这里反向用
+/// `{namespace}-{group}-` 作为前缀，保留命中的名字并剥离前缀得到裸 `svc_name`。
+/// namespace / group 为 `None` 时对应前缀段为空；两者皆为 `None` 时前缀为空，
+/// 即列出全部服务名。抽成纯函数便于不依赖网络做单测。
+fn filter_service_names(
+    names: impl IntoIterator<Item = String>,
+    namespace: Option<&str>,
+    group: Option<&str>,
+) -> Vec<String> {
+    let ns_prefix = namespace.map(|n| format!("{}-", n)).unwrap_or_default();
+    let group_prefix = group.map(|g| format!("{}-", g)).unwrap_or_default();
+    let prefix = format!("{}{}", ns_prefix, group_prefix);
+    let unique: BTreeSet<String> = names
+        .into_iter()
+        .filter_map(|name| name.strip_prefix(&prefix).map(|s| s.to_string()))
+        .collect();
+    unique.into_iter().collect()
+}
+
 #[cfg(feature = "micro-svc-client")]
 #[async_trait]
 impl RegistryCenterClient for ConsulClient {
@@ -373,5 +394,107 @@ impl RegistryCenterClient for ConsulClient {
                 health_check_url: None,
             })
             .collect())
+    }
+
+    /// 列出注册中心里指定 namespace / group 下的全部服务名。
+    ///
+    /// Consul 的 `/v1/catalog/services` 返回一个 JSON object：key 即注册时用的服务名，
+    /// value 为 tag 数组（这里只取 key）。过滤规则与 `discover` 一致，见
+    /// [`filter_service_names`]。HTTP 失败与响应解析失败映射到已有的
+    /// `RegistryCenterError::Connection` / `RegistryCenterError::Parse`，不新增错误类型。
+    async fn list_services(
+        &self,
+        namespace: Option<String>,
+        group: Option<String>,
+    ) -> Result<Vec<String>, RegistryCenterError> {
+        let url = format!("{}/v1/catalog/services", self.base_url);
+        let resp = self
+            .reqwest_client
+            .get(&url)
+            .send()
+            .await
+            .map_err(|e| RegistryCenterError::Connection(e.to_string()))?;
+        if !resp.status().is_success() {
+            return Err(RegistryCenterError::Connection(format!(
+                "GET /v1/catalog/services returned {}",
+                resp.status()
+            )));
+        }
+        // object 的 value（tag 数组）用不到，只关心 key；用 HashMap 让重复 key 在
+        // 反序列化阶段即被合并，再交给纯函数做前缀过滤与排序去重。
+        let catalog: HashMap<String, Vec<String>> = resp
+            .json()
+            .await
+            .map_err(|e| RegistryCenterError::Parse(e.to_string()))?;
+        Ok(filter_service_names(
+            catalog.into_keys(),
+            namespace.as_deref(),
+            group.as_deref(),
+        ))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// /v1/catalog/services 的响应是一个 JSON object：key 是服务名，value 是 tag 数组。
+    /// 解析出的 key 应被排序去重（额外混入重复项验证去重）。
+    #[test]
+    fn parse_json_object_extracts_sorted_unique_names() {
+        let body = r#"{
+            "svc-b": ["tag"],
+            "svc-a": ["prod", "v1"],
+            "svc-c": []
+        }"#;
+        let catalog: HashMap<String, Vec<String>> = serde_json::from_str(body).unwrap();
+        // 故意再混入一个重复名字，验证纯函数会去重
+        let names = catalog.into_keys().chain(["svc-a".to_string()]);
+        assert_eq!(
+            filter_service_names(names, None, None),
+            vec![
+                "svc-a".to_string(),
+                "svc-b".to_string(),
+                "svc-c".to_string()
+            ]
+        );
+    }
+
+    /// 前缀规则与 discover 一致：{namespace}-{group}-{svc_name}。
+    #[test]
+    fn filter_service_names_by_namespace_and_group_prefix() {
+        let names = vec![
+            "prod-pay-order-svc".to_string(),
+            "prod-pay-user-svc".to_string(),
+            "prod-ship-order-svc".to_string(),
+            "dev-pay-order-svc".to_string(),
+            "standalone-svc".to_string(),
+            "prod-pay-order-svc".to_string(), // 重复
+        ];
+        // namespace=prod + group=pay → 前缀 "prod-pay-"，剥离后得到裸 svc_name
+        assert_eq!(
+            filter_service_names(names.clone(), Some("prod"), Some("pay")),
+            vec!["order-svc".to_string(), "user-svc".to_string()]
+        );
+        // 仅 namespace=prod → 前缀 "prod-"
+        assert_eq!(
+            filter_service_names(names.clone(), Some("prod"), None),
+            vec![
+                "pay-order-svc".to_string(),
+                "pay-user-svc".to_string(),
+                "ship-order-svc".to_string(),
+            ]
+        );
+        // 两者皆 None → 前缀为空，列出全部（名字原样保留），排序去重
+        assert_eq!(
+            filter_service_names(names, None, None),
+            vec![
+                "dev-pay-order-svc".to_string(),
+                "prod-pay-order-svc".to_string(),
+                "prod-pay-user-svc".to_string(),
+                "prod-ship-order-svc".to_string(),
+                "standalone-svc".to_string(),
+            ]
+        );
     }
 }
