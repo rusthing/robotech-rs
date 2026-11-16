@@ -3,7 +3,7 @@ use crate::cfg::cfg_error::CfgError;
 #[cfg(feature = "config-center")]
 use crate::micro_svc::get_configs;
 #[cfg(any(feature = "config-center", feature = "registry-center"))]
-use crate::micro_svc::{MICRO_SVC_CONFIG_KEY, MicroSvcConfig, get_hub_client, setup_hub_client};
+use crate::micro_svc::{get_hub_client, setup_hub_client, MicroSvcConfig, MICRO_SVC_CONFIG_KEY};
 use config::builder::DefaultState;
 use config::{Config, ConfigBuilder};
 use std::path::Path;
@@ -220,18 +220,40 @@ fn add_cfg_files(
 ) -> Result<(ConfigBuilder<DefaultState>, Vec<String>)> {
     let mut files = vec![];
     // 如果已指定配置文件路径
-    let config = if let Some(cfg_file_path) = cfg_file_path.clone() {
-        add_source(config, cfg_file_path.as_str(), None, &mut files)
-    } else {
-        let temp_path = app_dir
-            .join(cfg_file_name_without_ext)
-            .to_string_lossy()
-            .to_string();
-        for ext in ["toml", "json", "json5", "yml", "yaml", "ini", "ron"] {
-            config = add_source(config, temp_path.as_str(), Some(ext), &mut files);
+    if let Some(cfg_file_path) = cfg_file_path.clone() {
+        files.push(cfg_file_path.clone());
+        let config = add_source(config, Path::new(cfg_file_path.as_str()));
+        return Ok((config, files));
+    }
+
+    for ext in ["toml", "json", "json5", "yml", "yaml", "ini", "ron"] {
+        // 两个候选：`$APP_DIR/config/<name>.<ext>` 与 `$APP_DIR/<name>.<ext>`。
+        //
+        // `config/` 优先是有原因的：容器里若用「单文件 bind」挂配置，容器内路径会被
+        // 钉在启动时的 inode 上，host 侧 rsync / 编辑器原子替换后读到的仍是旧文件；
+        // 改成「整目录挂载」后真正的文件在 `$APP_DIR/config/` 下，这里直接认它，
+        // 就不需要再靠 init.sh 建软链把路径摆回应用根目录。
+        let in_config_dir = app_dir
+            .join("config")
+            .join(format!("{cfg_file_name_without_ext}.{ext}"));
+        let in_app_dir = app_dir.join(format!("{cfg_file_name_without_ext}.{ext}"));
+
+        // 两个候选都登记监听（不存在也登记），后续往任一位置补文件都能热更新；
+        // 但只加载先命中的那个，避免两份同名文件叠加成难以解释的结果。
+        files.push(in_config_dir.to_string_lossy().to_string());
+        files.push(in_app_dir.to_string_lossy().to_string());
+
+        let picked = if in_config_dir.exists() {
+            Some(&in_config_dir)
+        } else if in_app_dir.exists() {
+            Some(&in_app_dir)
+        } else {
+            None
+        };
+        if let Some(path) = picked {
+            config = add_source(config, path);
         }
-        config
-    };
+    }
     Ok((config, files))
 }
 
@@ -240,41 +262,71 @@ fn add_cfg_files(
 /// 根据文件路径（可含扩展名）构建 `config::File` 并添加到配置构建器。
 /// `.json` 后缀的文件会以 Json5 格式加载。
 ///
-/// 文件不存在时**不加载内容**，但仍把路径登记进 `files`：监听由
-/// [`wheel_rs::file_utils::FileWatcher`] 落到「父目录 + 文件名」上，
-/// 文件稍后才出现、或被 rename 覆盖时同样能触发热更新。
+/// 只负责「加载」：路径登记与监听由调用方（[`add_cfg_files`]）统一处理，
+/// 因此文件不存在时直接原样返回，不报错。
 ///
 /// ## 参数
 /// * `config` - 配置构建器
-/// * `file_path_without_ext` - 文件路径（不含扩展名）
-/// * `ext` - 可选的文件扩展名（如 `"toml"`、`"json"`）
-/// * `files` - 成功加载的文件路径列表，用于后续监听
+/// * `file_path` - 配置文件路径（含扩展名）
 ///
 /// ## 返回值
 /// 返回添加了配置源的构建器；文件不存在时原样返回
 fn add_source(
     config: ConfigBuilder<DefaultState>,
-    file_path_without_ext: &str,
-    ext: Option<&str>,
-    files: &mut Vec<String>,
+    file_path: &Path,
 ) -> ConfigBuilder<DefaultState> {
-    let file_path_string = if let Some(ext) = ext {
-        format!("{file_path_without_ext}.{ext}")
-    } else {
-        file_path_without_ext.to_string()
-    };
-    let file_path = Path::new(file_path_string.as_str());
-    // 即便文件当前不存在，也要记进监听列表：监听落到「父目录 + 文件名」上（见
-    // wheel_rs::file_utils::FileWatcher），文件稍后才出现/被替换时才能触发热更新。
-    // 早期实现只在文件启动时就存在时才加入，配置目录晚于应用就绪就永久失去热更新能力。
-    files.push(file_path_string.clone());
     if !file_path.exists() {
         return config;
     }
-    let mut file = config::File::with_name(file_path_string.as_str());
+    let mut file = config::File::with_name(file_path.to_string_lossy().as_ref());
     // .json 后缀也用 Json5 格式
-    if file_path.ends_with(".json") {
+    if file_path
+        .extension()
+        .map(|ext| ext.eq_ignore_ascii_case("json"))
+        .unwrap_or(false)
+    {
         file = file.format(config::FileFormat::Json5)
     }
     config.add_source(file)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn temp_app_dir(tag: &str) -> std::path::PathBuf {
+        let dir = std::env::temp_dir().join(format!("robotech_cfg_test_{tag}"));
+        std::fs::create_dir_all(&dir).unwrap();
+        dir
+    }
+
+    #[test]
+    fn config_dir_wins_over_app_dir() {
+        let app_dir = temp_app_dir("config_first");
+        std::fs::create_dir_all(app_dir.join("config")).unwrap();
+        std::fs::write(app_dir.join("config/log.toml"), "level = \"debug\"\n").unwrap();
+        std::fs::write(app_dir.join("log.toml"), "level = \"info\"\n").unwrap();
+
+        let (builder, files) = add_cfg_files(&app_dir, "log", &None, Config::builder()).unwrap();
+        let cfg = builder.build().unwrap();
+        // config/ 优先：加载的是 config/log.toml
+        assert_eq!(cfg.get_string("level").unwrap(), "debug");
+        // 两个候选都登记监听
+        assert!(files.iter().any(|f| f.ends_with("config/log.toml")));
+        assert!(files.iter().any(|f| f.ends_with("/log.toml")));
+        std::fs::remove_dir_all(&app_dir).ok();
+    }
+
+    #[test]
+    fn falls_back_to_app_dir_and_registers_missing_config_dir() {
+        let app_dir = temp_app_dir("app_fallback");
+        std::fs::write(app_dir.join("log.toml"), "level = \"warn\"\n").unwrap();
+
+        let (builder, files) = add_cfg_files(&app_dir, "log", &None, Config::builder()).unwrap();
+        let cfg = builder.build().unwrap();
+        assert_eq!(cfg.get_string("level").unwrap(), "warn");
+        // config/ 下没文件时仍登记，便于之后往那里补文件
+        assert!(files.iter().any(|f| f.ends_with("config/log.toml")));
+        std::fs::remove_dir_all(&app_dir).ok();
+    }
 }
