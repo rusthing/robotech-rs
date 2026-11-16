@@ -238,7 +238,11 @@ fn add_cfg_files(
 /// # 向配置构建器添加单个配置源
 ///
 /// 根据文件路径（可含扩展名）构建 `config::File` 并添加到配置构建器。
-/// `.json` 后缀的文件会以 Json5 格式加载；文件不存在时直接跳过。
+/// `.json` 后缀的文件会以 Json5 格式加载。
+///
+/// 文件不存在时**不加载内容**，但仍把路径登记进 `files`：监听由
+/// [`wheel_rs::file_utils::FileWatcher`] 落到「父目录 + 文件名」上，
+/// 文件稍后才出现、或被 rename 覆盖时同样能触发热更新。
 ///
 /// ## 参数
 /// * `config` - 配置构建器
@@ -260,10 +264,13 @@ fn add_source(
         file_path_without_ext.to_string()
     };
     let file_path = Path::new(file_path_string.as_str());
+    // 即便文件当前不存在，也要记进监听列表：监听落到「父目录 + 文件名」上（见
+    // wheel_rs::file_utils::FileWatcher），文件稍后才出现/被替换时才能触发热更新。
+    // 早期实现只在文件启动时就存在时才加入，配置目录晚于应用就绪就永久失去热更新能力。
+    files.push(file_path_string.clone());
     if !file_path.exists() {
         return config;
     }
-    files.push(file_path_string.clone());
     let mut file = config::File::with_name(file_path_string.as_str());
     // .json 后缀也用 Json5 格式
     if file_path.ends_with(".json") {
