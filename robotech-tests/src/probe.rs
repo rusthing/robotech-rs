@@ -93,6 +93,31 @@ pub async fn item_id(code: &str) -> Result<Option<i64>, SvcError> {
     Ok(row.map(|r| r.try_get::<i64>("", "id").unwrap_or_default()))
 }
 
+/// 从独立连接取某编码行的审计字段 `(creater_id, create_ms, updater_id, update_ms)`
+///
+/// sync 插入测试用它核对「审计字段全部来自源端请求体，而非本地请求头」。
+pub async fn item_audit(code: &str) -> Result<Option<(i64, i64, i64, i64)>, SvcError> {
+    let stmt = sea_orm::Statement::from_string(
+        sea_orm::DatabaseBackend::Postgres,
+        format!(
+            "select creater_id, create_ms, updater_id, update_ms from tx_item where code = '{}'",
+            sql_escape(code)
+        ),
+    );
+    let row = probe()
+        .query_one_raw(stmt)
+        .await
+        .map_err(|e| SvcError::Runtime(anyhow::Error::new(e)))?;
+    Ok(row.map(|r| {
+        (
+            r.try_get::<i64>("", "creater_id").unwrap_or_default(),
+            r.try_get::<i64>("", "create_ms").unwrap_or_default(),
+            r.try_get::<i64>("", "updater_id").unwrap_or_default(),
+            r.try_get::<i64>("", "update_ms").unwrap_or_default(),
+        )
+    }))
+}
+
 /// 从独立连接取某编码行的 `update_ms`（版本号）与 `name`
 ///
 /// sync 测试用它核对「写入后的版本」与「被拦下后未被动过的数据」。

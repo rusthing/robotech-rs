@@ -1,22 +1,26 @@
-//! # sync 语义：带版本门槛的条件更新
+//! # sync 语义：单向同步（不存在则插入，存在则按版本门槛更新）
 //!
-//! `sync` 是给多源同步用的：按 id 更新，但只在「存储的 `update_ms` < 传入
-//! `update_ms`」时才真正改写；否则影响 0 行、**不报错**。用途是中心库只接受
-//! 比自己当前版本更新的写入——迟到、乱序、重复的重放被静默丢弃，不会把
-//! 新数据覆盖成旧数据。
+//! `sync` 是给多源单向同步用的：按 id 同步——id 不存在时插入（首次复制），
+//! 存在时只在「存储的 `update_ms` < 传入 `update_ms`」时才真正改写；否则
+//! 影响 0 行、**不报错**。用途是中心库只接受比自己当前版本更新的写入——迟到、
+//! 乱序、重复的重放被静默丢弃，不会把新数据覆盖成旧数据。
 //!
-//! 用真实 PostgreSQL 验五件事（单函数串行执行，避免并行建 schema 竞态）：
+//! 审计字段（`createrId`/`createMs`/`updaterId`/`updateMs`）全部来自请求体
+//! （源端），不取本地请求头。
+//!
+//! 用真实 PostgreSQL 验六件事（单函数串行执行，避免并行建 schema 竞态）：
 //!
 //! | 场景 | 断言点 |
 //! |---|---|
+//! | id 不存在 | 影响行数 1，审计字段按请求体落库 |
 //! | 传入版本更新 | 影响行数 1，字段与版本号都刷新 |
 //! | 传入版本更旧 | 影响行数 0（不报错），字段与版本号原样保留 |
 //! | 版本完全相同（重放） | 影响行数 0，幂等 |
 //! | 缺 id | 校验失败，不碰数据 |
 //! | 缺版本号 | 校验失败，不碰数据 |
 //!
-//! 第 2、3 组是这条逻辑的核心：0 行是**正常结果**而不是错误，调用方靠
-//! `Ro.extra` 里的行数区分「已应用 / 被拦下」。
+//! 0 行是**正常结果**而不是错误，调用方靠 `Ro.extra` 里的行数区分
+//! 「已插入/已应用 / 被拦下」。
 //!
 //! ## 怎么跑
 //!
@@ -101,8 +105,11 @@ fn 同步(id: u64, code: &str, name: Option<&str>, update_ms: u64) -> TxItemSync
     dto.code = Some(code.to_string());
     // 源字段是 Option<String> 时，DTO 里会再包一层：`Some(Some(v))` 才是「带上这个值」
     dto.name = Some(name.map(|v| v.to_string()));
+    // 审计字段全部来自源端请求体：插入时这组值落库；更新时创建字段被 DAO 锁死
+    dto.creater_id = Some(U64::from(7u64));
+    dto.create_ms = Some(U64::from(700u64));
+    dto.updater_id = Some(U64::from(8u64));
     dto.update_ms = Some(U64::from(update_ms));
-    dto._current_user_id = U64::from(1u64);
     dto
 }
 
@@ -129,7 +136,7 @@ async fn 建初始行(code: &str) -> (u64, i64) {
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn 只接受比自己新的版本() {
+async fn 不存在则插入_存在则按版本门槛更新() {
     let Ok(url) = std::env::var("ROBOTECH_TEST_DB_URL") else {
         eprintln!(
             "跳过：未设置 ROBOTECH_TEST_DB_URL；\
@@ -138,6 +145,32 @@ async fn 只接受比自己新的版本() {
         return;
     };
     准备环境(&url).await;
+
+    // ─────────────────────────────────────────────
+    // 0. id 不存在：插入（首次复制），审计字段按请求体落库
+    // ─────────────────────────────────────────────
+    let new_id = 9_000_000_000u64;
+    let version0 = 1_000u64;
+    let ro = TxItemSvc::sync(
+        同步(new_id, "sync-insert", Some("首份"), version0),
+        None::<&DatabaseConnection>,
+    )
+    .await
+    .expect("id 不存在应插入");
+    assert_eq!(ro.extra, Some(1), "应插入 1 行");
+
+    let audit = probe::item_audit("sync-insert")
+        .await
+        .expect("读取失败")
+        .expect("行应存在");
+    assert_eq!(audit, (7, 700, 8, version0 as i64), "审计字段应来自请求体");
+
+    let (ms, name) = probe::item_version_and_name("sync-insert")
+        .await
+        .expect("读取失败")
+        .expect("行应存在");
+    assert_eq!(ms as u64, version0, "插入后版本号应为传入值");
+    assert_eq!(name.as_deref(), Some("首份"), "插入后字段应为传入值");
 
     // ─────────────────────────────────────────────
     // 1. 传入版本更新：应用，字段与版本号都刷新

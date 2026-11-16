@@ -321,20 +321,19 @@ pub(crate) fn ctrl_macro(args: CtrlArgs, input: ItemStruct) -> TokenStream {
     // 生成sync方法
     if !skip.contains("sync") {
         generated_methods.push(quote! {
-        /// # 带版本门槛的条件更新（多源同步）
+        /// # 单向同步（多源同步：不存在则插入，存在则按版本门槛更新）
         ///
-        /// 与 `upsert` 不同：本接口只做「按 id 更新」，且要求传入的 `updateMs`
-        /// 严格大于存储的 `updateMs` 才真正写入；否则（本地更新或版本相同）影响
-        /// 0 行、按成功返回，不会把新数据覆盖成旧数据。
+        /// 与 `upsert` 不同：本接口的审计字段全部来自请求体（源端的 `createrId` /
+        /// `createMs` / `updaterId` / `updateMs`），不取本地请求头。id 不存在时插入
+        /// （首次复制），存在时要求传入的 `updateMs` 严格大于存储值才真正写入；
+        /// 否则（本地更新或版本相同）影响 0 行、按成功返回，不会把新数据覆盖成旧数据。
         ///
         /// ## 请求体
-        /// * `SyncDto` - id + 业务字段 + 必填 `updateMs`（版本号）
-        ///
-        /// ## 请求头
-        /// * `USER_ID_HEADER_NAME` - 当前用户ID，必需项，类型为u64
+        /// * `SyncDto` - id + 业务字段 + 必填 `createrId` / `createMs` /
+        ///   `updaterId` / `updateMs`（版本号）
         ///
         /// ## 返回值
-        /// * 成功时返回受影响行数（1=已应用，0=被版本门槛拦下），两者都算成功
+        /// * 成功时返回受影响行数（1=已插入/已应用，0=被版本门槛拦下），两者都算成功
         /// * 唯一键/外键冲突等失败照常返回
         #[utoipa::path(
             post,
@@ -344,11 +343,9 @@ pub(crate) fn ctrl_macro(args: CtrlArgs, input: ItemStruct) -> TokenStream {
         #[debug_handler]
         #[log_call]
         pub async fn sync(
-            headers: HeaderMap,
-            Json(mut dto): Json<#sync_dto_name>,
+            Json(dto): Json<#sync_dto_name>,
         ) -> Result<Json<Ro<u64>>, CtrlError> {
-            // 版本号来自请求体（SyncDto.update_ms），不取请求头时间戳
-            dto._current_user_id = get_current_user_id(&headers)?;
+            // 审计字段（createrId/createMs/updaterId/updateMs）全部来自请求体，不取请求头
             let result = #svc_name::sync::<DatabaseTransaction>(dto, None).await?;
             Ok(Json(result))
         }

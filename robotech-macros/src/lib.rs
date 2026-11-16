@@ -247,9 +247,11 @@ pub fn db_unwrap(args: TokenStream, input: TokenStream) -> TokenStream {
 /// Ex 版本（附带关联表信息）等方法。生成的方法内部调用对应的 `XxxDao`，
 /// 返回 `Ro<Vo>`、`Ro<ExVo>`、`Ro<PageRx<Vo>>` 等统一响应格式。
 ///
-/// `sync` 是带版本门槛的条件更新：按 id 更新，但只在「存储的 `update_ms` < 传入
-/// `update_ms`」时才真正改写，否则（本地更新或版本相同）影响 0 行、不报错——用于
-/// 多源同步时只接受比本地更新的写入。返回 `Ro<u64>`（受影响行数）。
+/// `sync` 是单向同步：id 不存在时插入（首次复制），存在时只在
+/// 「存储的 `update_ms` < 传入 `update_ms`」时才真正改写，否则（本地更新或
+/// 版本相同）影响 0 行、不报错——用于多源同步时只接受比本地更新的写入。
+/// 审计字段（`creater_id`/`create_ms`/`updater_id`/`update_ms`）来自请求体。
+/// 返回 `Ro<u64>`（受影响行数）。
 ///
 /// 使用前提：项目中需存在与结构体名称对应的 `dto`、`dao`、`mo`、`vo` 模块。
 ///

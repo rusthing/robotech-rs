@@ -233,15 +233,12 @@ pub fn crud_dto_macro(args: CrudDtoArgs, input: ItemStruct) -> TokenStream {
             pub _current_user_id: U64,
         }
 
-        // SyncDto（带版本门槛的条件更新：只有传入的 update_ms 严格大于存储值时才写入）
+        // SyncDto（单向同步：id 存在则按版本门槛更新，不存在则插入；
+        // 审计字段全部来自源端请求体，不取本地请求头）
         #[cfg(feature = "server")]
         #[derive(o2o::o2o, utoipa::ToSchema, Debug, Clone, Default, serde::Serialize, serde::Deserialize, validator::Validate, Setters, TypedBuilder)]
         #[serde(default, rename_all = "camelCase")]
         #[owned_into(ActiveModel)]
-        #[ghosts(
-            creater_id: Default::default(),
-            create_ms: Default::default(),
-        )]
         #[builder]
         #vis struct #sync_dto_name {
             #[validate(required(message = "id不能为空"))]
@@ -249,13 +246,32 @@ pub fn crud_dto_macro(args: CrudDtoArgs, input: ItemStruct) -> TokenStream {
             #[builder(default, setter(strip_option))]
             pub id: Option<U64>,
             #modify_fields
+            /// # 源端创建者ID
+            ///
+            /// id 不存在时用于插入；id 存在时由 DAO 锁死（不参与改写），
+            /// 保留目标库原有的创建者。
+            #[validate(required(message = "createrId不能为空"))]
+            #[into(creater_id, match ~ {Some(v)=>ActiveValue::Set(v.into()),None=>ActiveValue::NotSet})]
+            #[builder(default, setter(strip_option))]
+            pub creater_id: Option<U64>,
+            /// # 源端创建时间（毫秒）
+            ///
+            /// 同 `creater_id`：仅插入用，更新时锁死。
+            #[validate(required(message = "createMs不能为空"))]
+            #[into(create_ms, match ~ {Some(v)=>ActiveValue::Set(v.into()),None=>ActiveValue::NotSet})]
+            #[builder(default, setter(strip_option))]
+            pub create_ms: Option<U64>,
+            /// # 源端更新者ID
+            ///
+            /// 更新、插入都取自源端请求体，不取本地请求头。
+            #[validate(required(message = "updaterId不能为空"))]
+            #[into(updater_id, match ~ {Some(v)=>ActiveValue::Set(v.into()),None=>ActiveValue::NotSet})]
+            #[builder(default, setter(strip_option))]
+            pub updater_id: Option<U64>,
             #[validate(required(message = "updateMs不能为空"))]
             #[into(update_ms, match ~ {Some(v)=>ActiveValue::Set(v.into()),None=>ActiveValue::NotSet})]
             #[builder(default, setter(strip_option))]
             pub update_ms: Option<U64>,
-            #[serde(skip_deserializing)]
-            #[into(updater_id, ActiveValue::Set(~.into()))]
-            pub _current_user_id: U64,
         }
 
         // SaveDto
@@ -369,7 +385,7 @@ pub fn crud_dto_macro(args: CrudDtoArgs, input: ItemStruct) -> TokenStream {
             pub _current_user_id: U64,
         }
 
-        // SyncDto（client 模式：update_ms 随请求体发出，供服务端做版本门槛判断）
+        // SyncDto（client 模式：审计字段随请求体发出，服务端按版本门槛更新或插入）
         #[cfg(not(feature = "server"))]
         #[derive(utoipa::ToSchema, Debug, Clone, Default, serde::Serialize, serde::Deserialize, Setters, TypedBuilder)]
         #[serde(default, rename_all = "camelCase")]
@@ -379,9 +395,13 @@ pub fn crud_dto_macro(args: CrudDtoArgs, input: ItemStruct) -> TokenStream {
             pub id: Option<U64>,
             #client_modify_fields
             #[builder(default, setter(strip_option))]
+            pub creater_id: Option<U64>,
+            #[builder(default, setter(strip_option))]
+            pub create_ms: Option<U64>,
+            #[builder(default, setter(strip_option))]
+            pub updater_id: Option<U64>,
+            #[builder(default, setter(strip_option))]
             pub update_ms: Option<U64>,
-            #[serde(skip_serializing)]
-            pub _current_user_id: U64,
         }
 
         #[cfg(not(feature = "server"))]

@@ -15,8 +15,9 @@ use wheel_rs::str_utils::{split_camel_case, CamelFormat};
 
 /// 写操作方法名集合（before_write / after_write 快捷方式生效范围）
 ///
-/// `sync` 也是写方法（带版本门槛的条件更新），但它不像 `save` / `upsert` 那样
-/// 委托给 `add` / `modify`，因此必须显式列进来，before_write 快捷方式才会对它生效。
+/// `sync` 也是写方法（单向同步：不存在则插入、存在则按版本门槛更新），但它不像
+/// `save` / `upsert` 那样委托给 `add` / `modify`，因此必须显式列进来，
+/// before_write 快捷方式才会对它生效。
 const WRITE_METHODS: &[&str] = &["add", "modify", "del_by_id", "del_by_query_dto", "sync"];
 
 /// `#[svc]` 宏参数
@@ -495,18 +496,20 @@ pub(crate) fn svc_macro(args: SvcArgs, input: ItemStruct) -> TokenStream {
         let after_call = resolve_hook("sync", false, &args.after, &args.after_write, Some(quote! { rows }), Some(quote! { sync_dto }), true);
         let after_commit = write_notify(&args);
         generated_methods.push(quote! {
-        /// # 带版本门槛的条件更新（用于多源同步）
+        /// # 单向同步（用于多源同步：不存在则插入，存在则按版本门槛更新）
         ///
-        /// 按 id 更新，但只有在「存储的 `update_ms` < 传入 `update_ms`（即 `SyncDto.update_ms`）」
+        /// 按 id 同步：id 不存在时直接插入（首次复制），存在时只有在
+        /// 「存储的 `update_ms` < 传入 `update_ms`（即 `SyncDto.update_ms`）」
         /// 时才真正改写；否则（本地更新或版本相同）影响 0 行、不报错。
         ///
         /// 用途：多节点/多设备把本地改动推给中心时，中心只接受比自己当前版本更新的写入，
         /// 迟到/乱序/重复的重放被静默丢弃，不会把新数据覆盖成旧数据。
         ///
-        /// - `update_ms` 必填（缺失由 DTO 校验拦截）；只更新 `SyncDto` 里提供的字段
-        ///   （`ActiveValue::Set` 的部分更新），创建者信息与创建时间不会被同步改写；
-        /// - 返回值为受影响行数：1=已应用，0=被版本门槛拦下（本地更新）——两者都算成功，
-        ///   调用方若要区分「到底改了没」就读这个值；
+        /// - 审计字段（`creater_id`/`create_ms`/`updater_id`/`update_ms`）全部来自
+        ///   `SyncDto`（源端请求体），不取本地请求头；更新时创建者信息与创建时间
+        ///   被锁死、只刷新更新者与版本号；
+        /// - 返回值为受影响行数：1=已插入/已应用，0=被版本门槛拦下（本地更新）——两者
+        ///   都算成功，调用方若要区分「到底改了没」就读这个值；
         /// - 唯一键/外键冲突、参数校验失败、钩子失败等仍原样抛出，不受「0 行不报错」影响。
         ///
         /// 未传 `db` 时会自开事务：`before_sync` / `after_sync` 钩子与本次更新
@@ -532,7 +535,7 @@ pub(crate) fn svc_macro(args: SvcArgs, input: ItemStruct) -> TokenStream {
                 sync_dto.validate()?;
 
                 let active_model: ActiveModel = sync_dto.clone().into();
-                let rows = #dao_name::update_if_older(active_model, db).await?;
+                let rows = #dao_name::sync(active_model, db).await?;
                 #after_call
                 #after_commit
                 return Ok(Ro::success("同步完成".to_string()).extra(Some(rows)));
@@ -547,7 +550,7 @@ pub(crate) fn svc_macro(args: SvcArgs, input: ItemStruct) -> TokenStream {
                 sync_dto.validate()?;
 
                 let active_model: ActiveModel = sync_dto.clone().into();
-                let rows = #dao_name::update_if_older(active_model, db).await?;
+                let rows = #dao_name::sync(active_model, db).await?;
                 #after_call
                 rows
             };

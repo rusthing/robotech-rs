@@ -148,22 +148,20 @@ pub(crate) fn feign_macro(input: ItemStruct) -> TokenStream {
         }
     });
 
-    // sync
+    // sync：审计字段随请求体发出，不依赖请求头
     generated_methods.push(quote! {
         pub async fn sync(
             &self,
             dto: &#sync_dto_name,
         ) -> ::core::result::Result<robotech::api::Ro<u64>, robotech::api_client::ApiClientError> {
             let url = #sync_path.to_string();
-            // 版本号来自请求体（SyncDto.update_ms），不取请求头时间戳
-            let headers = Self::build_headers(dto._current_user_id.value(), ::core::option::Option::None)?;
             self.client
                 .request::<#sync_dto_name, u64>(
                     ::reqwest::Method::POST,
                     &url,
                     ::core::option::Option::None,
                     ::core::option::Option::Some(dto),
-                    ::core::option::Option::Some(&headers),
+                    ::core::option::Option::None,
                 )
                 .await
         }

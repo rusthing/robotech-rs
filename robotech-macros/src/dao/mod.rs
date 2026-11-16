@@ -504,20 +504,22 @@ pub(super) fn dao_macro(args: DaoArgs, input: ItemStruct) -> TokenStream {
     });
     }
 
-    // 生成update_if_older方法（带版本门槛的条件更新，用于 sync）
-    if !skip.contains("update_if_older") {
+    // 生成sync方法（单向同步：不存在则插入，存在则按版本门槛更新）
+    if !skip.contains("sync") {
         generated_members.push(quote! {
-            /// # 带版本门槛的条件更新
+            /// # 单向同步：不存在则插入，存在则按版本门槛更新
             ///
-            /// 按主键更新，但只在「存储的 `update_ms` < 传入 `update_ms`」时才真正改写——
-            /// 否则（本地更新或版本相同）影响 0 行、不报错。用于多源同步时只接受
+            /// 按主键同步：id 不存在时插入（首次复制），存在时只在
+            /// 「存储的 `update_ms` < 传入 `update_ms`」时才真正改写——否则
+            /// （本地更新或版本相同）影响 0 行、不报错。用于多源同步时只接受
             /// 比本地更新的写入，迟到/乱序/重复的重放被静默丢弃，不会把新数据覆盖成旧数据。
             ///
-            /// - `update_ms` 必须显式传入（来自 SyncDto），缺失视为非法调用；
-            /// - 只写 `ActiveValue::Set` 的字段（天然部分更新），创建者信息与创建时间
-            ///   不会被同步改写；
-            /// - 返回受影响行数：1=已应用，0=被版本门槛拦下（本地更新）。
-            pub async fn update_if_older<C>(mut active_model: ActiveModel, db: &C) -> Result<u64, DaoError>
+            /// - 审计字段（`creater_id`/`create_ms`/`updater_id`/`update_ms`）必须显式传入
+            ///   （来自 SyncDto）；插入时四者一并落库，更新时创建者信息与创建时间被锁死、
+            ///   只刷新更新者与版本号；
+            /// - 只写 `ActiveValue::Set` 的字段（天然部分更新）；
+            /// - 返回受影响行数：1=已插入/已应用，0=被版本门槛拦下（本地更新）。
+            pub async fn sync<C>(active_model: ActiveModel, db: &C) -> Result<u64, DaoError>
             where
                 C: ConnectionTrait,
             {
@@ -526,7 +528,7 @@ pub(super) fn dao_macro(args: DaoArgs, input: ItemStruct) -> TokenStream {
                     ActiveValue::Set(v) | ActiveValue::Unchanged(v) => v,
                     ActiveValue::NotSet => {
                         return Err(DaoError::Runtime(::anyhow::anyhow!(
-                            "update_if_older 需要 update_ms 版本号"
+                            "sync 需要 update_ms 版本号"
                         )));
                     }
                 };
@@ -534,30 +536,53 @@ pub(super) fn dao_macro(args: DaoArgs, input: ItemStruct) -> TokenStream {
                     ActiveValue::Set(v) | ActiveValue::Unchanged(v) => v,
                     ActiveValue::NotSet => {
                         return Err(DaoError::Runtime(::anyhow::anyhow!(
-                            "update_if_older 需要 id"
+                            "sync 需要 id"
                         )));
                     }
                 };
-                // 锁死创建者信息，不能被同步改写
-                active_model.creater_id = ActiveValue::NotSet;
-                active_model.create_ms = ActiveValue::NotSet;
                 // 这两个 trait/类型只在本方法用到，函数级导入——
                 // 宏注入的 use 落在模块级，会跟用户手写的 `use sea_orm::ColumnTrait` 撞名（E0252）
                 use sea_orm::{ColumnTrait, Update};
+                // 更新分支：锁死创建者信息，不能被同步改写；
+                // 插入分支保留原始 active_model（creater_id/create_ms 为 Set）。
+                let mut update_model = active_model.clone();
+                update_model.creater_id = ActiveValue::NotSet;
+                update_model.create_ms = ActiveValue::NotSet;
                 // 原子条件更新：UPDATE ... SET <Set 字段> WHERE id = ? AND update_ms < ?
                 // `.set()` 只会把 ActiveValue::Set 的字段写进 SET 子句
                 let mut __update = Update::many(Entity)
-                    .set(active_model)
+                    .set(update_model)
                     .filter(Column::Id.eq(id_val))
                     .filter(Column::UpdateMs.lt(version));
                 if Self::__has_data_scope() {
                     __update = __update.filter(Self::__data_scope_only());
                 }
-                let res = __update
+                let rows = __update
                     .exec(db)
                     .await
+                    .map_err(DaoError::parse_db_err)?
+                    .rows_affected;
+                if rows > 0 {
+                    return Ok(rows);
+                }
+
+                // 影响 0 行有两种可能：记录不存在（需要插入）或版本门槛拦下（保持现状）。
+                // 用一次查询区分两者，避免把「本地更新」误判成「需要插入」。
+                let exists = Entity::find_by_id(id_val)
+                    .one(db)
+                    .await
                     .map_err(DaoError::parse_db_err)?;
-                Ok(res.rows_affected)
+                if exists.is_some() {
+                    // 记录存在但版本不新：被版本门槛拦下，保持现状
+                    return Ok(0);
+                }
+
+                // 记录不存在：插入（首次复制），审计字段来自请求体（active_model 未动过）
+                active_model
+                    .insert(db)
+                    .await
+                    .map(|_| 1)
+                    .map_err(DaoError::parse_db_err)
             }
         });
     }
