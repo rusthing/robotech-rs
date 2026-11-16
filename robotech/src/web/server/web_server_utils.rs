@@ -40,6 +40,71 @@ pub static ROUTER_SLICE: [fn() -> Router];
 #[distributed_slice]
 pub static API_DOC_SLICE: [fn() -> (Url<'static>, OpenApi)];
 
+/// # 业务路由中间件注册切片
+///
+/// 业务模块通过 `#[distributed_slice(ROUTER_LAYER_SLICE)]` 注册
+/// `fn(Router) -> Router`，`setup_web_server` 在合并完 [`ROUTER_SLICE`] 里所有
+/// 业务路由之后、注册健康检查与 Swagger 之前，按切片遍历顺序依次执行
+/// `router = apply(router)`，等价于对全部业务路由统一 `.layer(...)` / `.route_layer(...)`。
+///
+/// ## 用法
+///
+/// ```ignore
+/// use axum::{middleware, Router};
+/// use linkme::distributed_slice;
+/// use robotech::web::ROUTER_LAYER_SLICE;
+///
+/// #[distributed_slice(ROUTER_LAYER_SLICE)]
+/// static REQUIRE_IDENTITY_LAYER: fn(Router) -> Router = require_identity_layer;
+///
+/// fn require_identity_layer(router: Router) -> Router {
+///     // 需要保留未匹配路径的 404 时用 route_layer
+///     router.route_layer(middleware::from_fn(require_identity))
+/// }
+/// ```
+///
+/// ## 覆盖范围
+///
+/// 只覆盖 [`ROUTER_SLICE`] 注册的业务路由（含业务模块里的 `nest` 子路由），
+/// **不覆盖**健康检查与 Swagger UI：健康检查是启动自检与探针的入口，不能被业务鉴权拦住。
+///
+/// 未匹配路径的行为取决于注册项用哪个方法：
+/// * `Router::route_layer`：只包住已注册路由，未知路径仍是 404（推荐）；
+/// * `Router::layer`：axum 会把被 layer 包装过的 fallback 一起合并进来，
+///   未知路径也会进入中间件（例如返回 401 而不是 404）。需要保留 404 语义时不要用 `layer`。
+///
+/// ## 顺序
+///
+/// 后应用的位于外层（与连续调用 `Router::layer` / `route_layer` 一致）；
+/// 切片元素的遍历顺序由链接顺序决定，跨 crate 不保证稳定，
+/// 因此**多个注册项之间不要有先后依赖**，需要固定顺序时合并成一个注册项。
+///
+/// ## 空切片
+///
+/// 没有注册项时循环零次，Router 与未引入该扩展点时完全一致，无额外分配或包装。
+#[distributed_slice]
+pub static ROUTER_LAYER_SLICE: [fn(Router) -> Router];
+
+/// # 依次应用业务路由中间件
+///
+/// 抽成函数便于单测覆盖“空切片”和“后应用者在外层”两条语义。
+///
+/// ## 参数
+/// * `router` - 已合并完业务路由的 Router
+/// * `layers` - 中间件应用函数，按迭代顺序执行
+///
+/// ## 返回值
+/// 应用完所有中间件后的 Router
+fn apply_router_layers(
+    mut router: Router,
+    layers: impl IntoIterator<Item = fn(Router) -> Router>,
+) -> Router {
+    for apply_layer in layers {
+        router = apply_layer(router);
+    }
+    router
+}
+
 use arc_swap::ArcSwapOption;
 use std::sync::atomic::{AtomicU16, Ordering};
 
@@ -209,6 +274,15 @@ pub async fn setup_web_server(
         for build_router in ROUTER_SLICE.iter() {
             router = router.merge(build_router());
         }
+        // 业务可注册的全局路由中间件：只包住业务路由。
+        //
+        // 放在这里的三个原因：
+        // 1. 健康检查是启动自检（wait_for_web_server_ready）和探针入口，请求不带业务头，
+        //    被鉴权层包住会导致启动超时；
+        // 2. Swagger UI 属于开发者界面，是否鉴权由业务自行决定，框架不默认拦；
+        // 3. 位置在框架全局 layer（CORS / IP 拦截等）之内，预检请求不会走到这里。
+        // 未匹配路径的 404 语义由注册项决定：用 route_layer 保持 404，用 layer 则会被一起包住。
+        router = apply_router_layers(router, ROUTER_LAYER_SLICE.iter().copied());
         // 判断是否暴露健康检查
         if health_check.exposed {
             router = router.route(health_check_uri, get(health));
@@ -662,4 +736,103 @@ fn bind_and_start(
         info!("监听 <{actual_addr}> 成功✅  -> 🌐 {http_protocol}://{ip}:{actual_port}");
     }
     Ok((health_check_url_prefix.unwrap(), web_service_handles))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use axum::body::Body;
+    use axum::extract::Request as ExtRequest;
+    use axum::http::{Request, StatusCode};
+    use axum::middleware::{self, Next};
+    use axum::response::{IntoResponse, Response};
+    use axum::routing::get;
+    use tower::ServiceExt;
+
+    async fn hello() -> &'static str {
+        "ok"
+    }
+
+    fn base_router() -> Router {
+        Router::new().route("/ping", get(hello))
+    }
+
+    /// 用来验证中间件执行顺序的请求扩展标记
+    #[derive(Clone)]
+    struct Mark;
+
+    async fn mark(request: ExtRequest, next: Next) -> Response {
+        let mut request = request;
+        request.extensions_mut().insert(Mark);
+        next.run(request).await
+    }
+
+    async fn require_mark(request: ExtRequest, next: Next) -> Response {
+        if request.extensions().get::<Mark>().is_none() {
+            return StatusCode::UNAUTHORIZED.into_response();
+        }
+        next.run(request).await
+    }
+
+    fn layer_mark(router: Router) -> Router {
+        router.layer(middleware::from_fn(mark))
+    }
+
+    fn layer_require_mark(router: Router) -> Router {
+        router.layer(middleware::from_fn(require_mark))
+    }
+
+    fn route_layer_require_mark(router: Router) -> Router {
+        router.route_layer(middleware::from_fn(require_mark))
+    }
+
+    async fn status(router: Router, path: &str) -> StatusCode {
+        router
+            .oneshot(Request::builder().uri(path).body(Body::empty()).expect("request"))
+            .await
+            .expect("response")
+            .status()
+    }
+
+    #[tokio::test]
+    async fn empty_layer_slice_keeps_router_unchanged() {
+        let router = apply_router_layers(base_router(), Vec::<fn(Router) -> Router>::new());
+        assert_eq!(status(router, "/ping").await, StatusCode::OK);
+    }
+
+    #[tokio::test]
+    async fn later_registered_layer_is_outer() {
+        // mark 后应用 → 位于外层，先于 require_mark 执行，因此能提供标记
+        let layers: [fn(Router) -> Router; 2] = [layer_require_mark, layer_mark];
+        let router = apply_router_layers(base_router(), layers);
+        assert_eq!(status(router, "/ping").await, StatusCode::OK);
+    }
+
+    #[tokio::test]
+    async fn earlier_registered_layer_is_inner() {
+        // mark 先应用 → 位于内层，require_mark 先执行，拿不到标记
+        let layers: [fn(Router) -> Router; 2] = [layer_mark, layer_require_mark];
+        let router = apply_router_layers(base_router(), layers);
+        assert_eq!(status(router, "/ping").await, StatusCode::UNAUTHORIZED);
+    }
+
+    #[tokio::test]
+    async fn route_layer_keeps_unmatched_paths_404() {
+        // route_layer 只包已注册路由：业务路由被拦，未知路径仍是 404
+        let layers: [fn(Router) -> Router; 1] = [route_layer_require_mark];
+        let router = apply_router_layers(base_router(), layers.clone());
+
+        assert_eq!(status(router.clone(), "/ping").await, StatusCode::UNAUTHORIZED);
+        assert_eq!(status(router, "/missing").await, StatusCode::NOT_FOUND);
+    }
+
+    #[tokio::test]
+    async fn plain_layer_also_wraps_fallback() {
+        // 用 layer 时 axum 会连 fallback 一起包住，未知路径跟着进入中间件；
+        // 这是文档里建议用 route_layer 的原因。
+        let layers: [fn(Router) -> Router; 1] = [layer_require_mark];
+        let router = apply_router_layers(base_router(), layers);
+
+        assert_eq!(status(router, "/missing").await, StatusCode::UNAUTHORIZED);
+    }
 }

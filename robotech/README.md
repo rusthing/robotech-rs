@@ -363,17 +363,44 @@ Built-in common middleware:
 | Trace | Request tracing | Log request duration, status code |
 | IpFilter | IP filtering | Whitelist/blacklist support |
 | Health Check | Health monitoring | `/health` endpoint |
-| Auth | Authentication | JWT/OAuth2 (customizable) |
+| URN guards | Access control | `forbidden_urns` / `local_only_urns` |
 
-**Adding Middleware**:
+**Adding global business middleware** (`ROUTER_LAYER_SLICE`):
+
 ```rust
-use tower::ServiceBuilder;
+use axum::{middleware, Router};
+use linkme::distributed_slice;
+use robotech::web::ROUTER_LAYER_SLICE;
+
+#[distributed_slice(ROUTER_LAYER_SLICE)]
+static REQUIRE_IDENTITY_LAYER: fn(Router) -> Router = require_identity_layer;
+
+fn require_identity_layer(router: Router) -> Router {
+    // route_layer 只包已注册路由；用 layer 会连 fallback 一起包住，未知路径会变成 401
+    router.route_layer(middleware::from_fn(require_identity))
+}
+```
+
+The hook runs after all `ROUTER_SLICE` routers are merged and before the health-check route,
+Swagger UI and the framework layers, so:
+
+- it only wraps business routes: health probes and Swagger are never blocked by it; use
+  `route_layer` (as above) to keep unmatched paths returning 404;
+- CORS / IP filtering / URN guards stay outside it, so preflight requests are short-circuited
+  before reaching your layer;
+- layers are applied as `router = f(router)`, so the later one is the outer one. Traversal order
+  across crates is link-order dependent — do not rely on ordering between registrations;
+  combine them into a single registration if order matters;
+- with no registration the slice loop is a no-op and the router is identical to before.
+
+**Adding middleware locally**:
+
+```rust
 use tower_http::trace::TraceLayer;
 
 let app = Router::new()
     .route("/api/list", get(handler))
-    .layer(TraceLayer::new_for_axum())
-    .layer(CorsLayer::permissive());
+    .layer(TraceLayer::new_for_http());
 ```
 
 ### 9. Dictionary Enums (Dic)
