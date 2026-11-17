@@ -691,7 +691,6 @@ Full documentation at: [robotech-macros](../robotech-macros/)
 ### Complete Microservice Example
 
 ```rust
-use robotech::prelude::*;
 use serde::{Deserialize, Serialize};
 use sea_orm::EntityTrait;
 
