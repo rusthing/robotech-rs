@@ -8,44 +8,34 @@ RoboTech-RS 是一个用 Rust 编写的后端服务微服务框架。本项目�
 
 ```
 src/
-├── api_client/         # API 客户端（可选 feature：api-client）
-│                       # 提供 HTTP 客户端封装，用于调用其他微服务
-├── app/               # 应用配置管理（feature：app）
-│                       # 配置文件加载、应用上下文管理
-├── cfg/               # 配置模块（feature：app）
-│                       # 支持 TOML/YAML/JSON 格式配置文件
-├── cst/               # 常量定义
-│                       # 全局常量和枚举定义
-├── dao/               # 数据访问层（feature：db）
-│   ├── eo/            # Entity Object - 数据库实体映射
-│                       # 基于 SeaORM Entity 封装
-│   ├── dao_error.rs   # DAO 错误处理
-│   └── dao_utils.rs   # DAO 工具函数
-│                       # 通用 CRUD 操作封装
-├── db/                # 数据库连接与迁移（feature：db）
-│                       # 数据库连接池管理、迁移脚本执行
-├── env/               # 环境变量管理（feature：app）
-│                       # 环境变量读取和验证
-├── log/               # 日志系统（feature：app）
-│                       # 结构化日志，支持文件轮转、多输出源
-├── macros/            # 宏定义（feature：macros）
-│                       # 简化开发的常用宏
-├── ro/                # 响应对象（Response Object）
-│                       # 统一的 API 响应格式
-├── signal/            # 信号处理（feature：app）
-│                       # SIGTERM/SIGKILL 优雅停机支持
-├── svc/               # 业务逻辑层（feature：app）
-│                       # 通用业务逻辑基类和服务模板
-└── web/               # Web 服务器（feature：web）
-    ├── cors/          # CORS 跨域中间件
-    ├── ctrl/          # 控制器基类
-    │                       # BaseController 提供通用 HTTP 处理方法
-    ├── health_check/  # 健康检查端点
-    ├── https/         # HTTPS/TLS 支持
-    ├── middleware/    # 中间件
-    │                       # 请求日志、认证、限流等
-    └── server/        # Web 服务器核心
-            # Axum 服务器封装、多端口监听
+├── api/               # 统一响应（Ro / PageRx）、U64 / F64 / Duration 包装、校验适配、脱敏
+├── api_client/        # HTTP 客户端（feature: api-client）
+├── app/               # 配置监听（AppWatcher）、应用生命周期、ID worker 初始化（feature: app）
+├── cache/             # 缓存抽象（local-cache / distributed-cache）
+├── cfg/               # 配置构建与解析（build_cfg / BaseConfig）
+├── cst/               # 常量（请求头名、系统操作者 ID）
+├── dao/               # 数据访问公共能力（feature: db）
+│   ├── eo/            # 唯一键 / 外键元数据（不是业务实体）
+│   ├── sort/          # 服务端排序（#[sortable] 的实现）
+│   ├── data_scope.rs  # 数据范围注入
+│   └── ...            # 事务、检索参数、树编码、关联转换
+├── db/                # 连接池（setup_db_conn / get_db_conn）与迁移（feature: db）
+├── env/               # 环境信息（APP_DIR、可执行文件名、profile）
+├── log/               # 日志（LogWatcher、本地滚动文件、静音过滤）
+├── macros/            # 过程宏导出（feature: macros）
+├── micro_svc/         # 服务治理：配置中心 / 注册中心 / Feign
+├── mq/                # MQTT / NATS / RabbitMQ
+├── redis/             # Redis 客户端
+├── refresh/           # 刷新信号（JetStream 广播 + 订阅自愈）
+├── signal/            # 信号与 PID 文件（feature: app）
+├── svc/               # 服务层错误类型（SvcError，feature: app）
+├── template/          # 模板渲染的调用侧封装
+├── tsdb/              # 时序库（InfluxDB）
+└── web/               # Web 服务（feature: web）
+    ├── ctrl/          # CtrlError 与请求头工具
+    ├── middleware/    # IP 黑名单、禁止访问 / 仅本地 URN
+    ├── cors/ https/ health_check/
+    └── server/        # Axum 封装、多端口监听
 ```
 
 ### Feature Flags 机制
@@ -133,21 +123,21 @@ src/
 **仅 API 服务**（最小组合）：
 ```toml
 [dependencies.robotech]
-version = "1.5.1"
+version = "1.18.0"
 features = ["app"]
 ```
 
 **完整 Web 服务 + 数据库**：
 ```toml
 [dependencies.robotech]
-version = "1.5.1"
+version = "1.18.0"
 features = ["web", "db", "macros"]
 ```
 
 **微服务场景（含客户端）**：
 ```toml
 [dependencies.robotech]
-version = "1.5.1"
+version = "1.18.0"
 features = ["web", "db", "macros", "api-client"]
 ```
 
@@ -185,9 +175,9 @@ features = ["web", "db", "macros", "api-client"]
   - 优雅停机支持
   - PID 文件管理
 
-- **`svc`**: 业务逻辑层基类
-  - BaseSvc 通用服务模板
-  - 事务管理辅助
+- **`svc`**: 服务层
+  - `SvcError` 业务错误类型（含 `NotFound`）
+  - 事务由 DAO 方法接收 `ConnectionTrait` 透传
 
 - **`app`**: 应用上下文
   - 全局配置存储
@@ -200,9 +190,9 @@ features = ["web", "db", "macros", "api-client"]
   - 多端口监听
   - HTTPS/TLS 支持
 
-- **`web::ctrl`**: 控制器基类
-  - BaseController trait
-  - 自动错误处理和响应包装
+- **`web::ctrl`**: 控制器支撑
+  - `CtrlError`：把 `SvcError` 映射成 HTTP 状态 + `Ro`
+  - `#[ctrl]` 宏生成的 handler 负责响应包装
 
 - **`web::cors`**: CORS 中间件
   - 自定义跨域规则
@@ -210,8 +200,8 @@ features = ["web", "db", "macros", "api-client"]
 
 - **`web::middleware`**: 中间件集合
   - TraceLayer：请求追踪和日志
-  - IpFilter：IP 白名单/黑名单
-  - HealthCheck：健康检查端点
+  - `ip_ban`：IP 黑名单（`IpBanState`）
+  - `forbidden_urns` / `local_only_urns`：禁止访问 / 仅本地访问
 
 - **`web::health_check`**: 健康检查
   - `/health` 端点实现
@@ -224,7 +214,7 @@ features = ["web", "db", "macros", "api-client"]
 ### 数据库模块（feature: db）
 
 - **`dao`**: 数据访问层
-  - `BaseDAO` trait：泛型 CRUD 操作
+  - `#[dao]` 宏：为实体生成泛型 CRUD 与检索方法
   - `EO`（Entity Object）：数据库实体映射
   - DAO 工具函数
   - 外键和唯一键处理
@@ -237,10 +227,10 @@ features = ["web", "db", "macros", "api-client"]
 ### 宏系统（feature: macros）
 
 - **`macros`**: 简化开发的宏
-  - `build_app_cfg!`：构建配置
-  - `watch_cfg_file!`：监听配置变化
+  - `bootstrap!`：启动链（配置加载 + 监听 + 信号）
   - `db_migrate!`：执行迁移
-  - `log_call`：自动日志记录
+  - `#[log_call]`：自动记录调用日志
+  - 其余见 [robotech-macros](../robotech-macros/)
   - 更多见 [robotech-macros](../robotech-macros/)
 
 ### API 客户端（feature: api-client）
@@ -254,227 +244,147 @@ features = ["web", "db", "macros", "api-client"]
 
 ### 1. 统一的 API 响应格式
 
-所有 API 响应遵循统一结构，前端可以轻松解析：
+所有响应都由 `robotech::api::Ro<E>` 包装，`None` 字段不参与序列化：
 
-```json
-{
-  "result": 1,
-  "msg": "Operation completed successfully",
-  "timestamp": 1700000000000,
-  "extra": {},
-  "detail": "Optional detailed information",
-  "code": "Optional business code"
-}
+```rust
+use robotech::api::Ro;
+
+Ro::success("查询成功".to_string())
+Ro::success("查询成功".to_string()).detail(Some("共 2 条".to_string()))
+Ro::illegal_argument("参数不合法".to_string())
+Ro::warn("数据已存在".to_string()).code(Some("RTW00001".to_string()))
 ```
 
-**字段说明**：
-- `result`：响应结果码（Success=1, Fail=-1 等）
-- `msg`：响应消息提示
-- `timestamp`：时间戳（毫秒）
-- `extra`：扩展数据字段
-- `detail`：详细信息（列表、分页等）
-- `code`：业务编码（用于国际化）
+| 字段 | 含义 |
+|---|---|
+| `result` | `RoResult`：`Success = 1` / `IllegalArgument = -1` / `Warn = -2` / `Fail = -3` |
+| `msg` | 提示信息 |
+| `timestamp` | 毫秒时间戳，序列化为**字符串**（见 `U64`） |
+| `extra` | 业务数据，`Option<E>` |
+| `detail` | 可选明细 |
+| `code` | 可选业务码 |
 
-**使用示例**：
+业务码常量在 `robotech::api::ro_code`：`RTW00001` 重复键、`RTW00002` 插入违反外键、
+`RTW00003` 删除违反外键。
+
+### 2. 数据访问层（`#[dao]`）
+
+`#[dao]` 一次性生成整条 CRUD + 检索链路，DAO 文件通常只有一行：
+
 ```rust
-use robotech::ro::{RO, Result};
-
-// 成功响应
-RO::success().finish()
-
-// 带详情响应
-RO::success().detail(vec![item1, item2]).finish()
-
-// 错误响应
-RO::illegal_argument("Invalid input").finish()
+#[dao(
+    unique_keys: [("code", "编码")],
+    like_columns: [Column::Code, Column::Name],
+)]
+pub struct TxItemDao;
 ```
 
-### 2. BaseDAO 数据访问层
+生成的方法：`insert` / `update` / `sync` / `delete_by_condition` / `get_by_id` /
+`get_by_condition` / `list_by_condition` / `page_by_condition`，以及带关联的 `ex_` 版本
+和 `search_*` 系列。它们接收 `db: &C where C: ConnectionTrait`，同一个方法既能跑在连接池
+上，也能跑在事务里。
 
-提供通用的 CRUD 操作，大幅减少重复代码：
+**唯一键、外键必须登记**：登记了才能把驱动层的约束报错翻译成「哪个字段的哪个值重复了」
+这样的可读信息；不登记就会退化成约束名甚至 500。
 
-**核心功能**：
-- `create`：创建记录
-- `update`：更新记录
-- `delete_by_id`：根据 ID 删除
-- `get_by_id`：根据 ID 查询
-- `list`：列出所有记录
-- `page_list`：分页查询
-- `exists`：判断记录是否存在
+### 3. 控制器层（`#[ctrl]`）
 
-**使用示例**：
 ```rust
-use robotech::dao::BaseDAO;
-use sea_orm::EntityTrait;
-
-#[derive(EntityTrait)]
-struct MyEntity;
-
-// 自动生成 CRUD 方法
-impl_base_dao!(MyEntity);
-
-// 使用
-let entity = MyEntity::create(&ctx, data).await?;
-let list = MyEntity::list(&ctx).await?;
-let page = MyEntity::page_list(&ctx, page_num, page_size).await?;
+#[ctrl]
+pub struct TxItemCtrl;
 ```
 
-### 3. BaseController 控制器层
+为每个服务方法生成一个 axum handler（`add` / `modify` / `save` / `upsert` / `sync` /
+`del_by_id` / `get_by_id` / `page_by_query_dto` 等），自带 `#[utoipa::path]`、
+`#[debug_handler]`、`#[log_call]`，返回 `Json<Ro<...>>`。错误统一走 `CtrlError`：
 
-提供 HTTP 请求处理基类，简化路由控制：
+| 错误 | HTTP |
+|---|---|
+| 参数校验 / Header 非法 / multipart | 400 |
+| `SvcError::NotFound` | 404 |
+| 重复键、插入/删除违反外键 | **200 + `Ro(Warn)` + `code`** |
+| 其它 | 500 |
 
-**核心功能**：
-- 统一异常处理和错误转换
-- 自动包装响应为 RO 格式
-- 内置中间件支持
-- CORS、认证、限流等常用中间件开箱即用
+也就是说状态码不是唯一的错误分类依据，前端要按 `code` 分支。
 
-**使用示例**：
+### 4. 配置管理
+
+`bootstrap!(AppConfig)` 通过 `AppWatcher` 加载配置，优先级从低到高：
+
+1. `$APP_DIR/config/<可执行文件名>.<ext>`，不存在则回落
+   `$APP_DIR/<可执行文件名>.<ext>`（`toml` / `json` / `json5` / `yml` / `yaml` / `ini` /
+   `ron`）；
+2. 配了 `profile` 时再叠加 `<可执行文件名>-<profile>.<ext>`；
+3. 配了 `[micro-svc]` 时叠加配置中心；
+4. `APP_` 前缀的环境变量，优先级最高。
+
+`-c <路径>` 指定单份文件后不再按目录查找。任何被监听的文件改动都会重新执行 `setup`
+回调 —— 启动与热更新是同一条代码路径，所以**不要**在 `main` 里写一次性的初始化逻辑。
+
+### 5. 日志
+
+`bootstrap!` 会自动启动 `LogWatcher`（配置读 `log.<ext>`，环境变量前缀 `LOG`，改动热更新）。
+业务代码只用 `tracing`：
+
 ```rust
-use robotech::web::ctrl::BaseController;
-
-struct MyController;
-
-#[async_trait]
-impl BaseController for MyController {
-    // 定义路由和处理方法
-    async fn get_list(&self, state: AppState) -> impl IntoResponse {
-        self.success_response(state).await
-    }
-}
-```
-
-### 4. 配置管理系统
-
-支持多层配置优先级：命令行参数 > 环境变量 > 配置文件 > 默认值
-
-**配置加载流程**：
-1. 启动时加载配置文件（TOML/YAML/JSON）
-2. 环境变量覆盖配置项
-3. 命令行参数最高优先级
-4. 配置文件变化时自动热重载
-
-**使用示例**：
-```rust
-use robotech::cfg::build_app_cfg;
-
-// 加载配置
-let config = build_app_cfg::<AppConfig>("config.toml")?;
-
-// 监听配置变化
-watch_cfg_file!("app", {
-    let new_config = build_app_cfg::<AppConfig>("config.toml")?;
-    apply_new_config(new_config);
-});
-```
-
-### 5. 日志系统
-
-基于 Tracing 框架的结构化日志，生产环境开箱即用：
-
-**核心功能**：
-- 多输出源（控制台、文件）
-- 日志轮转（按大小、按时间）
-- JSON 格式输出（便于 ELK/Loki 收集）
-- 动态日志级别调整
-- 调用链追踪（span/span树）
-
-**使用示例**：
-```rust
-use robotech::log::init_log;
-
-// 初始化日志
-init_log()?;
-
-// 基本日志
 tracing::info!("Service started");
 tracing::debug!(user_id = 123, "Processing user");
-tracing::warn!("High memory usage: {}MB", mem_usage);
 tracing::error!(error = %e, "Failed to process request");
-
-// Span 追踪
-tracing::instrument(name = "process_request", fields(user_id))
-async fn handle_request(id: u64) {
-    tracing::debug!("Handling request");
-    // ... 业务逻辑
-}
 ```
+
+日志轮转由框架的 `LocalRollingFile` 负责（按大小/时间，带时区）。**不要**自己再接一套
+`tracing_appender`，会重复写并破坏热更新链路。
 
 ### 6. 数据库连接与迁移
 
-自动管理数据库连接池和执行迁移：
-
-**核心功能**：
-- 连接池管理（最大/最小连接数）
-- 自动迁移执行（启动时升级数据库 schema）
-- SQL 日志记录
-- 事务支持
-
-**使用示例**：
 ```rust
-use robotech::db::init_db_conn;
-
-// 初始化数据库连接
-init_db_conn(config.clone()).await?;
-
-// 自动迁移
-db_migrate!("postgres://localhost/mydb");
-
-// 查询
-let entities = MyEntity::find().all(db).await?;
+setup_db_conn(app_config.db.clone(), changed).await?;   // 建池；配置没变则复用
+let db = get_db_conn()?;                                // 全局连接池
 ```
+
+`DbConnConfig` 包装 SeaORM 的 `ConnectOptions`：连接池大小、超时、SQL 日志、
+`schema_search_path` 等。**驱动不由框架绑定**：业务 crate 自己要给 `sea-orm` 开
+`sqlx-postgres` / `sqlx-mysql`。
+
+迁移用 `db_migrate!(db_url)`，会按 URL scheme 从业务 crate 的
+`migrations/{pgsql,mysql,sqlite}` 目录执行。
 
 ### 7. 信号处理与优雅停机
 
-支持 Unix 信号，实现优雅停机：
+`bootstrap!` 已接好 `SignalManager` + `wait_app_exit`，`-s` 参数决定行为：
 
-**支持的信号**：
-- `SIGTERM`（15）：优雅停机
-- `SIGINT`（2）：中断
-- `SIGUSR1/USR2`：自定义处理
+| `-s` | 行为 |
+|---|---|
+| `start`（默认） | 先发 `SIGCONT` 探测旧进程，再启动 |
+| `restart` | 先 `SIGTERM` 停旧进程，再启动新进程 |
+| `stop` / `s` | `SIGTERM`，优雅停机 |
+| `kill` / `k` | `SIGKILL`，强制终止 |
 
-**信号指令**：
-- `start`：默认值，先发送 SIGCONT 检查是否已运行
-- `restart`：先 SIGTERM 停止旧进程，再启动新进程
-- `stop/s`：发送 SIGTERM 优雅停机
-- `kill/k`：发送 SIGKILL 强制终止
+停机逻辑用 `register_shutdown_hook` 注册；PID 文件与可执行文件放在一起。
 
-**使用示例**：
+### 8. 中间件
+
+内置：请求追踪、CORS、IP 黑名单、禁止访问 URN、仅本地访问 URN、健康检查（`/health`）。
+
+业务级全局中间件走 `ROUTER_LAYER_SLICE` 扩展点：
+
 ```rust
-use robotech::signal::SignalManager;
+use axum::{middleware, Router};
+use linkme::distributed_slice;
+use robotech::web::ROUTER_LAYER_SLICE;
 
-let (mut mgr, old_pid) = SignalManager::new("start".to_string())?;
-let receiver = mgr.watch_signal()?;
+#[distributed_slice(ROUTER_LAYER_SLICE)]
+static REQUIRE_IDENTITY_LAYER: fn(Router) -> Router = require_identity_layer;
 
-// 等待信号并优雅关闭
-wait_app_exit(signal_receiver, || async move {
-    stop_services().await.ok();
-    Ok(())
-}).await?
+fn require_identity_layer(router: Router) -> Router {
+    // route_layer 只包已注册路由；用 layer 会连 fallback 一起包住，未知路径会变成 401
+    router.route_layer(middleware::from_fn(require_identity))
+}
 ```
 
-### 8. 中间件系统
-
-内置多种常用中间件：
-
-| 中间件 | 功能 | 说明 |
-|--------|------|------|
-| CORS | 跨域资源共享 | 支持自定义域名、方法、头 |
-| Trace | 请求追踪 | 记录请求耗时、状态码 |
-| IpFilter | IP 过滤 | 支持白名单/黑名单 |
-| Health Check | 健康检查 | `/health` 端点 |
-| Auth | 认证中间件 | JWT/OAuth2（需自定义） |
-
-**添加中间件**：
-```rust
-use tower::ServiceBuilder;
-use tower_http::trace::TraceLayer;
-
-let app = Router::new()
-    .route("/api/list", get(handler))
-    .layer(TraceLayer::new_for_axum())
-    .layer(CorsLayer::permissive());
-```
+这个钩子跑在所有业务路由合并之后、健康检查 / Swagger UI 之前，所以探针和文档不会被拦；
+跨 crate 的注册顺序取决于 link 顺序，有顺序要求就合并成一次注册。单条路由的中间件仍可
+直接用 `tower-http` 挂。
 
 ### 9. 字典枚举（Dic）
 
@@ -579,9 +489,9 @@ pub enum ConnectorStatus {
 
 ### 先决条件
 
-- Rust 1.75+（2024 Edition）
-- PostgreSQL 12+ 或 MySQL 8.0+（如果使用数据库）
-- Redis（可选，用于缓存）
+- Rust 1.85+（edition 2024）
+- PostgreSQL 12+ 或 MySQL 8.0+（启用 `db` 时）
+- Redis（可选，仅 `distributed-cache` 需要）
 
 ### 第一步：创建项目
 
@@ -595,46 +505,89 @@ cd my-service
 ```toml
 # Cargo.toml
 [dependencies]
-robotech = { version = "1.5.1", features = ["web", "db", "macros"] }
+robotech = { version = "1.18.0", features = ["app", "macros", "db", "web"] }
+# `bootstrap!` 会展开出 `use clap::Parser` 与 `#[tokio::main]`
+clap = { version = "4", features = ["derive"] }
+# `setup` 回调的参数里要用 `HashMap<String, Value>`
+config = "0.15"
+# 数据库驱动不由框架绑定，业务 crate 自己选
+sea-orm = { version = "2.0", features = ["sqlx-postgres", "runtime-tokio-rustls"] }
 tokio = { version = "1", features = ["full"] }
+serde = { version = "1", features = ["derive"] }
+anyhow = "1"
+tracing = "0.1"
 ```
 
 ### 第三步：编写代码
 
 ```rust
 // main.rs
-use robotech::app::AppConfig;
-use robotech::db::init_db_conn;
-use robotech::web::setup_web_server;
+use std::collections::HashMap;
+use std::sync::Arc;
+
+use config::Value;
+use robotech::bootstrap;
+use robotech::db::{setup_db_conn, DbConnConfig};
+use robotech::web::{setup_web_server, WebServerConfig};
 use serde::{Deserialize, Serialize};
 
-#[derive(Debug, Deserialize, Serialize)]
-struct MyAppConfig {
-    // 自定义配置
+/// 应用配置：`[db]`、`[web]` 两段直接复用框架提供的类型
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub struct AppConfig {
+    pub db: DbConnConfig,
+    pub web: WebServerConfig,
+    pub mysvc: MySvcConfig,
 }
 
-#[tokio::main]
-async fn main() -> anyhow::Result<()> {
-    // 1. 初始化
-    robotech::env::init_env()?;
-    robotech::log::init_log()?;
-    
-    // 2. 加载配置
-    let (config, _) = robotech::cfg::build_app_cfg::<AppConfig>(None)?;
-    
-    // 3. 数据库连接
-    init_db_conn(config.db.clone()).await?;
-    
-    // 4. 启动 Web 服务
-    setup_web_server(config.web_server, None, None).await?;
-    
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub struct MySvcConfig {
+    pub greeting: String,
+}
+
+// 生成 Args 与 main()：init_env → LogWatcher → init_app → AppWatcher → setup
+// → register_app → wait_app_exit
+bootstrap!(AppConfig);
+
+/// 首次启动与每次配置变更都会调用：函数名和签名都是固定的
+async fn setup(
+    app_config: &Arc<AppConfig>,
+    changed: &Option<HashMap<String, Value>>,
+    port: Option<u16>,
+    old_pid: Option<u32>,
+) -> Result<(), anyhow::Error> {
+    setup_db_conn(app_config.db.clone(), changed).await?;
+    setup_web_server(app_config.web.clone(), port, old_pid, changed).await?;
+    tracing::info!(greeting = %app_config.mysvc.greeting, "service ready");
     Ok(())
 }
 ```
 
-### 第四步：配置数据库
+### 第四步：写配置文件
 
-创建数据库和用户：
+默认文件名跟可执行文件名一致：优先 `$APP_DIR/config/<可执行文件名>.<ext>`，其次
+`$APP_DIR/<可执行文件名>.<ext>`。配了 `profile` 时还会叠加
+`<可执行文件名>-<profile>.<ext>`；用 `-c <路径>` 指定单份文件后不再按目录查找。
+
+```toml
+# config/my-service.toml
+app-name = "my-service"
+profile = "dev"
+
+[db]
+url = "postgres://myuser:mypassword@127.0.0.1:5432/mydb"
+
+[web]
+port = 9840
+
+[mysvc]
+greeting = "hello"
+```
+
+### 第五步：配置数据库
+
+创建数据库与用户：
 
 ```sql
 -- PostgreSQL
@@ -647,107 +600,73 @@ CREATE DATABASE mydb CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
 GRANT ALL PRIVILEGES ON mydb.* TO 'myuser'@'%';
 ```
 
-### 第五步：运行服务
+### 第六步：运行服务
 
 ```bash
-# 开发模式
-cargo run --features web,db
+# feature 挂在 robotech 依赖上，不在本 crate 上
+cargo run
 
 # 指定配置文件
-cargo run --features web,db -c ./config.toml
+cargo run -- -c ./config.toml
 
-# 发布模式
+# 覆盖端口 / 重启旧进程
+cargo run -- -p 9840
+cargo run -- -s restart
+
+# 发布
 cargo build --release
-cargo run --features web,db -- -c ./config.toml
 ```
 
-访问 Swagger UI：http://localhost:9840/swagger-ui/
-
-## 快速开始
-
-### 先决条件
-
-- Rust 1.70 或更高版本
-- PostgreSQL 数据库（如果使用 SeaORM）
-
-### 构建项目
-
-```bash
-# 构建默认 features（api_client）
-cargo build
-
-# 构建 web 服务器功能
-cargo build --features web
-
-# 构建所有 features
-cargo build --features web,db
-```
-
-### 运行服务
-
-```bash
-# 运行服务（需要启用 web feature）
-cargo run --features web
-
-# 运行带数据库支持的服务
-cargo run --features web,db
-```
+访问 Swagger UI：http://localhost:9840/swagger-ui/（即上面 `[web] port`）。
 
 ## 核心概念
 
-### RO (Response Object) - 响应对象
+### 分层表
 
-所有 API 响应都通过 `RO` 结构包装，确保统一的返回格式。
+| 层 | 内容 | 宏 | 命名 |
+|---|---|---|---|
+| mo | SeaORM 实体 | `#[sea_orm::model]` | 表 `tx_item` → `Model` |
+| dto | 请求对象 | `#[crud_dto]` | `XxxDto` → `XxxAddDto` / `XxxModifyDto` / `XxxSaveDto` / `XxxQueryDto` |
+| vo | 响应对象 | `#[vo]` | `XxxVo` |
+| dao | 数据访问 | `#[dao(...)]` | `XxxDao` |
+| svc | 业务逻辑 | `#[svc]` | `XxxSvc` |
+| ctrl | HTTP 处理 | `#[ctrl]` | `XxxCtrl` |
+| router | 路由 | `#[router(...)]` | `XxxRouter` |
+| api_doc | OpenAPI | `#[api_doc(...)]` | `XxxApiDoc` |
+| dic | 字典枚举 | `#[dic]` | `src/dic/*.rs` |
 
-### BaseDAO - 数据访问基类
+每个宏都**靠推导名字**去找上一层，所以改一个结构体名就要顺着改完整条链。
 
-泛型封装了常见的 CRUD 操作，只需几行代码即可实现完整的数据库访问层。
+### 错误链
 
-### EO (Entity Object) - 实体对象
+`DaoError → SvcError → CtrlError → Ro`，只在 `#[ctrl]` 里集中映射一次：
 
-对应数据库表的 SeaORM Entity，由 `robotech-macros` 自动生成。
+- `SvcError::NotFound` 表示「这个值没了」（行被删、关联不存在），不是「查不到一行」；
+  只有在调用方确实需要知道时才用；
+- `upsert` 只把 `DaoError::Db(DbErr::RecordNotUpdated)` 当作「没有需要更新的行」；
+- 唯一键 / 外键冲突一律返回 **HTTP 200 + `Ro(Warn)` + `code`**，不是 500。
 
-### DTO/VO - 数据传输/视图对象
+### ID 与数值编码
 
-- **DTO**（Data Transfer Object）：接收前端请求参数
-- **VO**（View Object）：返回给前端的数据结构
-
-### Service - 业务逻辑层
-
-继承 `BaseSvc` 或自行实现业务逻辑，调用 DAO 完成数据操作。
-
-### Controller - 控制器层
-
-处理 HTTP 请求，调用 Service 层，返回 RO 响应。
+`u64` 一律序列化为**字符串**，避免 JavaScript 截断：实体字段由宏改成 `U64`，非实体结构用
+`wheel_rs::serde::{u64_serde, u64_option_serde}`，ID 列表用 `Vec<U64>`。不要自己再造第三套
+写法。
 
 ## 宏系统（robotech-macros）
 
-项目提供了丰富的宏来简化开发：
+| 宏 | 形式 | 作用 |
+|---|---|---|
+| `bootstrap!(T)` | 函数式 | 生成 `Args` 与 `#[tokio::main] main()`，串起完整启动链 |
+| `db_migrate!(db_url)` | 函数式 | 按 scheme 执行 `migrations/{pgsql,mysql,sqlite}` |
+| `#[dao(...)]` | 属性 | CRUD / 检索，以及唯一键、外键报错翻译 |
+| `#[svc]`、`#[ctrl]`、`#[router(...)]`、`#[api_doc(...)]` | 属性 | 服务层、handler、路由、OpenAPI |
+| `#[crud_dto]`、`#[vo]` | 属性 | 请求 / 响应对象，`u64 → U64` 改写 |
+| `#[dic]` | 属性 | 字典枚举按整数序列化 + OpenAPI schema |
+| `#[sortable]` | 属性 | 服务端排序白名单 |
+| `#[db_unwrap]`、`#[log_call]` | 属性 | 错误转 `Ro`、调用日志 |
+| `#[api_client]`、`#[feign]` | 属性 | 出站 HTTP 客户端 |
 
-### 应用配置宏
-
-- `build_app_cfg!` - 构建应用配置
-- `watch_cfg_file!` - 监听配置文件变化并热重载
-
-### 数据库宏
-
-- `db_migrate!` - 执行数据库迁移
-- `db_conn!` - 获取数据库连接
-
-### 日志宏
-
-- `log_call` - 自动记录函数调用日志
-- `log_result` - 记录返回值
-
-### 控制器宏
-
-- `impl_controller` - 自动生成控制器路由
-
-### 字典枚举宏
-
-- `dic` - 把无字段枚举的 HTTP 序列化统一为整数，并自动生成 OpenAPI schema（详见「核心特性 9」）
-
-完整文档见：[robotech-macros](../robotech-macros/README.md)
+完整文档：[robotech-macros](../robotech-macros/)
 
 ## 许可证
 

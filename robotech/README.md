@@ -8,44 +8,34 @@ RoboTech-RS is a microservice framework written in Rust for backend service deve
 
 ```
 src/
-├── api_client/         # API Client (optional feature: api-client)
-│                       # HTTP client wrapper for microservice communication
-├── app/               # Application configuration management (feature: app)
-│                       # Config file loading, application context
-├── cfg/               # Configuration module (feature: app)
-│                       # Supports TOML/YAML/JSON config formats
-├── cst/               # Constants definition
-│                       # Global constants and enums
-├── dao/               # Data Access Object (feature: db)
-│   ├── eo/            # Entity Object - Database entity mapping
-│                       # Based on SeaORM Entity encapsulation
-│   ├── dao_error.rs   # DAO error handling
-│   └── dao_utils.rs   # DAO utility functions
-│                       # Generic CRUD operation wrappers
-├── db/                # Database connection and migration (feature: db)
-│                       # Connection pool management, migration execution
-├── env/               # Environment variable management (feature: app)
-│                       # Environment variable reading and validation
-├── log/               # Logging system (feature: app)
-│                       # Structured logging with file rotation
-├── macros/            # Macro definitions (feature: macros)
-│                       # Development helper macros
-├── ro/                # Response Object
-│                       # Unified API response format
-├── signal/            # Signal handling (feature: app)
-│                       # SIGTERM/SIGKILL graceful shutdown support
-├── svc/               # Business logic layer (feature: app)
-│                       # Base service logic templates
-└── web/               # Web server (feature: web)
-    ├── cors/          # CORS middleware
-    ├── ctrl/          # Controller base class
-    │                       # BaseController for generic HTTP handling
-    ├── health_check/  # Health check endpoint
-    ├── https/         # HTTPS/TLS support
-    ├── middleware/    # Middleware collection
-    │                       # Request logging, auth, rate limiting
-    └── server/        # Web server core
-            # Axum server wrapper, multi-port listening
+├── api/               # unified response (Ro / PageRx), U64 / F64 / Duration wrappers, validators
+├── api_client/        # HTTP client (feature: api-client)
+├── app/               # config watcher (AppWatcher), app lifecycle, id-worker setup (feature: app)
+├── cache/             # cache abstraction (local-cache / distributed-cache)
+├── cfg/               # config building (build_cfg / BaseConfig)
+├── cst/               # constants (header names, system operator id)
+├── dao/               # data access (feature: db)
+│   ├── eo/            # unique-key / foreign-key metadata (NOT business entities)
+│   ├── sort/          # server-side ordering (backing #[sortable])
+│   ├── data_scope.rs  # data-scope injection
+│   └── ...            # transactions, search params, tree codes, relation mapping
+├── db/                # pool (setup_db_conn / get_db_conn) and migration (feature: db)
+├── env/               # environment info (APP_DIR, binary name, profile)
+├── log/               # logging (LogWatcher, local rolling files, mute filter)
+├── macros/            # proc-macro re-exports (feature: macros)
+├── micro_svc/         # service governance: config center / registry center / Feign
+├── mq/                # MQTT / NATS / RabbitMQ
+├── redis/             # Redis client
+├── refresh/           # refresh signals (JetStream broadcast + subscription self-heal)
+├── signal/            # signals and pid file (feature: app)
+├── svc/               # service-layer error type (SvcError, feature: app)
+├── template/          # call-side wrapper for template rendering
+├── tsdb/              # time-series DB (InfluxDB)
+└── web/               # web service (feature: web)
+    ├── ctrl/          # CtrlError and header helpers
+    ├── middleware/    # IP ban, forbidden / local-only URNs
+    ├── cors/ https/ health_check/
+    └── server/        # axum wrapper, multi-port listeners
 ```
 
 ### Feature Flags Mechanism
@@ -133,21 +123,21 @@ This project uses feature flags to control dependencies and functional modules f
 **Minimal API Service (smallest combination)**:
 ```toml
 [dependencies.robotech]
-version = "1.5.1"
+version = "1.18.0"
 features = ["app"]
 ```
 
 **Full Web Service + Database**:
 ```toml
 [dependencies.robotech]
-version = "1.5.1"
+version = "1.18.0"
 features = ["web", "db", "macros"]
 ```
 
 **Microservice Scenario (with client)**:
 ```toml
 [dependencies.robotech]
-version = "1.5.1"
+version = "1.18.0"
 features = ["web", "db", "macros", "api-client"]
 ```
 
@@ -155,217 +145,131 @@ features = ["web", "db", "macros", "api-client"]
 
 ### 1. Unified API Response Format
 
-All API responses follow a unified structure for easy frontend parsing:
+Every response is wrapped in `robotech::api::Ro<E>`; `None` fields are skipped:
 
-```json
-{
-  "result": 1,
-  "msg": "Operation completed successfully",
-  "timestamp": 1700000000000,
-  "extra": {},
-  "detail": "Optional detailed information",
-  "code": "Optional business code"
-}
+```rust
+use robotech::api::Ro;
+
+Ro::success("查询成功".to_string())
+Ro::success("查询成功".to_string()).detail(Some("2 rows".to_string()))
+Ro::illegal_argument("参数不合法".to_string())
+Ro::warn("数据已存在".to_string()).code(Some("RTW00001".to_string()))
 ```
 
-**Field Descriptions**:
-- `result`: Response result code (Success=1, Fail=-1, etc.)
-- `msg`: Response message prompt
-- `timestamp`: Timestamp in milliseconds
-- `extra`: Extended data field
-- `detail`: Detailed information (lists, pagination, etc.)
-- `code`: Business code (for internationalization)
+| field | meaning |
+|---|---|
+| `result` | `RoResult`: `Success = 1` / `IllegalArgument = -1` / `Warn = -2` / `Fail = -3` |
+| `msg` | human-readable message |
+| `timestamp` | milliseconds, serialized as a **string** (see `U64`) |
+| `extra` | payload, `Option<E>` |
+| `detail` | optional detail text |
+| `code` | optional business code |
 
-**Usage Example**:
+Business codes live in `robotech::api::ro_code`: `RTW00001` duplicate key, `RTW00002`
+insert foreign-key violation, `RTW00003` delete foreign-key violation.
+
+### 2. Data Access Layer (`#[dao]`)
+
+`#[dao]` generates the whole CRUD + search surface for a SeaORM entity, so the DAO file stays
+a one-liner:
+
 ```rust
-use robotech::ro::{RO, Result};
-
-// Success response
-RO::success().finish()
-
-// Response with details
-RO::success().detail(vec![item1, item2]).finish()
-
-// Error response
-RO::illegal_argument("Invalid input").finish()
+#[dao(
+    unique_keys: [("code", "code")],
+    like_columns: [Column::Code, Column::Name],
+)]
+pub struct TxItemDao;
 ```
 
-### 2. BaseDAO Data Access Layer
+Generated methods: `insert` / `update` / `sync` / `delete_by_condition` / `get_by_id` /
+`get_by_condition` / `list_by_condition` / `page_by_condition`, plus the `ex_` relation
+variants and the `search_*` family. They take `db: &C where C: ConnectionTrait`, so the same
+method runs on a pool or inside a transaction.
 
-Provides generic CRUD operations, drastically reducing repetitive code:
+Registering unique keys and foreign keys is what turns a driver-level constraint violation
+into a readable message; unregistered constraints degrade to a raw constraint name or a 500.
 
-**Core Functions**:
-- `create`: Create record
-- `update`: Update record
-- `delete_by_id`: Delete by ID
-- `get_by_id`: Get by ID
-- `list`: List all records
-- `page_list`: Paginated query
-- `exists`: Check if record exists
+### 3. Controller Layer (`#[ctrl]`)
 
-**Usage Example**:
 ```rust
-use robotech::dao::BaseDAO;
-use sea_orm::EntityTrait;
-
-#[derive(EntityTrait)]
-struct MyEntity;
-
-// Auto-generate CRUD methods
-impl_base_dao!(MyEntity);
-
-// Usage
-let entity = MyEntity::create(&ctx, data).await?;
-let list = MyEntity::list(&ctx).await?;
-let page = MyEntity::page_list(&ctx, page_num, page_size).await?;
+#[ctrl]
+pub struct TxItemCtrl;
 ```
 
-### 3. BaseController Controller Layer
+generates one axum handler per service method (`add` / `modify` / `save` / `upsert` / `sync` /
+`del_by_id` / `get_by_id` / `page_by_query_dto` …), each carrying `#[utoipa::path]`,
+`#[debug_handler]` and `#[log_call]` and returning `Json<Ro<...>>`. Errors flow through
+`CtrlError`:
 
-Provides HTTP request handling base class for simplified routing control:
+| error | HTTP |
+|---|---|
+| validation / bad header / multipart | 400 |
+| `SvcError::NotFound` | 404 |
+| duplicate key, insert/delete FK violation | **200 + `Ro(Warn)` + `code`** |
+| anything else | 500 |
 
-**Core Functions**:
-- Unified exception handling and error conversion
-- Automatic response wrapping in RO format
-- Built-in middleware support
-- Common middleware like CORS, auth, rate limiting out-of-the-box
+The status code is not the only error taxonomy here — clients branch on `code`.
 
-**Usage Example**:
+### 4. Configuration
+
+`bootstrap!(AppConfig)` loads configuration through `AppWatcher`, lowest priority first:
+
+1. `$APP_DIR/config/<binary>.<ext>`, falling back to `$APP_DIR/<binary>.<ext>`
+   (`toml` / `json` / `json5` / `yml` / `yaml` / `ini` / `ron`);
+2. `<binary>-<profile>.<ext>` layered on top, when `profile` is set;
+3. the config center, when `[micro-svc]` is configured;
+4. `APP_`-prefixed environment variables, highest priority.
+
+`-c <path>` pins a single file. Editing any watched file re-runs the `setup` callback —
+startup and hot reload share one code path, so never put one-off initialization in `main`.
+
+### 5. Logging
+
+`bootstrap!` starts a `LogWatcher` (config from `log.<ext>`, env prefix `LOG`, hot-reloaded).
+Application code only uses `tracing`:
+
 ```rust
-use robotech::web::ctrl::BaseController;
-
-struct MyController;
-
-#[async_trait]
-impl BaseController for MyController {
-    async fn get_list(&self, state: AppState) -> impl IntoResponse {
-        self.success_response(state).await
-    }
-}
-```
-
-### 4. Configuration Management System
-
-Supports multi-layer configuration priority: CLI args > Environment variables > Config file > Defaults
-
-**Configuration Loading Flow**:
-1. Load config file on startup (TOML/YAML/JSON)
-2. Override with environment variables
-3. CLI args have highest priority
-4. Auto hot-reload when config file changes
-
-**Usage Example**:
-```rust
-use robotech::cfg::build_app_cfg;
-
-// Load configuration
-let config = build_app_cfg::<AppConfig>("config.toml")?;
-
-// Watch for config changes
-watch_cfg_file!("app", {
-    let new_config = build_app_cfg::<AppConfig>("config.toml")?;
-    apply_new_config(new_config);
-});
-```
-
-### 5. Logging System
-
-Structured logging based on Tracing framework, production-ready out-of-the-box:
-
-**Core Functions**:
-- Multiple output sources (console, file)
-- Log rotation (by size, by time)
-- JSON format output (for ELK/Loki collection)
-- Dynamic log level adjustment
-- Call chain tracing (span/span tree)
-
-**Usage Example**:
-```rust
-use robotech::log::init_log;
-
-// Initialize logging
-init_log()?;
-
-// Basic logging
 tracing::info!("Service started");
 tracing::debug!(user_id = 123, "Processing user");
-tracing::warn!("High memory usage: {}MB", mem_usage);
 tracing::error!(error = %e, "Failed to process request");
-
-// Span tracing
-tracing::instrument(name = "process_request", fields(user_id))
-async fn handle_request(id: u64) {
-    tracing::debug!("Handling request");
-    // ... business logic
-}
 ```
+
+Rotation is handled by the framework's `LocalRollingFile` (by size/time, time-zone aware).
+Do not wire your own `tracing_appender` — it would double-write and break the hot reload path.
 
 ### 6. Database Connection & Migration
 
-Automatically manages database connection pool and executes migrations:
-
-**Core Functions**:
-- Connection pool management (max/min connections)
-- Automatic migration execution (upgrade DB schema on startup)
-- SQL query logging
-- Transaction support
-
-**Usage Example**:
 ```rust
-use robotech::db::init_db_conn;
-
-// Initialize database connection
-init_db_conn(config.clone()).await?;
-
-// Auto migration
-db_migrate!("postgres://localhost/mydb");
-
-// Query
-let entities = MyEntity::find().all(db).await?;
+setup_db_conn(app_config.db.clone(), changed).await?;   // build the pool, reuse if unchanged
+let db = get_db_conn()?;                                // global pool
 ```
+
+`DbConnConfig` wraps SeaORM `ConnectOptions`: pool size, timeouts, SQL logging,
+`schema_search_path`. The driver is **not** bundled — enable `sea-orm` with
+`sqlx-postgres` / `sqlx-mysql` in your own crate.
+
+Migrations run through `db_migrate!(db_url)`, which selects `migrations/{pgsql,mysql,sqlite}`
+from the business crate according to the URL scheme.
 
 ### 7. Signal Handling & Graceful Shutdown
 
-Supports Unix signals for graceful shutdown:
+`bootstrap!` wires `SignalManager` + `wait_app_exit`; the `-s` flag chooses the behaviour:
 
-**Supported Signals**:
-- `SIGTERM` (15): Graceful shutdown
-- `SIGINT` (2): Interrupt
-- `SIGUSR1/USR2`: Custom handling
+| `-s` | behaviour |
+|---|---|
+| `start` (default) | probe the old process with `SIGCONT`, then start |
+| `restart` | `SIGTERM` the old process, then start the new one |
+| `stop` / `s` | `SIGTERM`, graceful shutdown |
+| `kill` / `k` | `SIGKILL`, force kill |
 
-**Signal Commands**:
-- `start`: Default, sends SIGCONT to check if already running
-- `restart`: Sends SIGTERM to stop old process, then starts new one
-- `stop/s`: Sends SIGTERM for graceful shutdown
-- `kill/k`: Sends SIGKILL for forced termination
+Shutdown work registers via `register_shutdown_hook`; the pid file sits next to the binary.
 
-**Usage Example**:
-```rust
-use robotech::signal::SignalManager;
+### 8. Middleware
 
-let (mut mgr, old_pid) = SignalManager::new("start".to_string())?;
-let receiver = mgr.watch_signal()?;
+Built in: request tracing, CORS, IP ban list, forbidden URNs, local-only URNs, health check
+(`/health`).
 
-// Wait for signal and gracefully close
-wait_app_exit(signal_receiver, || async move {
-    stop_services().await.ok();
-    Ok(())
-}).await?
-```
-
-### 8. Middleware System
-
-Built-in common middleware:
-
-| Middleware | Function | Description |
-|------------|----------|-------------|
-| CORS | Cross-origin resource sharing | Custom domains, methods, headers |
-| Trace | Request tracing | Log request duration, status code |
-| IpFilter | IP filtering | Whitelist/blacklist support |
-| Health Check | Health monitoring | `/health` endpoint |
-| URN guards | Access control | `forbidden_urns` / `local_only_urns` |
-
-**Adding global business middleware** (`ROUTER_LAYER_SLICE`):
+Business-wide layers go through the `ROUTER_LAYER_SLICE` extension point:
 
 ```rust
 use axum::{middleware, Router};
@@ -376,32 +280,16 @@ use robotech::web::ROUTER_LAYER_SLICE;
 static REQUIRE_IDENTITY_LAYER: fn(Router) -> Router = require_identity_layer;
 
 fn require_identity_layer(router: Router) -> Router {
-    // route_layer 只包已注册路由；用 layer 会连 fallback 一起包住，未知路径会变成 401
+    // route_layer wraps only registered routes; `layer` would also wrap the fallback and
+    // turn unknown paths into 401 instead of 404
     router.route_layer(middleware::from_fn(require_identity))
 }
 ```
 
-The hook runs after all `ROUTER_SLICE` routers are merged and before the health-check route,
-Swagger UI and the framework layers, so:
-
-- it only wraps business routes: health probes and Swagger are never blocked by it; use
-  `route_layer` (as above) to keep unmatched paths returning 404;
-- CORS / IP filtering / URN guards stay outside it, so preflight requests are short-circuited
-  before reaching your layer;
-- layers are applied as `router = f(router)`, so the later one is the outer one. Traversal order
-  across crates is link-order dependent — do not rely on ordering between registrations;
-  combine them into a single registration if order matters;
-- with no registration the slice loop is a no-op and the router is identical to before.
-
-**Adding middleware locally**:
-
-```rust
-use tower_http::trace::TraceLayer;
-
-let app = Router::new()
-    .route("/api/list", get(handler))
-    .layer(TraceLayer::new_for_http());
-```
+The hook runs after all business routers are merged and before health check / Swagger UI, so
+probes and docs are never blocked by it. Traversal order across crates is link-order
+dependent — merge registrations when the order matters. Per-route layers can still be added
+with `tower-http` directly.
 
 ### 9. Dictionary Enums (Dic)
 
@@ -516,9 +404,9 @@ Only when `#[dic(default = VariantName)]` is present, these are generated **in a
 
 ### Prerequisites
 
-- Rust 1.75+ (2024 Edition)
-- PostgreSQL 12+ or MySQL 8.0+ (if using database)
-- Redis (optional, for caching)
+- Rust 1.85+ (edition 2024)
+- PostgreSQL 12+ or MySQL 8.0+ (if you enable `db`)
+- Redis (optional, only for `distributed-cache`)
 
 ### Step 1: Create Project
 
@@ -532,46 +420,89 @@ cd my-service
 ```toml
 # Cargo.toml
 [dependencies]
-robotech = { version = "1.5.1", features = ["web", "db", "macros"] }
+robotech = { version = "1.18.0", features = ["app", "macros", "db", "web"] }
+# `bootstrap!` expands to `use clap::Parser` + `#[tokio::main]`
+clap = { version = "4", features = ["derive"] }
+# the `setup` callback takes `HashMap<String, Value>`
+config = "0.15"
+# robotech does not pick a database driver for you
+sea-orm = { version = "2.0", features = ["sqlx-postgres", "runtime-tokio-rustls"] }
 tokio = { version = "1", features = ["full"] }
+serde = { version = "1", features = ["derive"] }
+anyhow = "1"
+tracing = "0.1"
 ```
 
 ### Step 3: Write Code
 
 ```rust
 // main.rs
-use robotech::app::AppConfig;
-use robotech::db::init_db_conn;
-use robotech::web::setup_web_server;
+use std::collections::HashMap;
+use std::sync::Arc;
+
+use config::Value;
+use robotech::bootstrap;
+use robotech::db::{setup_db_conn, DbConnConfig};
+use robotech::web::{setup_web_server, WebServerConfig};
 use serde::{Deserialize, Serialize};
 
-#[derive(Debug, Deserialize, Serialize)]
-struct MyAppConfig {
-    // Custom configuration
+/// Application config: `[db]` and `[web]` reuse the framework types
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub struct AppConfig {
+    pub db: DbConnConfig,
+    pub web: WebServerConfig,
+    pub mysvc: MySvcConfig,
 }
 
-#[tokio::main]
-async fn main() -> anyhow::Result<()> {
-    // 1. Initialize
-    robotech::env::init_env()?;
-    robotech::log::init_log()?;
-    
-    // 2. Load configuration
-    let (config, _) = robotech::cfg::build_app_cfg::<AppConfig>(None)?;
-    
-    // 3. Database connection
-    init_db_conn(config.db.clone()).await?;
-    
-    // 4. Start Web service
-    setup_web_server(config.web_server, None, None).await?;
-    
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub struct MySvcConfig {
+    pub greeting: String,
+}
+
+// Generates Args + main(): init_env → LogWatcher → init_app → AppWatcher → setup
+// → register_app → wait_app_exit
+bootstrap!(AppConfig);
+
+/// Runs on startup and on every config change: the name and signature are fixed.
+async fn setup(
+    app_config: &Arc<AppConfig>,
+    changed: &Option<HashMap<String, Value>>,
+    port: Option<u16>,
+    old_pid: Option<u32>,
+) -> Result<(), anyhow::Error> {
+    setup_db_conn(app_config.db.clone(), changed).await?;
+    setup_web_server(app_config.web.clone(), port, old_pid, changed).await?;
+    tracing::info!(greeting = %app_config.mysvc.greeting, "service ready");
     Ok(())
 }
 ```
 
-### Step 4: Configure Database
+### Step 4: Write the Config File
 
-Create database and user:
+The default name follows the binary: `$APP_DIR/config/<binary>.<ext>` first, then
+`$APP_DIR/<binary>.<ext>`. With `profile` set, `<binary>-<profile>.<ext>` is layered on top;
+`-c <path>` pins a single file instead.
+
+```toml
+# config/my-service.toml
+app-name = "my-service"
+profile = "dev"
+
+[db]
+url = "postgres://myuser:mypassword@127.0.0.1:5432/mydb"
+
+[web]
+port = 9840
+
+[mysvc]
+greeting = "hello"
+```
+
+### Step 5: Configure Database
+
+Create the database and user:
 
 ```sql
 -- PostgreSQL
@@ -584,191 +515,134 @@ CREATE DATABASE mydb CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
 GRANT ALL PRIVILEGES ON mydb.* TO 'myuser'@'%';
 ```
 
-### Step 5: Run Service
+### Step 6: Run Service
 
 ```bash
-# Development mode
-cargo run --features web,db
+# features belong to the robotech dependency, not to this crate
+cargo run
 
-# Specify config file
-cargo run --features web,db -c ./config.toml
+# pin a config file
+cargo run -- -c ./config.toml
 
-# Release mode
+# override the port, or restart the old process
+cargo run -- -p 9840
+cargo run -- -s restart
+
+# release
 cargo build --release
-cargo run --features web,db -- -c ./config.toml
 ```
 
-Access Swagger UI: http://localhost:9840/swagger-ui/
-
-## Quick Start
-
-### Prerequisites
-
-- Rust 1.70 or higher
-- PostgreSQL database (if using SeaORM)
-
-### Build Project
-
-```bash
-# Build with default features (api_client)
-cargo build
-
-# Build with web server features
-cargo build --features web
-
-# Build with all features
-cargo build --features web,db
-```
-
-### Run Service
-
-```bash
-# Run service (requires web feature)
-cargo run --features web
-
-# Run service with database support
-cargo run --features web,db
-```
+Swagger UI: http://localhost:9840/swagger-ui/ (the `[web] port` above).
 
 ## Core Concepts
 
-### RO (Response Object) - Response Object
+### Layer map
 
-All API responses are wrapped through `RO` structure, ensuring consistent return format.
+| layer | content | macro | naming |
+|---|---|---|---|
+| mo | SeaORM entity | `#[sea_orm::model]` | table `tx_item` → `Model` |
+| dto | request objects | `#[crud_dto]` | `XxxDto` → `XxxAddDto` / `XxxModifyDto` / `XxxSaveDto` / `XxxQueryDto` |
+| vo | response objects | `#[vo]` | `XxxVo` |
+| dao | data access | `#[dao(...)]` | `XxxDao` |
+| svc | business logic | `#[svc]` | `XxxSvc` |
+| ctrl | HTTP handlers | `#[ctrl]` | `XxxCtrl` |
+| router | routes | `#[router(...)]` | `XxxRouter` |
+| api_doc | OpenAPI paths | `#[api_doc(...)]` | `XxxApiDoc` |
+| dic | dict enums | `#[dic]` | `src/dic/*.rs` |
 
-### BaseDAO - Data Access Base Class
+Each macro finds the previous layer **by deriving its name**, so renaming one struct means
+renaming the whole chain.
 
-Generic encapsulation of common CRUD operations, enabling complete data access layer with just a few lines of code.
+### Error chain
 
-### EO (Entity Object) - Entity Object
+`DaoError → SvcError → CtrlError → Ro`, mapped once in `#[ctrl]`:
 
-Database table mapping via SeaORM Entity, auto-generated by `robotech-macros`.
+- `SvcError::NotFound` means "the value is gone" (row deleted, relation missing) — not
+  "no row returned"; use it only when the caller must know;
+- `upsert` only treats `DaoError::Db(DbErr::RecordNotUpdated)` as "nothing to update";
+- duplicate key / foreign-key violations return **HTTP 200 with `Ro(Warn)` plus `code`**,
+  never a 500.
 
-### DTO/VO - Data Transfer/View Objects
+### IDs and numbers
 
-- **DTO** (Data Transfer Object): Receive request parameters from frontend
-- **VO** (View Object): Data structures returned to frontend
-
-### Service - Business Logic Layer
-
-Inherit `BaseSvc` or implement custom business logic, call DAO to complete data operations.
-
-### Controller - Controller Layer
-
-Handle HTTP requests, call Service layer, return RO response.
+`u64` is serialized as a **string** so JavaScript never truncates it: entity fields get the
+`U64` type from the macro, non-entity structs use `wheel_rs::serde::{u64_serde,
+u64_option_serde}`, and ID lists are `Vec<U64>`. Do not invent a third representation.
 
 ## Macro System (robotech-macros)
 
-The project provides numerous macros to simplify development:
+| macro | kind | purpose |
+|---|---|---|
+| `bootstrap!(T)` | function-like | `Args` + `#[tokio::main] main()`, the full startup chain |
+| `db_migrate!(db_url)` | function-like | run `migrations/{pgsql,mysql,sqlite}` by scheme |
+| `#[dao(...)]` | attribute | CRUD / search, plus unique-key and FK error translation |
+| `#[svc]`, `#[ctrl]`, `#[router(...)]`, `#[api_doc(...)]` | attribute | service, handlers, routes, OpenAPI paths |
+| `#[crud_dto]`, `#[vo]` | attribute | request / response objects, `u64 → U64` rewriting |
+| `#[dic]` | attribute | dict enums as integers + OpenAPI schema |
+| `#[sortable]` | attribute | server-side ordering whitelist |
+| `#[db_unwrap]`, `#[log_call]` | attribute | `Ro` error unwrapping, call logging |
+| `#[api_client]`, `#[feign]` | attribute | outbound HTTP clients |
 
-### Application Config Macros
-
-- `build_app_cfg!` - Build application configuration
-- `watch_cfg_file!` - Watch config file changes and hot-reload
-
-### Database Macros
-
-- `db_migrate!` - Execute database migration
-- `db_conn!` - Get database connection
-
-### Logging Macros
-
-- `log_call` - Auto-record function call logs
-- `log_result` - Record return values
-
-### Controller Macros
-
-- `impl_controller` - Auto-generate controller routes
-
-### Dictionary Enum Macros
-
-- `dic` - Unify fieldless enums to integer HTTP serialization and auto-generate the OpenAPI schema (see "Core Features 9")
-
-Full documentation at: [robotech-macros](../robotech-macros/)
+Full reference: [robotech-macros](../robotech-macros/)
 
 ## Usage Examples
 
-### Complete Microservice Example
+### Layered service: mo → dto → vo → dao → svc → ctrl → router → api_doc
+
+The order matters: each macro looks the previous layer up **by name**. The full walkthrough
+with the reasoning is in [AGENTS.md](../AGENTS.md) §5.1.
 
 ```rust
-use serde::{Deserialize, Serialize};
-use sea_orm::EntityTrait;
-
-// 1. Define configuration
-#[derive(Debug, Clone, Serialize, Deserialize)]
-struct ServiceConfig {
-    pub port: u16,
-    pub db_url: String,
+// mo: SeaORM entity; table tx_item → struct Model
+#[sea_orm::model]
+#[derive(Clone, Debug, PartialEq, Eq, DeriveEntityModel, Serialize, Deserialize, Default)]
+#[sea_orm(table_name = "tx_item")]
+pub struct Model {
+    #[sea_orm(primary_key, auto_increment = false, unique)]
+    pub id: i64,
+    #[sea_orm(unique)]
+    pub code: String,
+    // audit columns: creater_id / create_ms / updater_id / update_ms
 }
 
-// 2. Define entity
-#[derive(EntityTrait)]
-struct User {
-    #[pk]
-    id: i64,
-    name: String,
-    email: String,
+impl ActiveModelBehavior for ActiveModel {}
+
+// dto: generates Add / Modify / Save / Query in one go
+#[crud_dto]
+pub struct TxItemDto {
+    /// Code
+    /// @len 1..=50
+    pub code: String,
 }
 
-// 3. Implement DAO
-impl_base_dao!(User);
-
-// 4. Implement Service
-struct UserService;
-
-impl UserService {
-    async fn create_user(ctx: &Context, data: CreateUserDto) -> Result<User> {
-        // Business logic
-        let user = User::create(ctx, data).await?;
-        Ok(user)
-    }
-    
-    async fn get_user_list(ctx: &Context) -> Result<Vec<User>> {
-        let users = User::list(ctx).await?;
-        Ok(users)
-    }
+// vo: write plain u64; the macro rewrites it to U64 (JSON string, keeps JS precision)
+#[vo]
+pub struct TxItemVo {
+    pub id: u64,
+    pub code: String,
 }
 
-// 5. Implement Controller
-struct UserController;
+// dao: registering the unique key is what makes conflicts readable
+#[dao(unique_keys: [("code", "code")], like_columns: [Column::Code, Column::Name])]
+pub struct TxItemDao;
 
-#[async_trait]
-impl UserController {
-    async fn create(&self, State(ctx): State<Context>) -> impl IntoResponse {
-        self.handle(|req: CreateUserDto| async move {
-            let user = UserService::create_user(&ctx, req).await?;
-            Ok(RO::success().detail(user).finish())
-        })
-        .await
-    }
-    
-    async fn list(&self, State(ctx): State<Context>) -> impl IntoResponse {
-        self.handle(|_| async move {
-            let users = UserService::get_user_list(&ctx).await?;
-            Ok(RO::success().detail(users).finish())
-        })
-        .await
-    }
-}
+// svc / ctrl / router / api_doc: fully generated
+#[svc]
+pub struct TxItemSvc;
 
-// 6. Start service
-#[tokio::main]
-async fn main() -> anyhow::Result<()> {
-    init_env()?;
-    init_log()?;
-    init_dao()?;
-    
-    let (config, _) = build_app_cfg::<ServiceConfig>(None)?;
-    set_app_config(config.clone());
-    
-    db_migrate!(config.db_url.as_str());
-    init_db_conn(DbConfig::from_url(&config.db_url)).await?;
-    
-    setup_web_server(config.web_server, None, None).await?;
-    
-    Ok(())
-}
+#[ctrl]
+pub struct TxItemCtrl;
+
+#[router(crud)]
+pub struct TxItemRouter;
+
+#[api_doc(add, modify, get_by_id, page_by_query_dto)]
+pub struct TxItemApiDoc;
 ```
+
+`#[router(crud)]` derives its prefix from the struct name: `TxItemRouter` → `/tx/item`, with
+`POST` / `PUT` on the root, `POST /save` `/upsert` `/sync`, `DELETE /{id}`, `GET /{id}`,
+`/list` `/page` `/ex` `/ex/{id}`, and the whole `search/*` family underneath.
 
 ## License
 
