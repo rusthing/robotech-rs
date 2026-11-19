@@ -43,6 +43,7 @@ pub(crate) fn feign_macro(input: ItemStruct) -> TokenStream {
     let del_by_query_dto_path = crud_path.clone();
     let get_by_id_path = format!("{crud_path}/{{}}");
     let get_by_query_dto_path = crud_path.clone();
+    let count_by_query_dto_path = format!("{crud_path}/count");
     let list_by_query_dto_path = format!("{crud_path}/list");
     let page_by_query_dto_path = format!("{crud_path}/page");
     let get_ex_by_id_path = format!("{crud_path}/ex/{{}}");
@@ -241,6 +242,27 @@ pub(crate) fn feign_macro(input: ItemStruct) -> TokenStream {
             let headers = Self::build_headers(current_user_id, None)?;
             self.client
                 .request::<#query_dto_name, #vo_name>(
+                    ::reqwest::Method::GET,
+                    &url,
+                    ::core::option::Option::Some(dto),
+                    ::core::option::Option::None::<&#query_dto_name>,
+                    ::core::option::Option::Some(&headers),
+                )
+                .await
+        }
+    });
+
+    // count_by_query_dto
+    generated_methods.push(quote! {
+        pub async fn count_by_query_dto(
+            &self,
+            dto: &#query_dto_name,
+            current_user_id: u64,
+        ) -> ::core::result::Result<robotech::api::Ro<robotech::api::U64>, robotech::api_client::ApiClientError> {
+            let url = #count_by_query_dto_path.to_string();
+            let headers = Self::build_headers(current_user_id, None)?;
+            self.client
+                .request::<#query_dto_name, robotech::api::U64>(
                     ::reqwest::Method::GET,
                     &url,
                     ::core::option::Option::Some(dto),

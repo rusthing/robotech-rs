@@ -106,6 +106,7 @@ pub(crate) fn router_macro(args: RouterArgs, input: ItemStruct) -> TokenStream {
     let get_by_id_path = format!("{crud_path}/{{id}}");
     let get_ex_by_id_path = format!("{crud_path}/ex/{{id}}");
     let get_by_query_dto_path = crud_path.clone();
+    let count_by_query_dto_path = format!("{crud_path}/count");
     let get_ex_by_query_dto_path = format!("{crud_path}/ex");
     let list_by_query_dto_path = format!("{crud_path}/list");
     let list_ex_by_query_dto_path = format!("{crud_path}/list-ex");
@@ -135,6 +136,7 @@ pub(crate) fn router_macro(args: RouterArgs, input: ItemStruct) -> TokenStream {
         routes.push(quote! {#del_by_id_path, delete(del_by_id)});
         routes.push(quote! {#del_by_query_dto_path, delete(del_by_query_dto)});
         routes.push(quote! {#get_by_query_dto_path, get(get_by_query_dto)});
+        routes.push(quote! {#count_by_query_dto_path, get(count_by_query_dto)});
         routes.push(quote! {#get_ex_by_query_dto_path, get(get_ex_by_query_dto)});
         routes.push(quote! {#list_by_query_dto_path, get(list_by_query_dto)});
         routes.push(quote! {#list_ex_by_query_dto_path, get(list_ex_by_query_dto)});

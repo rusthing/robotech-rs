@@ -787,6 +787,46 @@ pub(crate) fn svc_macro(args: SvcArgs, input: ItemStruct) -> TokenStream {
         });
     }
 
+    // 生成count_by_query_dto方法
+    if !skip.contains("count_by_query_dto") {
+        let before_call = resolve_hook("count_by_query_dto", false, &args.before, &args.before_write, Some(quote! { dto }), None, true);
+        let after_call = resolve_hook("count_by_query_dto", false, &args.after, &args.after_write, Some(quote! { count }), Some(quote! { dto }), true);
+        generated_methods.push(quote! {
+        /// # 根据条件统计记录数量
+        ///
+        /// 查询条件口径与 `list_by_query_dto` / `page_by_query_dto` 完全一致：
+        /// `dto.to_condition()` + `_keyword` 模糊匹配 + 数据范围，因此同样条件下
+        /// 本方法返回的数与列表的条数对得上。只执行一次 `count(*)`，不取明细。
+        ///
+        /// ## 参数
+        /// * `dto` - 查询参数（复用 QueryDto，其中的分页/排序字段会被忽略）
+        /// * `db` - 数据库连接，如果未提供则使用全局数据库连接
+        ///
+        /// ## 返回值
+        /// * `Result<Ro<U64>, SvcError>` - 成功时 extra 为符合条件的记录数
+        #[db_unwrap]
+        #[log_call]
+        pub async fn count_by_query_dto<C>(
+            dto: #query_dto_name,
+            #[skip_log]
+            db: Option<&C>
+        ) -> Result<Ro<U64>, SvcError>
+        where
+            C: ConnectionTrait,
+        {
+            #before_call
+            let mut condition = dto.to_condition();
+            if let Some(keyword) = &dto._keyword {
+                condition = condition.add(build_like_condition(keyword, #dao_name::LIKE_COLUMNS));
+            }
+
+            let count = #dao_name::count_by_condition(condition, db).await?;
+            #after_call
+            Ok(Ro::success("统计成功".to_string()).extra(Some(count)))
+        }
+        });
+    }
+
     // 生成list_by_query_dto方法
     if !skip.contains("list_by_query_dto") {
         let before_call = resolve_hook("list_by_query_dto", false, &args.before, &args.before_write, Some(quote! { dto }), None, true);

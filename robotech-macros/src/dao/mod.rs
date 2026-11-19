@@ -675,6 +675,35 @@ pub(super) fn dao_macro(args: DaoArgs, input: ItemStruct) -> TokenStream {
     });
     }
 
+    // 生成count_by_condition方法
+    if !skip.contains("count_by_condition") {
+        generated_members.push(quote! {
+        /// # 根据条件统计记录数量
+        ///
+        /// 只做 `SELECT count(*)`，不取行、不排序、不分页，适用于只需要总数
+        /// 的场景（如大屏统计、分页前的总量校验）。条件口径与 `list_by_condition`
+        /// 一致：同样会叠加数据范围条件，同样吃 `Condition`。
+        ///
+        /// ## 参数
+        /// - `condition`: 查询条件
+        /// - `db`: 数据库连接
+        ///
+        /// ## 返回值
+        /// 返回符合条件的记录数（U64）；查询失败返回相应的错误信息
+        pub async fn count_by_condition<C>(condition: Condition, db: &C) -> Result<U64, DaoError>
+        where
+            C: ConnectionTrait,
+        {
+            Entity::find()
+                .filter(Self::__data_scope_condition(condition))
+                .count(db)
+                .await
+                .map(U64)
+                .map_err(|e| DaoError::parse_db_err(e))
+        }
+    });
+    }
+
     // 生成list_by_condition方法
     if !skip.contains("list_by_condition") {
         generated_members.push(quote! {

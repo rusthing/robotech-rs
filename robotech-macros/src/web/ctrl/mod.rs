@@ -98,6 +98,7 @@ pub(crate) fn ctrl_macro(args: CtrlArgs, input: ItemStruct) -> TokenStream {
     let get_by_id_path = format!("{crud_path}/{{id}}");
     let get_ex_by_id_path = format!("{crud_path}/ex/{{id}}");
     let get_by_query_dto_path = crud_path.clone();
+    let count_by_query_dto_path = format!("{crud_path}/count");
     let get_ex_by_query_dto_path = format!("{crud_path}/ex");
     let list_by_query_dto_path = format!("{crud_path}/list");
     let list_ex_by_query_dto_path = format!("{crud_path}/list-ex");
@@ -476,6 +477,37 @@ pub(crate) fn ctrl_macro(args: CtrlArgs, input: ItemStruct) -> TokenStream {
         #[log_call]
         pub async fn get_by_query_dto(Query(dto): Query<#query_dto_name>) -> Result<Json<Ro<#vo_name>>, CtrlError> {
             let ro = #svc_name::get_by_query_dto::<DatabaseConnection>(dto, None).await?;
+            Ok(Json(ro))
+        }
+    });
+    }
+
+    // 生成count_by_query_dto方法
+    if !skip.contains("count_by_query_dto") {
+        generated_methods.push(quote! {
+        /// # 根据条件统计记录数量
+        ///
+        /// 该接口用于按与列表一致的查询条件统计符合条件的记录总数，响应体
+        /// `extra` 为数量（U64，JSON 中是字符串）。
+        ///
+        /// ## 查询参数
+        /// * `QueryDto` - 包含查询条件的结构体（分页与排序字段被忽略）
+        ///
+        /// ## 返回值
+        /// * 成功时返回记录数的 JSON 格式数据
+        /// * 失败时返回相应的错误信息
+        #[utoipa::path(
+            get,
+            path = #count_by_query_dto_path,
+            params(#query_dto_name),
+            responses(
+                (status = OK, body = Ro<U64>)
+            )
+        )]
+        #[debug_handler]
+        #[log_call]
+        pub async fn count_by_query_dto(Query(dto): Query<#query_dto_name>) -> Result<Json<Ro<U64>>, CtrlError> {
+            let ro = #svc_name::count_by_query_dto::<DatabaseConnection>(dto, None).await?;
             Ok(Json(ro))
         }
     });

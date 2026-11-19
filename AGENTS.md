@@ -134,6 +134,7 @@ RoboTech 平台的**框架层**，不是业务工程。核心原则一句话：
 | DELETE | `/oss/bucket/{id}` · `/oss/bucket` | `del_by_id` · `del_by_query_dto` |
 | GET | `/oss/bucket/{id}` · `/ex/{id}` | `get_by_id` · `get_ex_by_id` |
 | GET | `/oss/bucket` · `/ex` | `get_by_query_dto` · `get_ex_by_query_dto` |
+| GET | `/oss/bucket/count` | `count_by_query_dto`（按与列表一致的查询条件统计总数，`extra` 为 U64） |
 | GET | `/list` · `/list-ex` · `/page` · `/page-ex` | 列表 / 分页 |
 | GET | `/search/{id}` · `/search` · `/search/list` · `/search/page` · `/search/ex/{id}` · `/search/ex` · `/search/list-ex` · `/search/page-ex` | 检索系列 |
 
