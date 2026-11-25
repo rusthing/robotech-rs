@@ -1,6 +1,6 @@
 use crate::mq::mqtt::mqtt_config::MqttConfig;
 use crate::mq::mqtt::mqtt_error::MqttError;
-use rumqttc::{AsyncClient, MqttOptions, Publish, SubscribeFilter};
+use rumqttc::{AsyncClient, LastWill, MqttOptions, Publish, SubscribeFilter};
 use std::future::Future;
 use std::sync::Arc;
 use tokio::task::JoinHandle;
@@ -31,6 +31,13 @@ where
         handle_error_sleep,
         ack_error_sleep,
         discard_error,
+        max_incoming_packet_size,
+        max_outgoing_packet_size,
+        manual_acks,
+        inflight,
+        request_channel_capacity,
+        pending_throttle,
+        last_will,
     } = mqtt_config;
     let mut mqtt_options = MqttOptions::new(client_id, host, port);
     mqtt_options.set_keep_alive(keep_alive);
@@ -40,7 +47,19 @@ where
     {
         mqtt_options.set_credentials(username, password);
     }
-    mqtt_options.set_manual_acks(true);
+    mqtt_options.set_manual_acks(manual_acks);
+    mqtt_options.set_max_packet_size(max_incoming_packet_size, max_outgoing_packet_size);
+    mqtt_options.set_inflight(inflight);
+    mqtt_options.set_request_channel_capacity(request_channel_capacity);
+    mqtt_options.set_pending_throttle(pending_throttle);
+    if let Some(last_will) = last_will {
+        mqtt_options.set_last_will(LastWill::new(
+            last_will.topic,
+            last_will.message.into_bytes(),
+            last_will.qos,
+            last_will.retain,
+        ));
+    }
 
     let (mqtt_client, mut mqtt_event_loop) = AsyncClient::new(mqtt_options, cap);
     let mqtt_client = Arc::new(mqtt_client);
