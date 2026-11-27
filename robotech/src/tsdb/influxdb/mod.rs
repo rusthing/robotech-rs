@@ -1,7 +1,7 @@
 //! # InfluxDB 时序数据库
 //!
-//! 基于 `influxdb` crate 提供 InfluxDB 客户端构建能力：配置（`InfluxdbConfig`）、
-//! 错误类型（`InfluxdbError`）与客户端构建入口（`build_influxdb_client`）。
+//! 提供 InfluxDB 2.x 写入客户端构建能力：配置（`InfluxdbConfig`）、错误类型
+//! （`InfluxdbError`）与客户端构建入口（`build_influxdb_client`）。
 
 mod influxdb_config;
 mod influxdb_error;

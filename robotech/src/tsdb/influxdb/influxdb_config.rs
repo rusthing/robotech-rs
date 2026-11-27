@@ -6,6 +6,8 @@ use serde::Deserialize;
 pub struct InfluxdbConfig {
     /// 数据库URL
     pub url: String,
+    /// 组织名（InfluxDB 2.x 写入接口 /api/v2/write 必填）
+    pub org: String,
     /// 桶(数据库)
     pub bucket: String,
     /// 量度(表)
