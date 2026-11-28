@@ -1,7 +1,7 @@
 use crate::tsdb::influxdb::influxdb_error::InfluxdbError;
 use crate::tsdb::influxdb::InfluxdbConfig;
 use reqwest::ClientBuilder;
-use reqwest::header::AUTHORIZATION;
+use reqwest::header::{ACCEPT, AUTHORIZATION, CONTENT_TYPE};
 
 /// InfluxDB 2.x 写入客户端。
 ///
@@ -48,6 +48,36 @@ impl InfluxdbWriter {
             });
         }
         Ok(())
+    }
+
+    /// # Flux 查询（InfluxDB 2.x 原生接口）
+    ///
+    /// `POST /api/v2/query?org=<org>`，请求体是 Flux 语句，返回 annotated CSV 原文。
+    /// 用原生 2.x 接口而非 1.x 兼容 `/query`：不必在库侧配 DBRP 映射，org/bucket
+    /// 与写入端同一套配置。CSV 的按列解析由调用方负责（各服务的 measurement 不同）。
+    pub async fn query_flux(&self, flux: &str) -> Result<String, InfluxdbError> {
+        let url = format!("{}/api/v2/query", self.base_url);
+        let res = self
+            .http
+            .post(url)
+            .query(&[("org", self.org.as_str())])
+            .header(AUTHORIZATION, format!("Token {}", self.token))
+            .header(CONTENT_TYPE, "application/vnd.flux")
+            .header(ACCEPT, "application/csv")
+            .body(flux.to_string())
+            .send()
+            .await
+            .map_err(|e| InfluxdbError::Request(e.to_string()))?;
+
+        let status = res.status();
+        let body = res.text().await.unwrap_or_default();
+        if !status.is_success() {
+            return Err(InfluxdbError::Api {
+                status: status.as_u16(),
+                body,
+            });
+        }
+        Ok(body)
     }
 }
 
